@@ -173,7 +173,7 @@ export async function convertCbzToXtc(
   const xtcData = await buildXtc(processedPages, { metadata, is2bit: options.is2bit })
 
   return {
-    name: file.name.replace(/\.cbz$/i, options.is2bit ? '.xtch' : '.xtc'),
+    name: file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xtch' : '.xtc'),
     data: xtcData,
     size: xtcData.byteLength,
     pageCount: processedPages.length,
@@ -280,7 +280,7 @@ export async function convertCbrToXtc(
   const xtcData = await buildXtc(processedPages, { metadata, is2bit: options.is2bit })
 
   return {
-    name: file.name.replace(/\.cbr$/i, options.is2bit ? '.xtch' : '.xtc'),
+    name: file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xtch' : '.xtc'),
     data: xtcData,
     size: xtcData.byteLength,
     pageCount: processedPages.length,
@@ -351,7 +351,7 @@ async function convertPdfToXtc(
   const xtcData = await buildXtc(processedPages, { metadata, is2bit: options.is2bit })
 
   return {
-    name: file.name.replace(/\.pdf$/i, options.is2bit ? '.xtch' : '.xtc'),
+    name: file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xtch' : '.xtc'),
     data: xtcData,
     size: xtcData.byteLength,
     pageCount: processedPages.length,
@@ -400,6 +400,9 @@ function processCanvasAsImage(
     resizedCanvas.height = newHeight
     resizedCanvas.getContext('2d')!.drawImage(canvas, 0, 0, width, height, 0, 0, TARGET_WIDTH, newHeight)
     
+    // Dither the entire strip first to ensure seamless pixel continuity across page boundaries
+    applyDithering(resizedCanvas.getContext('2d')!, TARGET_WIDTH, newHeight, options.dithering, options.is2bit)
+
     const sliceHeight = TARGET_HEIGHT
     const overlap = 200 // 25% overlap for seamless context
     for (let y = 0; y < newHeight; ) {
@@ -414,7 +417,8 @@ function processCanvasAsImage(
 
       const sliceCanvas = extractRegion(resizedCanvas, 0, y, TARGET_WIDTH, h)
       const finalCanvas = resizeWithPadding(sliceCanvas)
-      applyDithering(finalCanvas.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
+      // Dithering already applied
+      
       results.push({
         name: `${String(pageNum).padStart(4, '0')}_m_${y}.png`,
         canvas: finalCanvas
@@ -557,6 +561,9 @@ function processLoadedImage(
     resizedCanvas.height = newHeight
     resizedCanvas.getContext('2d')!.drawImage(canvas, 0, 0, width, height, 0, 0, TARGET_WIDTH, newHeight)
     
+    // Dither the entire strip first to ensure seamless pixel continuity across page boundaries
+    applyDithering(resizedCanvas.getContext('2d')!, TARGET_WIDTH, newHeight, options.dithering, options.is2bit)
+
     const sliceHeight = TARGET_HEIGHT
     const overlap = 200 // 25% overlap for seamless context
     for (let y = 0; y < newHeight; ) {
@@ -571,7 +578,8 @@ function processLoadedImage(
 
       const sliceCanvas = extractRegion(resizedCanvas, 0, y, TARGET_WIDTH, h)
       const finalCanvas = resizeWithPadding(sliceCanvas)
-      applyDithering(finalCanvas.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
+      // Dithering already applied
+      
       results.push({
         name: `${String(pageNum).padStart(4, '0')}_m_${y}.png`,
         canvas: finalCanvas
