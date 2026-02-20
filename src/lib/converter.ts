@@ -49,6 +49,113 @@ interface CropRect {
   height: number
 }
 
+class ManhwaStitcher {
+  private buffer: HTMLCanvasElement | null = null
+  private pageCount = 0
+  private overlap = 200
+
+  constructor(private options: ConversionOptions) {}
+
+  async append(source: HTMLImageElement | HTMLCanvasElement): Promise<ProcessedPage[]> {
+    const pages: ProcessedPage[] = []
+    
+    // 1. Resize source to TARGET_WIDTH
+    const scale = TARGET_WIDTH / source.width
+    const newHeight = Math.floor(source.height * scale)
+    const tempCanvas = document.createElement('canvas')
+    tempCanvas.width = TARGET_WIDTH
+    tempCanvas.height = newHeight
+    const tempCtx = tempCanvas.getContext('2d')!
+    
+    // Draw and apply pre-processing
+    tempCtx.drawImage(source, 0, 0, source.width, source.height, 0, 0, TARGET_WIDTH, newHeight)
+    
+    if (this.options.contrast > 0) {
+       applyContrast(tempCtx, TARGET_WIDTH, newHeight, this.options.contrast)
+    }
+    toGrayscale(tempCtx, TARGET_WIDTH, newHeight)
+
+    // 2. Stitch into buffer
+    if (!this.buffer) {
+      this.buffer = tempCanvas
+    } else {
+      const combinedHeight = this.buffer.height + newHeight
+      const combinedCanvas = document.createElement('canvas')
+      combinedCanvas.width = TARGET_WIDTH
+      combinedCanvas.height = combinedHeight
+      const combinedCtx = combinedCanvas.getContext('2d')!
+      
+      combinedCtx.drawImage(this.buffer, 0, 0)
+      combinedCtx.drawImage(tempCanvas, 0, this.buffer.height)
+      
+      this.buffer = combinedCanvas
+    }
+
+    // 3. Slice ready pages
+    // Keep slicing while we have at least one full page height
+    while (this.buffer && this.buffer.height >= TARGET_HEIGHT) {
+       // Extract top page
+       const slice = extractRegion(this.buffer, 0, 0, TARGET_WIDTH, TARGET_HEIGHT)
+       
+       // Dither
+       applyDithering(slice.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, this.options.dithering, this.options.is2bit)
+       
+       this.pageCount++
+       pages.push({
+         name: `${String(this.pageCount).padStart(5, '0')}.png`,
+         canvas: slice
+       })
+       
+       // Advance buffer by (Height - Overlap)
+       // This keeps the bottom 'overlap' pixels to be the top of the next page
+       const step = TARGET_HEIGHT - this.overlap
+       const remainingHeight = this.buffer.height - step
+       
+       if (remainingHeight <= 0) {
+         this.buffer = null
+         break
+       }
+       
+       const newBuffer = document.createElement('canvas')
+       newBuffer.width = TARGET_WIDTH
+       newBuffer.height = remainingHeight
+       newBuffer.getContext('2d')!.drawImage(this.buffer, 0, step, TARGET_WIDTH, remainingHeight, 0, 0, TARGET_WIDTH, remainingHeight)
+       
+       this.buffer = newBuffer
+    }
+    
+    return pages
+  }
+  
+  finish(): ProcessedPage[] {
+    const pages: ProcessedPage[] = []
+    if (this.buffer && this.buffer.height > 0) {
+        // Last chunk
+        // Align to top (content at top, white at bottom)
+        const final = document.createElement('canvas')
+        final.width = TARGET_WIDTH
+        final.height = TARGET_HEIGHT
+        const ctx = final.getContext('2d')!
+        
+        // Fill white
+        ctx.fillStyle = 'white'
+        ctx.fillRect(0, 0, TARGET_WIDTH, TARGET_HEIGHT)
+        
+        // Draw content at top
+        ctx.drawImage(this.buffer, 0, 0)
+        
+        applyDithering(ctx, TARGET_WIDTH, TARGET_HEIGHT, this.options.dithering, this.options.is2bit)
+        
+        this.pageCount++
+        pages.push({
+             name: `${String(this.pageCount).padStart(5, '0')}.png`,
+             canvas: final
+        })
+    }
+    return pages
+  }
+}
+
 function clampMarginPercent(value: number): number {
   if (!Number.isFinite(value)) return 0
   return Math.max(0, Math.min(20, value))
@@ -146,15 +253,42 @@ export async function convertCbzToXtc(
 
   const processedPages: ProcessedPage[] = []
   const mappingCtx = new PageMappingContext()
+  
+  // Manhwa Stitcher
+  let stitcher: ManhwaStitcher | null = null
+  if (options.manhwa) {
+    stitcher = new ManhwaStitcher(options)
+  }
 
   for (let i = 0; i < imageFiles.length; i++) {
     const imgFile = imageFiles[i]
     const imgBlob = await imgFile.entry.async('blob')
 
-    const pages = await processImage(imgBlob, i + 1, options)
+    let pages: ProcessedPage[] = []
+    
+    if (stitcher) {
+      // For Manhwa, we need to load the image first
+      // processImage returns pages, but we need the raw image for stitching.
+      // We can refactor processImage or just load it here.
+      // Let's load it here to pass to stitcher.
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const img = new Image()
+          const url = URL.createObjectURL(imgBlob)
+          img.onload = () => { URL.revokeObjectURL(url); resolve(img) }
+          img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Load failed')) }
+          img.src = url
+      }).catch(() => null)
+      
+      if (img) {
+          pages = await stitcher.append(img)
+      }
+    } else {
+      pages = await processImage(imgBlob, i + 1, options)
+    }
+    
     processedPages.push(...pages)
 
-    // Track page mapping for TOC adjustment
+    // Track page mapping for TOC adjustment (approximate for Manhwa)
     mappingCtx.addOriginalPage(i + 1, pages.length)
 
     if (pages.length > 0 && pages[0].canvas) {
@@ -163,6 +297,11 @@ export async function convertCbzToXtc(
     } else {
       onProgress((i + 1) / imageFiles.length, null)
     }
+  }
+  
+  if (stitcher) {
+      const finalPages = stitcher.finish()
+      processedPages.push(...finalPages)
   }
 
   processedPages.sort((a, b) => a.name.localeCompare(b.name))
@@ -252,13 +391,32 @@ export async function convertCbrToXtc(
 
   const processedPages: ProcessedPage[] = []
   const mappingCtx = new PageMappingContext()
+  
+  let stitcher: ManhwaStitcher | null = null
+  if (options.manhwa) {
+    stitcher = new ManhwaStitcher(options)
+  }
 
   for (let i = 0; i < imageFiles.length; i++) {
     const imgFile = imageFiles[i]
     // Create a copy of the data with a regular ArrayBuffer for Blob compatibility
     const imgBlob = new Blob([new Uint8Array(imgFile.data)])
 
-    const pages = await processImage(imgBlob, i + 1, options)
+    let pages: ProcessedPage[] = []
+    
+    if (stitcher) {
+      const img = await new Promise<HTMLImageElement>((resolve) => {
+          const img = new Image()
+          const url = URL.createObjectURL(imgBlob)
+          img.onload = () => { URL.revokeObjectURL(url); resolve(img) }
+          img.onerror = () => { URL.revokeObjectURL(url); resolve(null as any) }
+          img.src = url
+      })
+      if (img) pages = await stitcher.append(img)
+    } else {
+      pages = await processImage(imgBlob, i + 1, options)
+    }
+    
     processedPages.push(...pages)
 
     // Track page mapping for TOC adjustment
@@ -270,6 +428,10 @@ export async function convertCbrToXtc(
     } else {
       onProgress((i + 1) / imageFiles.length, null)
     }
+  }
+  
+  if (stitcher) {
+      processedPages.push(...stitcher.finish())
   }
 
   processedPages.sort((a, b) => a.name.localeCompare(b.name))
@@ -313,6 +475,11 @@ async function convertPdfToXtc(
   const processedPages: ProcessedPage[] = []
   const mappingCtx = new PageMappingContext()
   const numPages = pdf.numPages
+  
+  let stitcher: ManhwaStitcher | null = null
+  if (options.manhwa) {
+    stitcher = new ManhwaStitcher(options)
+  }
 
   for (let i = 1; i <= numPages; i++) {
     const page = await pdf.getPage(i)
@@ -329,7 +496,14 @@ async function convertPdfToXtc(
       background: 'rgb(255,255,255)'
     }).promise
 
-    const pages = processCanvasAsImage(canvas, i, options)
+    let pages: ProcessedPage[] = []
+    
+    if (stitcher) {
+        pages = await stitcher.append(canvas)
+    } else {
+        pages = processCanvasAsImage(canvas, i, options)
+    }
+    
     processedPages.push(...pages)
 
     // Track page mapping for TOC adjustment
@@ -341,6 +515,10 @@ async function convertPdfToXtc(
     } else {
       onProgress(i / numPages, null)
     }
+  }
+  
+  if (stitcher) {
+      processedPages.push(...stitcher.finish())
   }
 
   processedPages.sort((a, b) => a.name.localeCompare(b.name))
