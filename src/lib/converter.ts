@@ -59,8 +59,11 @@ function getAxisCropRect(
   sourceHeight: number,
   options: ConversionOptions
 ): CropRect {
+  // Force 0 vertical margin in Manhwa mode to prevent cutting content between files
+  const verticalMarginRaw = options.manhwa ? 0 : options.verticalMargin
+  
   const horizontalMargin = clampMarginPercent(options.horizontalMargin)
-  const verticalMargin = clampMarginPercent(options.verticalMargin)
+  const verticalMargin = clampMarginPercent(verticalMarginRaw)
 
   const maxCropX = Math.floor((sourceWidth - 1) / 2)
   const maxCropY = Math.floor((sourceHeight - 1) / 2)

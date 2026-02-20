@@ -38,13 +38,14 @@ export function Options({ options, onChange }: OptionsProps) {
           id="orientation"
           value={options.orientation}
           onChange={(e) => onChange({ ...options, orientation: e.target.value as 'landscape' | 'portrait' })}
+          disabled={options.manhwa}
         >
           <option value="landscape">Landscape</option>
           <option value="portrait">Portrait</option>
         </select>
       </div>
 
-      {options.orientation === 'landscape' && (
+      {options.orientation === 'landscape' && !options.manhwa && (
         <div className="option">
           <label htmlFor="splitMode">Page Split</label>
           <select
@@ -100,6 +101,7 @@ export function Options({ options, onChange }: OptionsProps) {
             step="0.5"
             value={options.horizontalMargin}
             onChange={(e) => onChange({ ...options, horizontalMargin: parseFloat(e.target.value) || 0 })}
+            disabled={options.manhwa}
           />
           <span className="unit">%</span>
         </div>
@@ -116,6 +118,7 @@ export function Options({ options, onChange }: OptionsProps) {
             step="0.5"
             value={options.verticalMargin}
             onChange={(e) => onChange({ ...options, verticalMargin: parseFloat(e.target.value) || 0 })}
+            disabled={options.manhwa}
           />
           <span className="unit">%</span>
         </div>
