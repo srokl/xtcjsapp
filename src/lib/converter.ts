@@ -6,7 +6,7 @@ import unrarWasm from 'node-unrar-js/esm/js/unrar.wasm?url'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { applyDithering } from './processing/dithering'
-import { toGrayscale, applyContrast, calculateOverlapSegments } from './processing/image'
+import { toGrayscale, applyContrast, calculateOverlapSegments, isSolidColor } from './processing/image'
 import { rotateCanvas, extractAndRotate, extractRegion, resizeWithPadding, TARGET_WIDTH, TARGET_HEIGHT } from './processing/canvas'
 import { buildXtc } from './xtc-format'
 import { extractPdfMetadata } from './metadata/pdf-outline'
@@ -52,7 +52,6 @@ interface CropRect {
 class ManhwaStitcher {
   private buffer: HTMLCanvasElement | null = null
   private pageCount = 0
-  private overlap = 200
 
   constructor(private options: ConversionOptions) {}
 
@@ -92,13 +91,22 @@ class ManhwaStitcher {
     }
 
     // 3. Slice ready pages
-    // Keep slicing while we have at least one full page height
     while (this.buffer && this.buffer.height >= TARGET_HEIGHT) {
        // Extract top page
        const slice = extractRegion(this.buffer, 0, 0, TARGET_WIDTH, TARGET_HEIGHT)
+       const sliceCtx = slice.getContext('2d')!
+       
+       // Check if solid color (blank/filler)
+       const isSolid = isSolidColor(sliceCtx, 0, 0, TARGET_WIDTH, TARGET_HEIGHT)
+       
+       // Calculate step:
+       // Solid -> Skip full page (800px)
+       // Detailed -> Standard 75% overlap (advance 200px)
+       const overlapPixels = 600 // 75% of 800
+       const step = isSolid ? TARGET_HEIGHT : (TARGET_HEIGHT - overlapPixels)
        
        // Dither
-       applyDithering(slice.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, this.options.dithering, this.options.is2bit)
+       applyDithering(sliceCtx, TARGET_WIDTH, TARGET_HEIGHT, this.options.dithering, this.options.is2bit)
        
        this.pageCount++
        pages.push({
@@ -106,9 +114,7 @@ class ManhwaStitcher {
          canvas: slice
        })
        
-       // Advance buffer by (Height - Overlap)
-       // This keeps the bottom 'overlap' pixels to be the top of the next page
-       const step = TARGET_HEIGHT - this.overlap
+       // Advance buffer
        const remainingHeight = this.buffer.height - step
        
        if (remainingHeight <= 0) {

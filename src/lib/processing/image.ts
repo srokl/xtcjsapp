@@ -118,3 +118,41 @@ export function calculateOverlapSegments(
 
   return segments;
 }
+
+/**
+ * Check if an image region is effectively a solid color (low standard deviation).
+ * Used for optimizing scroll speed on blank/filler pages.
+ */
+export function isSolidColor(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number
+): boolean {
+  const imageData = ctx.getImageData(x, y, w, h);
+  const data = imageData.data;
+  
+  let sum = 0;
+  let count = 0;
+  
+  // Calculate mean (grayscale only needs one channel check usually, but let's check R)
+  for (let i = 0; i < data.length; i += 4) {
+    sum += data[i];
+    count++;
+  }
+  const mean = sum / count;
+  
+  // Calculate variance
+  let sumSqDiff = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const diff = data[i] - mean;
+    sumSqDiff += diff * diff;
+  }
+  
+  const variance = sumSqDiff / count;
+  const stdDev = Math.sqrt(variance);
+  
+  // Python script uses < 5.0
+  return stdDev < 5.0;
+}
