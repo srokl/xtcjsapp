@@ -42,6 +42,7 @@ TARGET_HEIGHT = 800
 # Global configuration (defaults)
 XTC_MODE = "1bit"        # "1bit" or "2bit"
 DITHER_ALGO = "atkinson"    # "floyd", "ordered", "rasterize", "none", "atkinson"
+DOWNSCALE_FILTER = Image.Resampling.BICUBIC # Default downscaling filter
 GAMMA_VALUE = 1.0        # Gamma correction value (1.0 = neutral)
 INVERT_COLORS = False    # Invert colors (White <-> Black)
 
@@ -52,6 +53,15 @@ DITHER_MAP = {
     'rasterize': Image.Dither.RASTERIZE,
     'none': Image.Dither.NONE,
     'atkinson': 'atkinson' # Custom implementation
+}
+
+# Downscaling options mapping
+DOWNSCALE_MAP = {
+    'bicubic': Image.Resampling.BICUBIC,
+    'bilinear': Image.Resampling.BILINEAR,
+    'box': Image.Resampling.BOX,
+    'lanczos': Image.Resampling.LANCZOS,
+    'nearest': Image.Resampling.NEAREST
 }
 
 
@@ -131,7 +141,7 @@ def dither_atkinson(img, levels):
 def png_to_xtg_bytes(img: Image.Image, force_size=(480, 800), threshold=128):
     """Convert PIL image to XTG bytes (1-bit monochrome)."""
     if img.size != force_size:
-        img = img.resize(force_size, Image.Resampling.BILINEAR)
+        img = img.resize(force_size, DOWNSCALE_FILTER)
 
     # Ensure 1-bit mode efficiently
     if img.mode != '1':
@@ -164,7 +174,7 @@ def png_to_xth_bytes(img: Image.Image, force_size=(480, 800)):
     - LUT: White=0(00), Light=1(01), Dark=2(10), Black=3(11)
     """
     if img.size != force_size:
-        img = img.resize(force_size, Image.Resampling.BILINEAR)
+        img = img.resize(force_size, DOWNSCALE_FILTER)
 
     # Use numpy for fast bit manipulation
     arr = np.array(img.convert('L'))
@@ -599,61 +609,21 @@ def optimize_image(img_data, output_path_base, page_num, suffix="", overlap_perc
                             break
 
                 # Make overlapping segments that fill screen.
-                # Manhwa portrait splits should be upright portrait (480x800).
-                # All other splits (landscape or non-manhwa portrait) are sideways (800x480).
-                if MANHWA and not is_landscape:
-                    sw, sh = TARGET_WIDTH, TARGET_HEIGHT
-                else:
-                    sw, sh = TARGET_HEIGHT, TARGET_WIDTH
-                
-                number_of_h_segments = SET_H_OVERLAP_SEGMENTS
-                total_calculated_width = sw * number_of_h_segments - int((number_of_h_segments - 1) * (sw * 0.01 * SET_H_OVERLAP_PERCENT))
-                established_scale = total_calculated_width * 1.0 / width
-
-                overlapping_width = sw / established_scale // 1
-                shiftover_to_overlap = 0
-                if number_of_h_segments > 1:
-                    shiftover_to_overlap = overlapping_width - (overlapping_width * number_of_h_segments - width) // (number_of_h_segments - 1)
-
-                # For landscape spreads, we want at least 3 segments to ensure good zoom
-                number_of_v_segments = (DESIRED_V_OVERLAP_SEGMENTS - 1) if not is_landscape else 2
-                letter_keys = ["a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z"]
-
-                overlapping_height = sh / established_scale // 1
-                
-                # Ensure we have enough segments to cover the full height without gaps
-                shiftdown_to_overlap = 99999
-                while number_of_v_segments < 26:
-                    number_of_v_segments += 1
-                    if number_of_v_segments > 1:
-                        shiftdown_to_overlap = overlapping_height - (overlapping_height * number_of_v_segments - height) // (number_of_v_segments - 1)
-                    else:
-                        shiftdown_to_overlap = 0
-                    
-                    if shiftdown_to_overlap <= overlapping_height:
-                        if (shiftdown_to_overlap * 1.0 / overlapping_height) <= (1.0 - .01 * v_overlap):
-                            break
-
-                # Make overlapping segments that fill screen.
-                # Landscape: base -90, so Top (v=0) is Right, Bottom (v=max) is Left.
-                # Portrait: no rotation, so Top (v=0) is Top, Bottom (v=max) is Bottom.
+                # In rotated image (-90), Top (v=0) is Left, Bottom (v=max) is Right.
                 v_list = list(range(number_of_v_segments))
-                if is_landscape:
-                    # Default is LTR (Left then Right). RTL flag reverses this.
-                    is_rtl = LANDSCAPE_RTL and not MANHWA
-                    if is_rtl:
-                        v_list.reverse() # RTL: Left then Right (Swapped)
-
-                # Portrait splits are always Top-to-Bottom (v=0 to max).
+                # Default is LTR (Left then Right). RTL flag reverses this.
+                is_rtl = LANDSCAPE_RTL and not MANHWA
+                if is_rtl:
+                    v_list.reverse() # RTL: Left then Right (Swapped)
 
                 for v_idx, v in enumerate(v_list):
                     h = 0
                     while h < number_of_h_segments:
                         segment = img.crop((shiftover_to_overlap*h, shiftdown_to_overlap*v, width-(shiftover_to_overlap*(number_of_h_segments-h-1)), height-(shiftdown_to_overlap*(number_of_v_segments-v-1))))
-                        # Landscape segments rotate 90 to make them upright portrait (0).
-                        # Portrait segments: upright (0) if MANHWA, else sideways (-90).
-                        rot = 90 if is_landscape else (0 if MANHWA else -90)
-                        segment_rotated = segment.rotate(rot, expand=True)
+                        # Landscape segments are already -90 from base rotation. 
+                        # Rotate 90 to make them upright portrait (0) as requested.
+                        # Portrait segments rotate -90 to be sideways.
+                        segment_rotated = segment.rotate(90 if is_landscape else -90, expand=True)
                         
                         if number_of_h_segments > 1:
                             output = output_path_base.parent / f"{page_num:04d}{suffix}_3_{letter_keys[v_idx]}_{letter_keys[h]}.png"
@@ -668,9 +638,8 @@ def optimize_image(img_data, output_path_base, page_num, suffix="", overlap_perc
                 # Bottom half is Left (if landscape base -90) or Bottom (if portrait)
                 part2 = img.crop((0, half_height, width, height))
                 
-                # Landscape segments rotate 90 (to become 0 upright).
-                # Portrait segments: upright (0) if MANHWA, else sideways (-90).
-                rot = 90 if is_landscape else (0 if MANHWA else -90)
+                # Landscape segments rotate 90 (to become 0 upright); Portrait rotate -90
+                rot = 90 if is_landscape else -90
                 part1_rotated = part1.rotate(rot, expand=True)
                 part2_rotated = part2.rotate(rot, expand=True)
                 
@@ -722,7 +691,7 @@ def save_with_padding(img, output_path, *, padcolor=255):
     new_width = int(img_width * scale)
     new_height = int(img_height * scale)
     
-    img_resized = img.resize((new_width, new_height), Image.Resampling.BICUBIC)
+    img_resized = img.resize((new_width, new_height), DOWNSCALE_FILTER)
     
     # Create background (default padcolor is white)
     result = Image.new('L', (TARGET_WIDTH, TARGET_HEIGHT), color=padcolor)
@@ -862,7 +831,7 @@ def preprocess_for_manhwa(img_data, page_num):
         w, h = img.size
         scale = TARGET_WIDTH / w
         new_h = int(h * scale)
-        img = img.resize((TARGET_WIDTH, new_h), Image.Resampling.BILINEAR)
+        img = img.resize((TARGET_WIDTH, new_h), DOWNSCALE_FILTER)
         
         return img
     except Exception as e:
@@ -928,7 +897,7 @@ def process_manhwa_stream(image_iterator, output_folder):
     if current_buffer and current_buffer.height > 0:
         out_path = output_folder / f"{output_count:05d}.png"
         save_with_padding(current_buffer, out_path, padcolor=PADDING_COLOR)
-    
+        
     # Save mapping
     with open(output_folder / "manhwa_map.json", "w") as f:
         json.dump(page_mapping, f)
@@ -938,49 +907,73 @@ def process_manhwa_stream(image_iterator, output_folder):
 
 def extract_pdf_to_png(pdf_path, temp_dir):
     """
-    Extract PDF to PNGs using PyMuPDF (fitz)
+    Extract PDF to PNGs using pdftoppm (poppler-utils)
     """
-    try:
-        import fitz
-    except ImportError:
-        print("  ✗ Error: PyMuPDF not found. Please run: pip install pymupdf")
+    if not shutil.which("pdftoppm"):
+        print("  ✗ Error: pdftoppm not found. Please install poppler-utils.")
         return None
 
     pdf_name = pdf_path.stem
     output_folder = temp_dir / pdf_name
     output_folder.mkdir(parents=True, exist_ok=True)
     
+    print(f"  Extracting and converting PDF pages...", end=" ", flush=True)
+    
+    # Create a raw directory for initial extraction
+    raw_dir = output_folder / "_raw_extract"
+    raw_dir.mkdir(exist_ok=True)
+    prefix = raw_dir / "page"
+    
     try:
-        doc = fitz.open(pdf_path)
-        print(f"  Extracting and converting {len(doc)} PDF pages...", end=" ", flush=True)
+        # pdftoppm -png input.pdf output_prefix
+        # Note: -j (parallel) is not supported in all poppler versions (e.g. Termux)
+        cmd = ["pdftoppm", "-png", str(pdf_path), str(prefix)]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            print(f"✗ Error extracting PDF: {result.stderr or result.stdout}")
+            return None
+            
+        # Get generated files
+        generated_files = list(raw_dir.glob("page-*.png"))
+        
+        if not generated_files:
+            print(f"✗ No images extracted from {pdf_name}")
+            return None
+            
+        # Sort naturally (page-1, page-2, ... page-10)
+        generated_files.sort(key=lambda f: int(f.stem.split('-')[-1]))
         
         if MANHWA:
             def pdf_iterator():
-                for idx in range(1, len(doc) + 1):
-                    page = doc[idx-1]
-                    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
-                    yield pix.tobytes("png"), idx
+                for idx, img_file in enumerate(generated_files, 1):
+                    with open(img_file, "rb") as f:
+                        yield f.read(), idx
             
             process_manhwa_stream(pdf_iterator(), output_folder)
+            shutil.rmtree(raw_dir) # Clean up raw
             return output_folder
 
-        def process_pdf_page(idx, page, output_folder):
-            # Render page to image (default 72 DPI, usually enough for 480x800 target)
-            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2)) # 2x scale for better quality before resizing
-            img_data = pix.tobytes("png")
+        # Process extracted images in parallel
+        def process_raw_page(idx, img_file, output_folder):
+            with open(img_file, "rb") as f:
+                img_data = f.read()
             output_base = output_folder / f"{idx:04d}"
             overlap = 50 if MANHWA else 20
             optimize_image(img_data, output_base, idx, overlap_percent=overlap)
 
         with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as executor:
             futures = [
-                executor.submit(process_pdf_page, idx, doc[idx-1], output_folder)
-                for idx in range(1, len(doc) + 1)
+                executor.submit(process_raw_page, idx, img_file, output_folder)
+                for idx, img_file in enumerate(generated_files, 1)
             ]
             for _ in as_completed(futures):
                 pass
             
-        print(f"✓")
+        # Clean up raw directory
+        shutil.rmtree(raw_dir)
+        print(f"✓ ({len(generated_files)} pages)")
+        
         return output_folder
         
     except Exception as e:
@@ -1083,8 +1076,6 @@ def convert_png_folder_to_xtc(png_folder, output_file, source_file=None):
                 page_ranges[p] = {'start': start, 'end': end}
         except Exception as e:
             print(f"Warning: Failed to load manhwa map: {e}")
-            # Fallback will happen below if page_ranges is empty? 
-            # No, if empty it might skip loop.
             pass
 
     if not page_ranges:
@@ -1185,6 +1176,7 @@ def main():
         print("  cbz2xtc /path/to/folder           # Process specific folder")
         print("  cbz2xtc --no-dither               # Disable dithering (threshold)")
         print("  cbz2xtc --dither <algo>           # Select dithering: floyd, ordered, rasterize, none")
+        print("  cbz2xtc --downscale <algo>        # Select downscaling: bicubic, bilinear, box")
         print("  cbz2xtc --2bit                    # Use 2-bit (4-level) grayscale mode (outputs .xtch)")
         print("  cbz2xtc --gamma <float>           # Adjust brightness (0.5 = brighter, 1.0 = normal)")
         print("  cbz2xtc --invert                  # Invert colors (White <-> Black)")
@@ -1195,8 +1187,13 @@ def main():
         print("  ordered    - Ordered/Bayer (Grid pattern)")
         print("  rasterize  - Halftone style")
         print("  none       - Pure threshold")
+        print("\nDownscaling Algorithms:")
+        print("  bicubic    - Bicubic (Default, sharpest)")
+        print("  bilinear   - Bilinear (Smoother)")
+        print("  box        - Box (Pixel averaging)")
         print("\nOptions:")
         print("  --no-dither   Same as --dither none")
+        print("  --downscale   Select downscaling algorithm (bicubic, bilinear, box, lanczos, nearest)")
         print("  --2bit        Output 2-bit grayscale XTCH files instead of 1-bit XTC.")
         print("                (Dithering works with 2-bit mode too)")
         print("\n  --overlap     Split into 3 overlapping screen-filling pieces instead")
@@ -1270,6 +1267,7 @@ def main():
     # New globals
     global XTC_MODE
     global DITHER_ALGO
+    global DOWNSCALE_FILTER
     global GAMMA_VALUE
     global INVERT_COLORS
 
@@ -1285,6 +1283,20 @@ def main():
             GAMMA_VALUE = float(sys.argv[idx + 1])
         except (ValueError, IndexError):
             print("Warning: Invalid value for --gamma, using default 1.0")
+
+    if "--downscale" in sys.argv:
+        try:
+            idx = sys.argv.index("--downscale")
+            if idx + 1 < len(sys.argv) and not sys.argv[idx+1].startswith("--"):
+                val = sys.argv[idx + 1].lower()
+                if val in DOWNSCALE_MAP:
+                    DOWNSCALE_FILTER = DOWNSCALE_MAP[val]
+                else:
+                    print(f"Warning: Unknown downscale filter '{val}', using default 'bicubic'")
+            else:
+                print("Warning: --downscale flag missing value, using default")
+        except IndexError:
+            print("Warning: --downscale flag missing value, using default")
     
     # Handle dithering args
     if "--no-dither" in sys.argv:
@@ -1343,8 +1355,8 @@ def main():
     while i < len(sys.argv):
         arg = sys.argv[i]
         # Skip value args we already handled or boolean args
-        if arg in ["--dither", "--2bit", "--no-dither", "--clean", "--overlap", "--split-all", "--pad-black", "--include-overviews", "--sideways-overviews", "--gamma", "--invert"]:
-            if arg == "--dither" or arg == "--gamma":
+        if arg in ["--dither", "--2bit", "--no-dither", "--clean", "--overlap", "--split-all", "--pad-black", "--include-overviews", "--sideways-overviews", "--gamma", "--invert", "--downscale"]:
+            if arg == "--dither" or arg == "--gamma" or arg == "--downscale":
                  i += 1 # skip value
             # booleans are already handled
         elif arg == "--split-spreads":
@@ -1422,6 +1434,14 @@ def main():
     print(f"\nInput: {input_path.absolute()}")
     print(f"Mode: {XTC_MODE} ({'4-level grayscale' if XTC_MODE=='2bit' else '1-bit B&W'})")
     print(f"Dithering: {DITHER_ALGO.upper()}")
+
+    downscale_name = "BICUBIC"
+    for k, v in DOWNSCALE_MAP.items():
+        if v == DOWNSCALE_FILTER:
+            downscale_name = k.upper()
+            break
+    print(f"Downscaling: {downscale_name}")
+
     if GAMMA_VALUE != 1.0:
         print(f"Gamma: {GAMMA_VALUE}")
     if INVERT_COLORS:

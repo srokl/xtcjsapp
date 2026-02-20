@@ -1,0 +1,11 @@
+services:
+  xtcjs:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - xtcjs-data:/usr/src/app/data
+    restart: unless-stopped
+
+volumes:
+  xtcjs-data:
