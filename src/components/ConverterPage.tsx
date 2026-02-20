@@ -70,6 +70,7 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
     orientation: 'landscape',
     is2bit: false,
     manhwa: false,
+    manhwaOverlap: 50,
   })
 
   const handleFiles = useCallback((files: File[]) => {

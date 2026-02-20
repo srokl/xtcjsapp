@@ -32,6 +32,21 @@ export function Options({ options, onChange }: OptionsProps) {
         </label>
       </div>
 
+      {options.manhwa && (
+        <div className="option">
+          <label htmlFor="manhwaOverlap">Manhwa Overlap</label>
+          <select
+            id="manhwaOverlap"
+            value={options.manhwaOverlap}
+            onChange={(e) => onChange({ ...options, manhwaOverlap: parseInt(e.target.value) })}
+          >
+            <option value="30">30% Overlap</option>
+            <option value="50">50% Overlap</option>
+            <option value="75">75% Overlap</option>
+          </select>
+        </div>
+      )}
+
       <div className="option">
         <label htmlFor="orientation">Orientation</label>
         <select

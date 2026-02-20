@@ -26,6 +26,7 @@ export interface ConversionOptions {
   orientation: 'landscape' | 'portrait'
   is2bit: boolean
   manhwa: boolean
+  manhwaOverlap: number
 }
 
 export interface ConversionResult {
@@ -101,8 +102,9 @@ class ManhwaStitcher {
        
        // Calculate step:
        // Solid -> Skip full page (800px)
-       // Detailed -> Standard 75% overlap (advance 200px)
-       const overlapPixels = 600 // 75% of 800
+       // Detailed -> User-selected overlap
+       const overlapPercent = this.options.manhwaOverlap || 50
+       const overlapPixels = Math.floor(TARGET_HEIGHT * (overlapPercent / 100))
        const step = isSolid ? TARGET_HEIGHT : (TARGET_HEIGHT - overlapPixels)
        
        // Dither
@@ -257,6 +259,30 @@ export async function convertCbzToXtc(
     }
   }
 
+  // If no TOC from ComicInfo, try folder-based chapters (inspired by cbz2xtc.py)
+  if (metadata.toc.length === 0) {
+    const chapters = new Map<string, number>()
+    imageFiles.forEach((file, index) => {
+      const parts = file.path.split('/')
+      if (parts.length > 1) {
+        const folderName = parts[parts.length - 2]
+        if (!chapters.has(folderName)) {
+          chapters.set(folderName, index + 1)
+        }
+      }
+    })
+
+    if (chapters.size > 1) { // Only create TOC if there's more than one folder (chapter)
+      const chapterList = Array.from(chapters.entries())
+      metadata.toc = chapterList.map(([name, startPage], idx) => {
+        const endPage = idx < chapterList.length - 1 
+          ? chapterList[idx + 1][1] - 1 
+          : imageFiles.length
+        return { title: name, startPage, endPage }
+      })
+    }
+  }
+
   const processedPages: ProcessedPage[] = []
   const mappingCtx = new PageMappingContext()
   
@@ -392,6 +418,30 @@ export async function convertCbrToXtc(
       metadata = parseComicInfo(comicInfoContent)
     } catch {
       // ComicInfo parsing failed, continue without metadata
+    }
+  }
+
+  // If no TOC from ComicInfo, try folder-based chapters
+  if (metadata.toc.length === 0) {
+    const chapters = new Map<string, number>()
+    imageFiles.forEach((file, index) => {
+      const parts = file.path.split(/[\\/]/) // Handle both / and \ for RAR
+      if (parts.length > 1) {
+        const folderName = parts[parts.length - 2]
+        if (!chapters.has(folderName)) {
+          chapters.set(folderName, index + 1)
+        }
+      }
+    })
+
+    if (chapters.size > 1) {
+      const chapterList = Array.from(chapters.entries())
+      metadata.toc = chapterList.map(([name, startPage], idx) => {
+        const endPage = idx < chapterList.length - 1 
+          ? chapterList[idx + 1][1] - 1 
+          : imageFiles.length
+        return { title: name, startPage, endPage }
+      })
     }
   }
 
