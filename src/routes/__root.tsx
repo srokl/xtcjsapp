@@ -53,7 +53,7 @@ function RootLayout() {
             PDF
           </Link>
           <Link to="/image" className={`nav-tab${location.pathname === '/image' ? ' active' : ''}`}>
-            Image to xth
+            Image to xtg/xth
           </Link>
         </nav>
 
