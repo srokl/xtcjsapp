@@ -1,5 +1,5 @@
 import { applyDithering } from './dithering'
-import { toGrayscale, applyContrast, isSolidColor, applyGamma } from './image'
+import { toGrayscale, applyContrast, isSolidColor, applyGamma, applyInvert } from './image'
 import { extractRegion, TARGET_WIDTH, TARGET_HEIGHT } from './canvas'
 import type { ConversionOptions, ProcessedPage } from '../types'
 
@@ -28,6 +28,9 @@ export class ManhwaStitcher {
     }
     if (this.options.gamma !== 1.0 && this.options.is2bit) {
        applyGamma(tempCtx, TARGET_WIDTH, newHeight, this.options.gamma)
+    }
+    if (this.options.invert) {
+       applyInvert(tempCtx, TARGET_WIDTH, newHeight)
     }
     toGrayscale(tempCtx, TARGET_WIDTH, newHeight)
 

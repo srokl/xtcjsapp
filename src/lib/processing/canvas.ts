@@ -90,3 +90,51 @@ export function resizeWithPadding(canvas: HTMLCanvasElement, padColor = 255): HT
 
   return result;
 }
+
+/**
+ * Resize canvas by stretching to fill target dimensions
+ */
+export function resizeFill(canvas: HTMLCanvasElement): HTMLCanvasElement {
+  const result = document.createElement('canvas');
+  result.width = TARGET_WIDTH;
+  result.height = TARGET_HEIGHT;
+  const ctx = result.getContext('2d')!;
+  ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, TARGET_WIDTH, TARGET_HEIGHT);
+  return result;
+}
+
+/**
+ * Resize canvas by scaling to fill and cropping overflow
+ */
+export function resizeCover(canvas: HTMLCanvasElement): HTMLCanvasElement {
+  const result = document.createElement('canvas');
+  result.width = TARGET_WIDTH;
+  result.height = TARGET_HEIGHT;
+  const ctx = result.getContext('2d')!;
+
+  const scale = Math.max(TARGET_WIDTH / canvas.width, TARGET_HEIGHT / canvas.height);
+  const newWidth = Math.floor(canvas.width * scale);
+  const newHeight = Math.floor(canvas.height * scale);
+
+  const x = Math.floor((TARGET_WIDTH - newWidth) / 2);
+  const y = Math.floor((TARGET_HEIGHT - newHeight) / 2);
+
+  ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, x, y, newWidth, newHeight);
+  return result;
+}
+
+/**
+ * Resize canvas by center cropping target dimensions without scaling
+ */
+export function resizeCrop(canvas: HTMLCanvasElement): HTMLCanvasElement {
+  const result = document.createElement('canvas');
+  result.width = TARGET_WIDTH;
+  result.height = TARGET_HEIGHT;
+  const ctx = result.getContext('2d')!;
+
+  const x = Math.floor((TARGET_WIDTH - canvas.width) / 2);
+  const y = Math.floor((TARGET_HEIGHT - canvas.height) / 2);
+
+  ctx.drawImage(canvas, x, y);
+  return result;
+}

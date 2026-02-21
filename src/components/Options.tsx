@@ -3,73 +3,112 @@ import type { ConversionOptions } from '../lib/converter'
 interface OptionsProps {
   options: ConversionOptions
   onChange: (options: ConversionOptions) => void
+  fileType?: 'cbz' | 'pdf' | 'image'
 }
 
-export function Options({ options, onChange }: OptionsProps) {
+export function Options({ options, onChange, fileType }: OptionsProps) {
+  const isImageMode = fileType === 'image'
+
   return (
     <aside className="options-panel">
-      <div className="option checkbox-option">
-        <label htmlFor="is2bit">
-          <input
-            type="checkbox"
-            id="is2bit"
-            checked={options.is2bit}
-            onChange={(e) => onChange({ ...options, is2bit: e.target.checked })}
-          />
-          2-bit (High Quality XTCH)
-        </label>
-      </div>
+      {isImageMode ? (
+        <>
+          <div className="section-header">
+            <h2>Image Options</h2>
+          </div>
+          
+          <div className="option">
+            <label htmlFor="imageMode">Scaling Mode</label>
+            <select
+              id="imageMode"
+              value={options.imageMode}
+              onChange={(e) => onChange({ ...options, imageMode: e.target.value as any })}
+            >
+              <option value="cover">Cover (Fill & Crop)</option>
+              <option value="letterbox">Letterbox (Fit & Pad)</option>
+              <option value="fill">Fill (Stretch)</option>
+              <option value="crop">Crop (Center 480x800)</option>
+            </select>
+          </div>
 
-      <div className="option checkbox-option">
-        <label htmlFor="manhwa">
-          <input
-            type="checkbox"
-            id="manhwa"
-            checked={options.manhwa}
-            onChange={(e) => onChange({ ...options, manhwa: e.target.checked })}
-          />
-          Manhwa Mode (Long strips)
-        </label>
-      </div>
+          <div className="option checkbox-option">
+            <label htmlFor="is2bit">
+              <input
+                type="checkbox"
+                id="is2bit"
+                checked={options.is2bit}
+                onChange={(e) => onChange({ ...options, is2bit: e.target.checked })}
+              />
+              2-bit (High Quality XTCH)
+            </label>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="option checkbox-option">
+            <label htmlFor="is2bit">
+              <input
+                type="checkbox"
+                id="is2bit"
+                checked={options.is2bit}
+                onChange={(e) => onChange({ ...options, is2bit: e.target.checked })}
+              />
+              2-bit (High Quality XTCH)
+            </label>
+          </div>
 
-      <div className="option checkbox-option">
-        <label htmlFor="sidewaysOverviews" className={options.manhwa ? 'disabled' : ''}>
-          <input
-            type="checkbox"
-            id="sidewaysOverviews"
-            checked={options.sidewaysOverviews}
-            onChange={(e) => onChange({ ...options, sidewaysOverviews: e.target.checked })}
-            disabled={options.manhwa}
-          />
-          Include Sideways Overviews
-        </label>
-      </div>
+          <div className="option checkbox-option">
+            <label htmlFor="manhwa">
+              <input
+                type="checkbox"
+                id="manhwa"
+                checked={options.manhwa}
+                onChange={(e) => onChange({ ...options, manhwa: e.target.checked })}
+              />
+              Manhwa Mode (Long strips)
+            </label>
+          </div>
 
-      <div className="option checkbox-option">
-        <label htmlFor="includeOverviews" className={options.manhwa ? 'disabled' : ''}>
-          <input
-            type="checkbox"
-            id="includeOverviews"
-            checked={options.includeOverviews}
-            onChange={(e) => onChange({ ...options, includeOverviews: e.target.checked })}
-            disabled={options.manhwa}
-          />
-          Include Upright Overviews
-        </label>
-      </div>
+          <div className="option checkbox-option">
+            <label htmlFor="sidewaysOverviews" className={options.manhwa ? 'disabled' : ''}>
+              <input
+                type="checkbox"
+                id="sidewaysOverviews"
+                checked={options.sidewaysOverviews}
+                onChange={(e) => onChange({ ...options, sidewaysOverviews: e.target.checked })}
+                disabled={options.manhwa}
+              />
+              Include Sideways Overviews
+            </label>
+          </div>
 
-      <div className="option checkbox-option">
-        <label htmlFor="landscapeRtl" className={options.manhwa ? 'disabled' : ''}>
-          <input
-            type="checkbox"
-            id="landscapeRtl"
-            checked={options.landscapeRtl}
-            onChange={(e) => onChange({ ...options, landscapeRtl: e.target.checked })}
-            disabled={options.manhwa}
-          />
-          Landscape RTL
-        </label>
-      </div>
+          <div className="option checkbox-option">
+            <label htmlFor="includeOverviews" className={options.manhwa ? 'disabled' : ''}>
+              <input
+                type="checkbox"
+                id="includeOverviews"
+                checked={options.includeOverviews}
+                onChange={(e) => onChange({ ...options, includeOverviews: e.target.checked })}
+                disabled={options.manhwa}
+              />
+              Include Upright Overviews
+            </label>
+          </div>
+
+          <div className="option checkbox-option">
+            <label htmlFor="landscapeRtl" className={options.manhwa ? 'disabled' : ''}>
+              <input
+                type="checkbox"
+                id="landscapeRtl"
+                checked={options.landscapeRtl}
+                onChange={(e) => onChange({ ...options, landscapeRtl: e.target.checked })}
+                disabled={options.manhwa}
+              />
+              Landscape RTL
+            </label>
+          </div>
+        </>
+      )}
 
       <div className="option checkbox-option">
         <label htmlFor="padBlack">
@@ -80,6 +119,18 @@ export function Options({ options, onChange }: OptionsProps) {
             onChange={(e) => onChange({ ...options, padBlack: e.target.checked })}
           />
           Pad with Black (instead of white)
+        </label>
+      </div>
+
+      <div className="option checkbox-option">
+        <label htmlFor="invert">
+          <input
+            type="checkbox"
+            id="invert"
+            checked={options.invert}
+            onChange={(e) => onChange({ ...options, invert: e.target.checked })}
+          />
+          Invert Colors
         </label>
       </div>
 
@@ -100,7 +151,7 @@ export function Options({ options, onChange }: OptionsProps) {
         </div>
       )}
 
-      {options.manhwa && (
+      {!isImageMode && options.manhwa && (
         <div className="option">
           <label htmlFor="manhwaOverlap">Manhwa Overlap</label>
           <select
@@ -115,20 +166,22 @@ export function Options({ options, onChange }: OptionsProps) {
         </div>
       )}
 
-      <div className="option">
-        <label htmlFor="orientation">Orientation</label>
-        <select
-          id="orientation"
-          value={options.orientation}
-          onChange={(e) => onChange({ ...options, orientation: e.target.value as 'landscape' | 'portrait' })}
-          disabled={options.manhwa}
-        >
-          <option value="landscape">Landscape</option>
-          <option value="portrait">Portrait</option>
-        </select>
-      </div>
+      {!isImageMode && (
+        <div className="option">
+          <label htmlFor="orientation">Orientation</label>
+          <select
+            id="orientation"
+            value={options.orientation}
+            onChange={(e) => onChange({ ...options, orientation: e.target.value as 'landscape' | 'portrait' })}
+            disabled={options.manhwa}
+          >
+            <option value="landscape">Landscape</option>
+            <option value="portrait">Portrait</option>
+          </select>
+        </div>
+      )}
 
-      {options.orientation === 'landscape' && !options.manhwa && (
+      {!isImageMode && options.orientation === 'landscape' && !options.manhwa && (
         <div className="option">
           <label htmlFor="splitMode">Page Split</label>
           <select
@@ -173,39 +226,43 @@ export function Options({ options, onChange }: OptionsProps) {
         </select>
       </div>
 
-      <div className="option">
-        <label htmlFor="horizontalMargin">Horizontal margin crop</label>
-        <div className="input-with-unit">
-          <input
-            type="number"
-            id="horizontalMargin"
-            min="0"
-            max="20"
-            step="0.5"
-            value={options.horizontalMargin}
-            onChange={(e) => onChange({ ...options, horizontalMargin: parseFloat(e.target.value) || 0 })}
-            disabled={options.manhwa}
-          />
-          <span className="unit">%</span>
+      {!isImageMode && (
+        <div className="option">
+          <label htmlFor="horizontalMargin">Horizontal margin crop</label>
+          <div className="input-with-unit">
+            <input
+              type="number"
+              id="horizontalMargin"
+              min="0"
+              max="20"
+              step="0.5"
+              value={options.horizontalMargin}
+              onChange={(e) => onChange({ ...options, horizontalMargin: parseFloat(e.target.value) || 0 })}
+              disabled={options.manhwa}
+            />
+            <span className="unit">%</span>
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="option">
-        <label htmlFor="verticalMargin">Vertical margin crop</label>
-        <div className="input-with-unit">
-          <input
-            type="number"
-            id="verticalMargin"
-            min="0"
-            max="20"
-            step="0.5"
-            value={options.verticalMargin}
-            onChange={(e) => onChange({ ...options, verticalMargin: parseFloat(e.target.value) || 0 })}
-            disabled={options.manhwa}
-          />
-          <span className="unit">%</span>
+      {!isImageMode && (
+        <div className="option">
+          <label htmlFor="verticalMargin">Vertical margin crop</label>
+          <div className="input-with-unit">
+            <input
+              type="number"
+              id="verticalMargin"
+              min="0"
+              max="20"
+              step="0.5"
+              value={options.verticalMargin}
+              onChange={(e) => onChange({ ...options, verticalMargin: parseFloat(e.target.value) || 0 })}
+              disabled={options.manhwa}
+            />
+            <span className="unit">%</span>
+          </div>
         </div>
-      </div>
+      )}
     </aside>
   )
 }

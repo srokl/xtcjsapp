@@ -224,7 +224,7 @@ function writeTocEntries(
 /**
  * Convert ImageData to XTG format (XTEink Graphics)
  */
-function imageDataToXtg(imageData: ImageData): ArrayBuffer {
+export function imageDataToXtg(imageData: ImageData): ArrayBuffer {
   const w = imageData.width;
   const h = imageData.height;
   const data = imageData.data;
@@ -283,7 +283,7 @@ function setBigUint64(view: DataView, offset: number, value: bigint): void {
 /**
  * Convert ImageData to XTH format (2-bit Planar, Vertical Scan, R-to-L)
  */
-function imageDataToXth(imageData: ImageData): ArrayBuffer {
+export function imageDataToXth(imageData: ImageData): ArrayBuffer {
   const w = imageData.width;
   const h = imageData.height;
   const data = imageData.data;

@@ -13,6 +13,8 @@ export interface ConversionOptions {
   landscapeRtl: boolean
   padBlack: boolean
   gamma: number
+  imageMode: 'cover' | 'letterbox' | 'fill' | 'crop'
+  invert: boolean
 }
 
 export interface ConversionResult {

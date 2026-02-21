@@ -52,6 +52,9 @@ function RootLayout() {
           <Link to="/pdf" className={`nav-tab${location.pathname === '/pdf' ? ' active' : ''}`}>
             PDF
           </Link>
+          <Link to="/image" className={`nav-tab${location.pathname === '/image' ? ' active' : ''}`}>
+            Image to xth
+          </Link>
         </nav>
 
         <Outlet />

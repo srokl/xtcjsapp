@@ -11,7 +11,7 @@ import { consumePendingFiles } from '../lib/file-transfer'
 import { useStoredResults, type StoredResult } from '../hooks/useStoredResults'
 
 interface ConverterPageProps {
-  fileType: 'cbz' | 'pdf'
+  fileType: 'cbz' | 'pdf' | 'image'
   notice?: string
 }
 
@@ -42,6 +42,9 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
         if (fileType === 'pdf') {
           return name.endsWith('.pdf')
         }
+        if (fileType === 'image') {
+          return /\.(jpg|jpeg|png|webp|bmp|gif)$/i.test(name)
+        }
         // Accept both .cbz and .cbr for comic book type
         return name.endsWith('.cbz') || name.endsWith('.cbr')
       })
@@ -62,13 +65,13 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [viewerPages, setViewerPages] = useState<string[]>([])
   const [options, setOptions] = useState<ConversionOptions>({
-    splitMode: 'overlap',
+    splitMode: 'nosplit',
     dithering: fileType === 'pdf' ? 'atkinson' : 'floyd',
-    contrast: fileType === 'pdf' ? 8 : 4,
+    contrast: fileType === 'pdf' ? 8 : (fileType === 'image' ? 0 : 4),
     horizontalMargin: 0,
     verticalMargin: 0,
-    orientation: 'landscape',
-    is2bit: false,
+    orientation: fileType === 'image' ? 'portrait' : 'landscape',
+    is2bit: fileType === 'image',
     manhwa: false,
     manhwaOverlap: 50,
     sidewaysOverviews: false,
@@ -76,6 +79,8 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
     landscapeRtl: false,
     padBlack: false,
     gamma: 1.0,
+    imageMode: 'cover',
+    invert: false,
   })
 
   const handleFiles = useCallback((files: File[]) => {
@@ -103,8 +108,11 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
       setProgress(i / selectedFiles.length)
 
       try {
-        // Determine actual file type (cbz vs cbr)
-        const actualFileType = file.name.toLowerCase().endsWith('.cbr') ? 'cbr' : fileType
+        // Determine actual file type (cbz vs cbr vs image)
+        let actualFileType: 'cbz' | 'cbr' | 'pdf' | 'image' = fileType
+        if (file.name.toLowerCase().endsWith('.cbr')) actualFileType = 'cbr'
+        else if (fileType === 'image') actualFileType = 'image'
+
         console.log(`[Converter] Calling convertToXtc for ${file.name} as ${actualFileType}`)
         const result = await convertToXtc(file, actualFileType, options, (pageProgress, preview) => {
           // console.log(`[Converter] Progress for ${file.name}: ${pageProgress}`) // Verbose
@@ -116,10 +124,16 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
         // Store result immediately - progressive display
         await addResult(result)
 
-        recordConversion(fileType).catch(() => {})
+        recordConversion(fileType === 'image' ? 'cbz' : fileType).catch(() => {})
       } catch (err) {
         console.error(`[Converter] Error converting ${file.name}:`, err)
         // Store error result
+        await addResult({
+          name: file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xtch' : '.xtc'),
+          error: err instanceof Error ? err.message : 'Unknown error',
+        })
+      }
+    }
         await addResult({
           name: file.name.replace(/\.(cbz|cbr|pdf)$/i, '.xtc'),
           error: err instanceof Error ? err.message : 'Unknown error',
@@ -198,7 +212,7 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
         isConverting={isConverting}
       />
 
-      <Options options={options} onChange={setOptions} />
+      <Options options={options} onChange={setOptions} fileType={fileType} />
 
       <Progress
         visible={isConverting}

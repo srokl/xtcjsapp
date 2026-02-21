@@ -5,9 +5,9 @@ import { createExtractorFromData } from 'node-unrar-js'
 import unrarWasm from 'node-unrar-js/esm/js/unrar.wasm?url'
 import * as pdfjsLib from 'pdfjs-dist'
 import { applyDithering } from './processing/dithering'
-import { toGrayscale, applyContrast, calculateOverlapSegments, isSolidColor, applyGamma } from './processing/image'
-import { rotateCanvas, extractAndRotate, extractRegion, resizeWithPadding, TARGET_WIDTH, TARGET_HEIGHT } from './processing/canvas'
-import { buildXtc } from './xtc-format'
+import { toGrayscale, applyContrast, calculateOverlapSegments, isSolidColor, applyGamma, applyInvert } from './processing/image'
+import { rotateCanvas, extractAndRotate, extractRegion, resizeWithPadding, resizeFill, resizeCover, resizeCrop, TARGET_WIDTH, TARGET_HEIGHT } from './processing/canvas'
+import { buildXtc, imageDataToXth, imageDataToXtg } from './xtc-format'
 import { extractPdfMetadata } from './metadata/pdf-outline'
 import { parseComicInfo } from './metadata/comicinfo'
 import type { BookMetadata } from './metadata/types'
@@ -73,7 +73,7 @@ function adjustTocForMapping(toc: TocEntry[], mappingCtx: PageMappingContext): T
  */
 export async function convertToXtc(
   file: File,
-  fileType: 'cbz' | 'cbr' | 'pdf',
+  fileType: 'cbz' | 'cbr' | 'pdf' | 'image',
   options: ConversionOptions,
   onProgress: (progress: number, previewUrl: string | null) => void
 ): Promise<ConversionResult> {
@@ -82,6 +82,9 @@ export async function convertToXtc(
   }
   if (fileType === 'cbr') {
     return convertCbrToXtc(file, options, onProgress)
+  }
+  if (fileType === 'image') {
+    return convertImageToXtc(file, options, onProgress)
   }
   return convertCbzToXtc(file, options, onProgress)
 }
@@ -501,6 +504,37 @@ async function convertPdfToXtc(
 }
 
 /**
+ * Convert a single image file to XTC format
+ */
+async function convertImageToXtc(
+  file: File,
+  options: ConversionOptions,
+  onProgress: (progress: number, previewUrl: string | null) => void
+): Promise<ConversionResult> {
+  const pages = await processImage(file, 1, options)
+  
+  if (pages.length === 0) throw new Error('Failed to process image')
+
+  const page = pages[0]
+  const imageData = page.canvas.getContext('2d')!.getImageData(0, 0, TARGET_WIDTH, TARGET_HEIGHT)
+  
+  // Produce standalone format (XTH/XTG) instead of XTC container for single images
+  const xtcData = options.is2bit ? imageDataToXth(imageData) : imageDataToXtg(imageData)
+
+  if (page.canvas) {
+    onProgress(1, page.canvas.toDataURL('image/png'))
+  }
+
+  return {
+    name: file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xth' : '.xtg'),
+    data: xtcData,
+    size: xtcData.byteLength,
+    pageCount: 1,
+    pageImages: [page.canvas.toDataURL('image/png')]
+  }
+}
+
+/**
  * Process a canvas (from PDF rendering) through the same pipeline as images
  */
 function processCanvasAsImage(
@@ -535,6 +569,10 @@ function processCanvasAsImage(
 
   if (options.gamma !== 1.0 && options.is2bit) {
     applyGamma(ctx, width, height, options.gamma)
+  }
+
+  if (options.invert) {
+    applyInvert(ctx, width, height)
   }
 
   toGrayscale(ctx, width, height)
@@ -743,8 +781,42 @@ function processLoadedImage(
     applyGamma(ctx, width, height, options.gamma)
   }
 
+  if (options.invert) {
+    applyInvert(ctx, width, height)
+  }
+
   // Convert to grayscale
   toGrayscale(ctx, width, height)
+
+  // Special scaling modes for single images (wallpapers)
+  // We use these if it's not a Manhwa and not splitting
+  const isSingleImage = !options.manhwa && options.splitMode === 'nosplit' && options.orientation === 'portrait'
+
+  if (isSingleImage && options.is2bit) {
+    let finalCanvas: HTMLCanvasElement
+    switch (options.imageMode) {
+      case 'fill':
+        finalCanvas = resizeFill(canvas)
+        break
+      case 'cover':
+        finalCanvas = resizeCover(canvas)
+        break
+      case 'crop':
+        finalCanvas = resizeCrop(canvas)
+        break
+      case 'letterbox':
+      default:
+        finalCanvas = resizeWithPadding(canvas, padColor)
+        break
+    }
+
+    applyDithering(finalCanvas.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
+    
+    return [{
+      name: `${String(pageNum).padStart(4, '0')}_image.png`,
+      canvas: finalCanvas
+    }]
+  }
 
   // Add sideways overview if requested
   if (options.sidewaysOverviews && !options.manhwa) {

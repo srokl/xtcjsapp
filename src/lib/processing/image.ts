@@ -84,6 +84,26 @@ export function applyContrast(
 }
 
 /**
+ * Invert image colors
+ */
+export function applyInvert(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number
+): void {
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const data = imageData.data;
+
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = 255 - data[i];
+    data[i + 1] = 255 - data[i + 1];
+    data[i + 2] = 255 - data[i + 2];
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+}
+
+/**
  * Calculate overlapping segments for tall manga pages
  */
 export function calculateOverlapSegments(
