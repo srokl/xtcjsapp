@@ -10,7 +10,6 @@ import { rotateCanvas, extractAndRotate, extractRegion, resizeWithPadding, TARGE
 import { buildXtc } from './xtc-format'
 import { extractPdfMetadata } from './metadata/pdf-outline'
 import { parseComicInfo } from './metadata/comicinfo'
-import { PageMappingContext, adjustTocForMapping } from './page-mapping'
 import type { BookMetadata } from './metadata/types'
 
 // Set up PDF.js worker from CDN to avoid build asset path issues
@@ -20,6 +19,54 @@ import { ManhwaStitcher } from './processing/manhwa-stitcher'
 import { getAxisCropRect } from './processing/geometry'
 import type { ConversionOptions, ConversionResult, ProcessedPage, CropRect } from './types'
 export type { ConversionOptions, ConversionResult }
+
+// Inline PageMappingContext to avoid potential circular dependency/initialization issues
+export class PageMappingContext {
+  private mappings: Array<{ originalPage: number; xtcStartPage: number; xtcPageCount: number }> = []
+  private currentXtcPage = 1
+
+  addOriginalPage(originalPage: number, xtcPageCount: number): void {
+    this.mappings.push({
+      originalPage,
+      xtcStartPage: this.currentXtcPage,
+      xtcPageCount
+    })
+    this.currentXtcPage += xtcPageCount
+  }
+
+  getXtcPage(originalPage: number): number {
+    const mapping = this.mappings.find(m => m.originalPage === originalPage)
+    return mapping ? mapping.xtcStartPage : originalPage
+  }
+
+  getTotalXtcPages(): number {
+    return this.currentXtcPage - 1
+  }
+}
+
+import { adjustTocForMapping as adjustTocImport } from './page-mapping' // Keep helper import? Or inline it too?
+// Let's inline adjustTocForMapping too to be safe.
+import type { TocEntry } from './metadata/types'
+
+function adjustTocForMapping(toc: TocEntry[], mappingCtx: PageMappingContext): TocEntry[] {
+  if (toc.length === 0) return []
+  const totalXtcPages = mappingCtx.getTotalXtcPages()
+  return toc.map((entry, index) => {
+    const adjustedStartPage = mappingCtx.getXtcPage(entry.startPage)
+    let adjustedEndPage: number
+    if (index < toc.length - 1) {
+      const nextChapterStart = mappingCtx.getXtcPage(toc[index + 1].startPage)
+      adjustedEndPage = nextChapterStart - 1
+    } else {
+      adjustedEndPage = totalXtcPages
+    }
+    return {
+      title: entry.title,
+      startPage: adjustedStartPage,
+      endPage: adjustedEndPage
+    }
+  })
+}
 
 /**
  * Convert a file to XTC format (supports CBZ, CBR and PDF)
