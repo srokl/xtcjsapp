@@ -407,9 +407,11 @@ async function convertPdfToXtc(
   }
 
   // Generate TOC entries for every page to match Python logic
+  console.log('[PDF] Generating page titles map')
   const pageTitles = new Map<number, string>()
   metadata.toc.forEach(entry => pageTitles.set(entry.startPage, entry.title))
 
+  console.log('[PDF] Rebuilding TOC')
   metadata.toc = []
   for (let i = 1; i <= numPages; i++) {
     let title = `Page ${i}`
@@ -419,7 +421,9 @@ async function convertPdfToXtc(
     metadata.toc.push({ title, startPage: i, endPage: i })
   }
 
+  console.log('[PDF] Init processedPages')
   const processedPages: ProcessedPage[] = []
+  console.log('[PDF] Init mappingCtx')
   const mappingCtx = new PageMappingContext()
   const numPages = pdf.numPages
   
