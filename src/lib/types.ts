@@ -15,6 +15,7 @@ export interface ConversionOptions {
   gamma: number
   imageMode: 'cover' | 'letterbox' | 'fill' | 'crop'
   invert: boolean
+  videoFps: number
 }
 
 export interface ConversionResult {

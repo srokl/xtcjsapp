@@ -73,7 +73,7 @@ function adjustTocForMapping(toc: TocEntry[], mappingCtx: PageMappingContext): T
  */
 export async function convertToXtc(
   file: File,
-  fileType: 'cbz' | 'cbr' | 'pdf' | 'image',
+  fileType: 'cbz' | 'cbr' | 'pdf' | 'image' | 'video',
   options: ConversionOptions,
   onProgress: (progress: number, previewUrl: string | null) => void
 ): Promise<ConversionResult> {
@@ -85,6 +85,9 @@ export async function convertToXtc(
   }
   if (fileType === 'image') {
     return convertImageToXtc(file, options, onProgress)
+  }
+  if (fileType === 'video') {
+    return convertVideoToXtc(file, options, onProgress)
   }
   return convertCbzToXtc(file, options, onProgress)
 }
@@ -532,6 +535,125 @@ async function convertImageToXtc(
     pageCount: 1,
     pageImages: [page.canvas.toDataURL('image/png')]
   }
+}
+
+/**
+ * Convert a video file to XTC format
+ */
+async function convertVideoToXtc(
+  file: File,
+  options: ConversionOptions,
+  onProgress: (progress: number, previewUrl: string | null) => void
+): Promise<ConversionResult> {
+  const fps = options.videoFps || 1.0
+  const frames = await extractFramesFromVideo(file, fps)
+  const processedPages: ProcessedPage[] = []
+
+  for (let i = 0; i < frames.length; i++) {
+    const frameCanvas = frames[i]
+    
+    // Video frames use specific logic:
+    // If Landscape -> Rotate -90 -> Portrait
+    // Resize to fit screen with black background
+    let width = frameCanvas.width
+    let height = frameCanvas.height
+    let canvas = frameCanvas
+
+    if (width >= height) {
+      canvas = rotateCanvas(frameCanvas, -90)
+      width = canvas.width
+      height = canvas.height
+    }
+
+    // Process like a normal image but with black background default for video
+    const finalCanvas = resizeWithPadding(canvas, 0) // Black background
+    const ctx = finalCanvas.getContext('2d')!
+
+    if (options.contrast > 0) {
+      applyContrast(ctx, TARGET_WIDTH, TARGET_HEIGHT, options.contrast)
+    }
+
+    if (options.gamma !== 1.0 && options.is2bit) {
+      applyGamma(ctx, TARGET_WIDTH, TARGET_HEIGHT, options.gamma)
+    }
+
+    if (options.invert) {
+      applyInvert(ctx, TARGET_WIDTH, TARGET_HEIGHT)
+    }
+
+    toGrayscale(ctx, TARGET_WIDTH, TARGET_HEIGHT)
+    applyDithering(ctx, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
+
+    processedPages.push({
+      name: `${String(i + 1).padStart(5, '0')}.png`,
+      canvas: finalCanvas
+    })
+
+    if (i % 5 === 0 || i === frames.length - 1) {
+      onProgress((i + 1) / frames.length, finalCanvas.toDataURL('image/png'))
+    }
+  }
+
+  const xtcData = await buildXtc(processedPages, { is2bit: options.is2bit })
+
+  return {
+    name: file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xtch' : '.xtc'),
+    data: xtcData,
+    size: xtcData.byteLength,
+    pageCount: processedPages.length,
+    pageImages: processedPages.slice(0, 10).map(p => p.canvas.toDataURL('image/png'))
+  }
+}
+
+/**
+ * Extract frames from a video file at a specific FPS using HTML5 Video
+ */
+async function extractFramesFromVideo(file: File, fps: number): Promise<HTMLCanvasElement[]> {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement('video')
+    video.preload = 'auto'
+    video.muted = true
+    video.playsInline = true
+    
+    const url = URL.createObjectURL(file)
+    video.src = url
+
+    video.onloadedmetadata = async () => {
+      const duration = video.duration
+      const frameCount = Math.max(1, Math.floor(duration * fps))
+      const frames: HTMLCanvasElement[] = []
+      
+      const canvas = document.createElement('canvas')
+      canvas.width = video.videoWidth
+      canvas.height = video.videoHeight
+      const ctx = canvas.getContext('2d')!
+
+      for (let i = 0; i < frameCount; i++) {
+        const time = i / fps
+        video.currentTime = time
+        
+        await new Promise((r) => {
+          video.onseeked = () => {
+            ctx.drawImage(video, 0, 0)
+            const frameCopy = document.createElement('canvas')
+            frameCopy.width = canvas.width
+            frameCopy.height = canvas.height
+            frameCopy.getContext('2d')!.drawImage(canvas, 0, 0)
+            frames.push(frameCopy)
+            r(null)
+          }
+        })
+      }
+
+      URL.revokeObjectURL(url)
+      resolve(frames)
+    }
+
+    video.onerror = (e) => {
+      URL.revokeObjectURL(url)
+      reject(new Error('Failed to load video'))
+    }
+  })
 }
 
 /**

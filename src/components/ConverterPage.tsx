@@ -11,7 +11,7 @@ import { consumePendingFiles } from '../lib/file-transfer'
 import { useStoredResults, type StoredResult } from '../hooks/useStoredResults'
 
 interface ConverterPageProps {
-  fileType: 'cbz' | 'pdf' | 'image'
+  fileType: 'cbz' | 'pdf' | 'image' | 'video'
   notice?: string
 }
 
@@ -45,6 +45,9 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
         if (fileType === 'image') {
           return /\.(jpg|jpeg|png|webp|bmp|gif)$/i.test(name)
         }
+        if (fileType === 'video') {
+          return /\.(mp4|webm|mkv|avi|mov)$/i.test(name)
+        }
         // Accept both .cbz and .cbr for comic book type
         return name.endsWith('.cbz') || name.endsWith('.cbr')
       })
@@ -66,21 +69,22 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
   const [viewerPages, setViewerPages] = useState<string[]>([])
   const [options, setOptions] = useState<ConversionOptions>({
     splitMode: 'nosplit',
-    dithering: fileType === 'pdf' ? 'atkinson' : 'floyd',
-    contrast: fileType === 'pdf' ? 8 : (fileType === 'image' ? 0 : 4),
+    dithering: (fileType === 'pdf' || fileType === 'video') ? 'atkinson' : 'floyd',
+    contrast: fileType === 'pdf' ? 8 : (fileType === 'image' || fileType === 'video' ? 0 : 4),
     horizontalMargin: 0,
     verticalMargin: 0,
-    orientation: fileType === 'image' ? 'portrait' : 'landscape',
-    is2bit: fileType === 'image',
+    orientation: (fileType === 'image' || fileType === 'video') ? 'portrait' : 'landscape',
+    is2bit: (fileType === 'image' || fileType === 'video'),
     manhwa: false,
     manhwaOverlap: 50,
     sidewaysOverviews: false,
     includeOverviews: false,
     landscapeRtl: false,
-    padBlack: false,
+    padBlack: fileType === 'video', // Video usually looks better with black bars
     gamma: 1.0,
     imageMode: 'cover',
     invert: false,
+    videoFps: 1.0,
   })
 
   const handleFiles = useCallback((files: File[]) => {
@@ -108,10 +112,11 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
       setProgress(i / selectedFiles.length)
 
       try {
-        // Determine actual file type (cbz vs cbr vs image)
-        let actualFileType: 'cbz' | 'cbr' | 'pdf' | 'image' = fileType
+        // Determine actual file type (cbz vs cbr vs image vs video)
+        let actualFileType: 'cbz' | 'cbr' | 'pdf' | 'image' | 'video' = fileType
         if (file.name.toLowerCase().endsWith('.cbr')) actualFileType = 'cbr'
         else if (fileType === 'image') actualFileType = 'image'
+        else if (fileType === 'video') actualFileType = 'video'
 
         console.log(`[Converter] Calling convertToXtc for ${file.name} as ${actualFileType}`)
         const result = await convertToXtc(file, actualFileType, options, (pageProgress, preview) => {
@@ -124,7 +129,7 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
         // Store result immediately - progressive display
         await addResult(result)
 
-        recordConversion(fileType === 'image' ? 'cbz' : fileType).catch(() => {})
+        recordConversion(fileType === 'image' || fileType === 'video' ? 'cbz' : fileType).catch(() => {})
       } catch (err) {
         console.error(`[Converter] Error converting ${file.name}:`, err)
         // Store error result

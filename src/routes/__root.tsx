@@ -55,6 +55,9 @@ function RootLayout() {
           <Link to="/image" className={`nav-tab${location.pathname === '/image' ? ' active' : ''}`}>
             Image to xtg/xth
           </Link>
+          <Link to="/video" className={`nav-tab${location.pathname === '/video' ? ' active' : ''}`}>
+            Video
+          </Link>
         </nav>
 
         <Outlet />

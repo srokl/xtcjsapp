@@ -3,11 +3,12 @@ import type { ConversionOptions } from '../lib/converter'
 interface OptionsProps {
   options: ConversionOptions
   onChange: (options: ConversionOptions) => void
-  fileType?: 'cbz' | 'pdf' | 'image'
+  fileType?: 'cbz' | 'pdf' | 'image' | 'video'
 }
 
 export function Options({ options, onChange, fileType }: OptionsProps) {
   const isImageMode = fileType === 'image'
+  const isVideoMode = fileType === 'video'
 
   return (
     <aside className="options-panel">
@@ -29,6 +30,40 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
               <option value="fill">Fill (Stretch)</option>
               <option value="crop">Crop (Center 480x800)</option>
             </select>
+          </div>
+
+          <div className="option checkbox-option">
+            <label htmlFor="is2bit">
+              <input
+                type="checkbox"
+                id="is2bit"
+                checked={options.is2bit}
+                onChange={(e) => onChange({ ...options, is2bit: e.target.checked })}
+              />
+              2-bit (High Quality XTCH)
+            </label>
+          </div>
+        </>
+      ) : isVideoMode ? (
+        <>
+          <div className="section-header">
+            <h2>Video Options</h2>
+          </div>
+
+          <div className="option">
+            <label htmlFor="videoFps">Frames per second</label>
+            <div className="input-with-unit">
+              <input
+                type="number"
+                id="videoFps"
+                min="0.1"
+                max="10"
+                step="0.1"
+                value={options.videoFps}
+                onChange={(e) => onChange({ ...options, videoFps: parseFloat(e.target.value) || 1.0 })}
+              />
+              <span className="unit">FPS</span>
+            </div>
           </div>
 
           <div className="option checkbox-option">
@@ -151,7 +186,7 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
         </div>
       )}
 
-      {!isImageMode && options.manhwa && (
+      {!isImageMode && !isVideoMode && options.manhwa && (
         <div className="option">
           <label htmlFor="manhwaOverlap">Manhwa Overlap</label>
           <select
@@ -166,7 +201,7 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
         </div>
       )}
 
-      {!isImageMode && (
+      {!isImageMode && !isVideoMode && (
         <div className="option">
           <label htmlFor="orientation">Orientation</label>
           <select
@@ -181,7 +216,7 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
         </div>
       )}
 
-      {!isImageMode && options.orientation === 'landscape' && !options.manhwa && (
+      {!isImageMode && !isVideoMode && options.orientation === 'landscape' && !options.manhwa && (
         <div className="option">
           <label htmlFor="splitMode">Page Split</label>
           <select
@@ -226,7 +261,7 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
         </select>
       </div>
 
-      {!isImageMode && (
+      {!isImageMode && !isVideoMode && (
         <div className="option">
           <label htmlFor="horizontalMargin">Horizontal margin crop</label>
           <div className="input-with-unit">
@@ -245,7 +280,7 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
         </div>
       )}
 
-      {!isImageMode && (
+      {!isImageMode && !isVideoMode && (
         <div className="option">
           <label htmlFor="verticalMargin">Vertical margin crop</label>
           <div className="input-with-unit">
