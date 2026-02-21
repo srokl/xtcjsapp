@@ -271,6 +271,8 @@ Options:
   --sideways       Include sideways overview pages
   --rtl            Landscape Right-to-Left (for splits)
   --pad-black      Pad with black instead of white
+  --mode [mode]    Scaling mode: cover (default), letterbox, fill, crop
+  --invert         Invert colors
 
 Example:
   node xtc_converter.js manga.cbz --2bit --dither floyd --manhwa --overlap 75
@@ -286,6 +288,8 @@ Example:
       const rtl = args.includes('--rtl');
       const sideways = args.includes('--sideways');
       const padBlack = args.includes('--pad-black');
+      const invert = args.includes('--invert');
+      const imageMode = args.includes('--mode') ? args[args.indexOf('--mode') + 1] : 'cover';
       
       let overlapPct = 50;
       if (args.includes('--overlap')) {
@@ -385,11 +389,11 @@ Example:
           const pages = await stitcher.append(buffer);
           blobs.push(...pages);
         } else if (mode === 'split') {
-          const processed = await processSplit(sharp, buffer, is2bit, ditherAlgo, gamma, rtl, padBlack);
+          const processed = await processSplit(sharp, buffer, is2bit, ditherAlgo, gamma, rtl, padBlack, invert);
           blobs.push(...processed);
         } else {
           // Standard processing
-          const blob = await processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, sideways);
+          const blob = await processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, sideways, imageMode, invert);
           if (Array.isArray(blob)) blobs.push(...blob); // Handle sideways overview returning array
           else blobs.push(blob);
         }
@@ -489,7 +493,7 @@ Please install them using:
 
 // Updated helper functions with new options support
 
-async function processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, sideways) {
+async function processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, sideways, imageMode = 'cover', invert = false) {
   const blobs = [];
   const bg = padBlack ? { r:0, g:0, b:0, alpha:1 } : { r:255, g:255, b:255, alpha:1 };
   
@@ -500,6 +504,7 @@ async function processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, 
        .resize(TARGET_WIDTH, TARGET_HEIGHT, { fit: 'contain', background: bg })
        .grayscale();
      if (gamma !== 1.0 && is2bit) ovPipeline = ovPipeline.gamma(gamma);
+     if (invert) ovPipeline = ovPipeline.negate();
      const { data: ovData } = await ovPipeline.raw().toBuffer({ resolveWithObject: true });
      const ovPixels = new Uint8ClampedArray(ovData);
      if (ditherAlgo === 'atkinson') ditherAtkinson(ovPixels, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
@@ -507,14 +512,41 @@ async function processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, 
      blobs.push(is2bit ? packXth(ovPixels, TARGET_WIDTH, TARGET_HEIGHT) : packXtg(ovPixels, TARGET_WIDTH, TARGET_HEIGHT));
   }
 
-  let pipeline = sharp(buffer)
-    .resize(TARGET_WIDTH, TARGET_HEIGHT, {
-      fit: 'contain',
-      background: bg
-    })
-    .grayscale();
+  let resizeOptions = {
+    fit: 'contain',
+    background: bg
+  };
+
+  if (imageMode === 'fill') resizeOptions.fit = 'fill';
+  else if (imageMode === 'cover') resizeOptions.fit = 'cover';
+  
+  let pipeline = sharp(buffer);
+
+  if (imageMode === 'crop') {
+    // Center crop without scaling
+    pipeline = pipeline.resize(TARGET_WIDTH, TARGET_HEIGHT, { fit: 'cover', position: 'center' });
+    // Note: This still scales if smaller. True crop without scale:
+    // const meta = await pipeline.metadata();
+    // pipeline = pipeline.extract({ 
+    //   left: Math.max(0, Math.floor((meta.width - TARGET_WIDTH)/2)),
+    //   top: Math.max(0, Math.floor((meta.height - TARGET_HEIGHT)/2)),
+    //   width: Math.min(meta.width, TARGET_WIDTH),
+    //   height: Math.min(meta.height, TARGET_HEIGHT)
+    // }).extend({
+    //   top: Math.max(0, Math.floor((TARGET_HEIGHT - meta.height)/2)),
+    //   bottom: Math.max(0, Math.ceil((TARGET_HEIGHT - meta.height)/2)),
+    //   left: Math.max(0, Math.floor((TARGET_WIDTH - meta.width)/2)),
+    //   right: Math.max(0, Math.ceil((TARGET_WIDTH - meta.width)/2)),
+    //   background: bg
+    // });
+  } else {
+    pipeline = pipeline.resize(TARGET_WIDTH, TARGET_HEIGHT, resizeOptions);
+  }
+
+  pipeline = pipeline.grayscale();
 
   if (gamma !== 1.0 && is2bit) pipeline = pipeline.gamma(gamma);
+  if (invert) pipeline = pipeline.negate();
 
   const { data, info } = await pipeline.raw().toBuffer({ resolveWithObject: true });
   const pixels = new Uint8ClampedArray(data);
@@ -527,12 +559,12 @@ async function processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, 
   return blobs;
 }
 
-async function processSplit(sharp, buffer, is2bit, ditherAlgo, gamma, rtl, padBlack) {
+async function processSplit(sharp, buffer, is2bit, ditherAlgo, gamma, rtl, padBlack, invert = false) {
   const metadata = await sharp(buffer).metadata();
   const bg = padBlack ? { r:0, g:0, b:0, alpha:1 } : { r:255, g:255, b:255, alpha:1 };
   
   if (metadata.width < metadata.height) {
-    return await processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, false);
+    return await processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, false, 'cover', invert);
   }
 
   const results = [];
@@ -548,7 +580,7 @@ async function processSplit(sharp, buffer, is2bit, ditherAlgo, gamma, rtl, padBl
   for (const region of regions) {
     const partBuffer = await sharp(buffer).extract(region).toBuffer();
     // Recursive call to processImage for each part
-    const parts = await processImage(sharp, partBuffer, is2bit, ditherAlgo, gamma, padBlack, false);
+    const parts = await processImage(sharp, partBuffer, is2bit, ditherAlgo, gamma, padBlack, false, 'cover', invert);
     results.push(...parts);
   }
   return results;
