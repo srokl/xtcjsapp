@@ -912,23 +912,28 @@ function processLoadedImage(
 
   // Special scaling modes for single images (wallpapers)
   // We use these if it's not a Manhwa and not splitting
-  const isSingleImage = !options.manhwa && options.splitMode === 'nosplit' && options.orientation === 'portrait'
+  const isSingleImage = !options.manhwa && options.splitMode === 'nosplit'
 
   if (isSingleImage && options.is2bit) {
+    let processingCanvas = canvas
+    if (options.orientation === 'landscape') {
+      processingCanvas = rotateCanvas(canvas, 90)
+    }
+
     let finalCanvas: HTMLCanvasElement
     switch (options.imageMode) {
       case 'fill':
-        finalCanvas = resizeFill(canvas)
+        finalCanvas = resizeFill(processingCanvas)
         break
       case 'cover':
-        finalCanvas = resizeCover(canvas)
+        finalCanvas = resizeCover(processingCanvas)
         break
       case 'crop':
-        finalCanvas = resizeCrop(canvas)
+        finalCanvas = resizeCrop(processingCanvas)
         break
       case 'letterbox':
       default:
-        finalCanvas = resizeWithPadding(canvas, padColor)
+        finalCanvas = resizeWithPadding(processingCanvas, padColor)
         break
     }
 

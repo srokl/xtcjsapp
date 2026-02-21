@@ -201,20 +201,18 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
         </div>
       )}
 
-      {!isImageMode && (
-        <div className="option">
-          <label htmlFor="orientation">Orientation</label>
-          <select
-            id="orientation"
-            value={options.orientation}
-            onChange={(e) => onChange({ ...options, orientation: e.target.value as 'landscape' | 'portrait' })}
-            disabled={options.manhwa}
-          >
-            <option value="landscape">Landscape</option>
-            <option value="portrait">Portrait</option>
-          </select>
-        </div>
-      )}
+      <div className="option">
+        <label htmlFor="orientation">Orientation</label>
+        <select
+          id="orientation"
+          value={options.orientation}
+          onChange={(e) => onChange({ ...options, orientation: e.target.value as 'landscape' | 'portrait' })}
+          disabled={options.manhwa}
+        >
+          <option value="landscape">Landscape</option>
+          <option value="portrait">Portrait</option>
+        </select>
+      </div>
 
       {!isImageMode && !isVideoMode && options.orientation === 'landscape' && !options.manhwa && (
         <div className="option">
