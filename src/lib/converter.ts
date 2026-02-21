@@ -478,6 +478,7 @@ function processCanvasAsImage(
   const results: ProcessedPage[] = []
   const canvas = document.createElement('canvas')
   const ctx = canvas.getContext('2d')!
+  const padColor = options.padBlack ? 0 : 255
 
   const crop = getAxisCropRect(sourceCanvas.width, sourceCanvas.height, options)
   canvas.width = crop.width
@@ -502,8 +503,6 @@ function processCanvasAsImage(
   }
 
   toGrayscale(ctx, width, height)
-
-  const padColor = options.padBlack ? 0 : 255
 
   // Add sideways overview if requested
   if (options.sidewaysOverviews && !options.manhwa) {
@@ -667,6 +666,7 @@ function processLoadedImage(
   const results: ProcessedPage[] = []
   const canvas = document.createElement('canvas')
   const ctx = canvas.getContext('2d')!
+  const padColor = options.padBlack ? 0 : 255
 
   const crop = getAxisCropRect(img.width, img.height, options)
   canvas.width = crop.width
@@ -693,8 +693,6 @@ function processLoadedImage(
 
   // Convert to grayscale
   toGrayscale(ctx, width, height)
-
-  const padColor = options.padBlack ? 0 : 255
 
   // Add sideways overview if requested
   if (options.sidewaysOverviews && !options.manhwa) {
