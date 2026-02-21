@@ -496,7 +496,7 @@ async function processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, 
   if (sideways) {
      // Create sideways overview
      let ovPipeline = sharp(buffer)
-       .rotate(90) // 90 or -90? Webapp uses -90.
+       .rotate(90)
        .resize(TARGET_WIDTH, TARGET_HEIGHT, { fit: 'contain', background: bg })
        .grayscale();
      if (gamma !== 1.0) ovPipeline = ovPipeline.gamma(gamma);

@@ -541,7 +541,7 @@ function processCanvasAsImage(
 
   // Add sideways overview if requested
   if (options.sidewaysOverviews && !options.manhwa) {
-    const rotatedOverview = rotateCanvas(canvas, -90)
+    const rotatedOverview = rotateCanvas(canvas, 90)
     const finalOverview = resizeWithPadding(rotatedOverview, padColor)
     applyDithering(finalOverview.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
     results.push({
@@ -748,7 +748,7 @@ function processLoadedImage(
 
   // Add sideways overview if requested
   if (options.sidewaysOverviews && !options.manhwa) {
-    const rotatedOverview = rotateCanvas(canvas, -90)
+    const rotatedOverview = rotateCanvas(canvas, 90)
     const finalOverview = resizeWithPadding(rotatedOverview, padColor)
     applyDithering(finalOverview.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
     results.push({
