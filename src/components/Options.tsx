@@ -80,20 +80,22 @@ export function Options({ options, onChange }: OptionsProps) {
         </label>
       </div>
 
-      <div className="option">
-        <label htmlFor="gamma">Gamma Correction</label>
-        <div className="input-with-unit">
-          <input
-            type="number"
-            id="gamma"
-            min="0.1"
-            max="3.0"
-            step="0.1"
-            value={options.gamma}
-            onChange={(e) => onChange({ ...options, gamma: parseFloat(e.target.value) || 1.0 })}
-          />
+      {options.is2bit && (
+        <div className="option">
+          <label htmlFor="gamma">Gamma Correction</label>
+          <div className="input-with-unit">
+            <input
+              type="number"
+              id="gamma"
+              min="0.1"
+              max="3.0"
+              step="0.1"
+              value={options.gamma}
+              onChange={(e) => onChange({ ...options, gamma: parseFloat(e.target.value) || 1.0 })}
+            />
+          </div>
         </div>
-      </div>
+      )}
 
       {options.manhwa && (
         <div className="option">
