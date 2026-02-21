@@ -412,6 +412,7 @@ async function convertPdfToXtc(
   metadata.toc.forEach(entry => pageTitles.set(entry.startPage, entry.title))
 
   console.log('[PDF] Rebuilding TOC')
+  const numPages = pdf.numPages
   metadata.toc = []
   for (let i = 1; i <= numPages; i++) {
     let title = `Page ${i}`
@@ -425,7 +426,6 @@ async function convertPdfToXtc(
   const processedPages: ProcessedPage[] = []
   console.log('[PDF] Init mappingCtx')
   const mappingCtx = new PageMappingContext()
-  const numPages = pdf.numPages
   
   let stitcher: ManhwaStitcher | null = null
   if (options.manhwa) {
