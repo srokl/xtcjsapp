@@ -33,36 +33,39 @@ export function Options({ options, onChange }: OptionsProps) {
       </div>
 
       <div className="option checkbox-option">
-        <label htmlFor="sidewaysOverviews">
+        <label htmlFor="sidewaysOverviews" className={options.manhwa ? 'disabled' : ''}>
           <input
             type="checkbox"
             id="sidewaysOverviews"
             checked={options.sidewaysOverviews}
             onChange={(e) => onChange({ ...options, sidewaysOverviews: e.target.checked })}
+            disabled={options.manhwa}
           />
           Include Sideways Overviews
         </label>
       </div>
 
       <div className="option checkbox-option">
-        <label htmlFor="includeOverviews">
+        <label htmlFor="includeOverviews" className={options.manhwa ? 'disabled' : ''}>
           <input
             type="checkbox"
             id="includeOverviews"
             checked={options.includeOverviews}
             onChange={(e) => onChange({ ...options, includeOverviews: e.target.checked })}
+            disabled={options.manhwa}
           />
           Include Upright Overviews
         </label>
       </div>
 
       <div className="option checkbox-option">
-        <label htmlFor="landscapeRtl">
+        <label htmlFor="landscapeRtl" className={options.manhwa ? 'disabled' : ''}>
           <input
             type="checkbox"
             id="landscapeRtl"
             checked={options.landscapeRtl}
             onChange={(e) => onChange({ ...options, landscapeRtl: e.target.checked })}
+            disabled={options.manhwa}
           />
           Landscape RTL
         </label>

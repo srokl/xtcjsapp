@@ -106,6 +106,15 @@
   color: var(--ink);
 }
 
+.option.checkbox-option label.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.option.checkbox-option input:disabled {
+  cursor: not-allowed;
+}
+
 .option.checkbox-option input {
   width: auto;
   margin: 0;
