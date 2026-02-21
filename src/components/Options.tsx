@@ -40,7 +40,7 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
                 checked={options.is2bit}
                 onChange={(e) => onChange({ ...options, is2bit: e.target.checked })}
               />
-              2-bit (High Quality XTCH) (not recommended)
+              2-bit (High Quality XTCH)
             </label>
           </div>
         </>
@@ -88,7 +88,7 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
                 checked={options.is2bit}
                 onChange={(e) => onChange({ ...options, is2bit: e.target.checked })}
               />
-              2-bit (High Quality XTCH) (not recommended)
+              2-bit (High Quality XTCH)
             </label>
           </div>
 
