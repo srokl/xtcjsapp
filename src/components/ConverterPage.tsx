@@ -72,6 +72,10 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
     manhwa: false,
     manhwaOverlap: 50,
     sidewaysOverviews: false,
+    includeOverviews: false,
+    landscapeRtl: false,
+    padBlack: false,
+    gamma: 1.0,
   })
 
   const handleFiles = useCallback((files: File[]) => {

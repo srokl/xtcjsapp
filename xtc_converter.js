@@ -265,9 +265,15 @@ Options:
   --gamma [val]    Gamma correction (default: 1.0)
   --out [file]     Output filename
   --clean          Delete temporary files (not applicable for single file conversion)
+  
+  --manhwa         Enable Manhwa mode (seamless vertical stitching)
+  --overlap [pct]  Manhwa overlap percentage (30, 50, 75). Default: 50
+  --sideways       Include sideways overview pages
+  --rtl            Landscape Right-to-Left (for splits)
+  --pad-black      Pad with black instead of white
 
 Example:
-  node xtc_converter.js manga.cbz --2bit --dither floyd
+  node xtc_converter.js manga.cbz --2bit --dither floyd --manhwa --overlap 75
         `);
         process.exit(0);
       }
@@ -278,6 +284,14 @@ Example:
       const gamma = args.includes('--gamma') ? parseFloat(args[args.indexOf('--gamma') + 1]) : 1.0;
       const mode = args.includes('--manhwa') ? 'manhwa' : (args.includes('--split') ? 'split' : 'simple');
       const rtl = args.includes('--rtl');
+      const sideways = args.includes('--sideways');
+      const padBlack = args.includes('--pad-black');
+      
+      let overlapPct = 50;
+      if (args.includes('--overlap')) {
+          overlapPct = parseInt(args[args.indexOf('--overlap') + 1]);
+      }
+      
       let outputPath = args.includes('--out') ? args[args.indexOf('--out') + 1] : null;
 
       if (!inputPath || !fs.existsSync(inputPath)) {
@@ -287,17 +301,97 @@ Example:
 
       const stats = fs.statSync(inputPath);
       let blobs = [];
+      let chapterInfo = []; // TOC
+
+      // --- Helper: Manhwa Stitcher ---
+      class Stitcher {
+        constructor() {
+          this.buffer = null; // Buffer of raw grayscale pixels
+          this.width = TARGET_WIDTH;
+          this.height = 0;
+          this.pageCount = 0;
+        }
+
+        async append(buffer) {
+          const image = sharp(buffer);
+          const meta = await image.metadata();
+          const scale = TARGET_WIDTH / meta.width;
+          const newH = Math.floor(meta.height * scale);
+          
+          let pipeline = image.resize(TARGET_WIDTH, newH).grayscale();
+          if (gamma !== 1.0) pipeline = pipeline.gamma(gamma);
+          
+          const { data } = await pipeline.raw().toBuffer({ resolveWithObject: true });
+          
+          // Append to buffer
+          if (!this.buffer) {
+            this.buffer = data;
+            this.height = newH;
+          } else {
+            this.buffer = Buffer.concat([this.buffer, data]);
+            this.height += newH;
+          }
+          
+          const results = [];
+          
+          while (this.height >= TARGET_HEIGHT) {
+            // Check solid color logic could go here (stddev check on slice)
+            // For now, assume standard overlap logic
+            
+            const sliceSize = TARGET_WIDTH * TARGET_HEIGHT;
+            const slice = new Uint8ClampedArray(this.buffer.subarray(0, sliceSize));
+            
+            // Dither in place (on the copy)
+            if (ditherAlgo === 'atkinson') ditherAtkinson(slice, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
+            else if (ditherAlgo === 'floyd') ditherFloydSteinberg(slice, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
+            
+            results.push(is2bit ? packXth(slice, TARGET_WIDTH, TARGET_HEIGHT) : packXtg(slice, TARGET_WIDTH, TARGET_HEIGHT));
+            this.pageCount++;
+            
+            // Advance
+            const overlapPx = Math.floor(TARGET_HEIGHT * (overlapPct / 100));
+            const step = TARGET_HEIGHT - overlapPx;
+            const stepBytes = step * TARGET_WIDTH;
+            
+            this.buffer = this.buffer.subarray(stepBytes);
+            this.height -= step;
+          }
+          return results;
+        }
+        
+        finish() {
+          const results = [];
+          if (this.height > 0) {
+             // Pad last page (align top)
+             const final = new Uint8ClampedArray(TARGET_WIDTH * TARGET_HEIGHT).fill(padBlack ? 0 : 255);
+             const h = Math.min(this.height, TARGET_HEIGHT);
+             // Copy buffer to final
+             const src = new Uint8Array(this.buffer.subarray(0, h * TARGET_WIDTH));
+             final.set(src, 0); // Align top
+             
+             if (ditherAlgo === 'atkinson') ditherAtkinson(final, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
+             else if (ditherAlgo === 'floyd') ditherFloydSteinberg(final, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
+             
+             results.push(is2bit ? packXth(final, TARGET_WIDTH, TARGET_HEIGHT) : packXtg(final, TARGET_WIDTH, TARGET_HEIGHT));
+          }
+          return results;
+        }
+      }
+      
+      let stitcher = mode === 'manhwa' ? new Stitcher() : null;
 
       async function addImage(buffer) {
-        if (mode === 'manhwa') {
-          const processed = await processManhwa(sharp, buffer, is2bit, ditherAlgo, gamma);
-          blobs.push(...processed);
+        if (stitcher) {
+          const pages = await stitcher.append(buffer);
+          blobs.push(...pages);
         } else if (mode === 'split') {
-          const processed = await processSplit(sharp, buffer, is2bit, ditherAlgo, gamma, rtl);
+          const processed = await processSplit(sharp, buffer, is2bit, ditherAlgo, gamma, rtl, padBlack);
           blobs.push(...processed);
         } else {
-          const blob = await processImage(sharp, buffer, is2bit, ditherAlgo, gamma);
-          blobs.push(blob);
+          // Standard processing
+          const blob = await processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, sideways);
+          if (Array.isArray(blob)) blobs.push(...blob); // Handle sideways overview returning array
+          else blobs.push(blob);
         }
       }
 
@@ -311,6 +405,32 @@ Example:
 
         console.log(`Found ${imageFiles.length} images.`);
         
+        // Chapter Extraction (Folder based)
+        const folderMap = new Map();
+        imageFiles.forEach((f, idx) => {
+           const parts = f.split('/');
+           if (parts.length > 1) {
+             const folder = parts[parts.length - 2];
+             if (!folderMap.has(folder)) folderMap.set(folder, idx + 1);
+           }
+        });
+        
+        if (folderMap.size > 1) {
+           let lastStart = 1;
+           let lastTitle = "Start";
+           for (const [title, start] of folderMap) {
+              if (lastStart < start) {
+                 chapterInfo.push({ title: lastTitle, startPage: lastStart, endPage: start - 1 });
+              }
+              lastStart = start;
+              lastTitle = title;
+           }
+           chapterInfo.push({ title: lastTitle, startPage: lastStart, endPage: imageFiles.length });
+        } else {
+           // Page-level TOC
+           imageFiles.forEach((f, i) => chapterInfo.push({ title: `Page ${i+1}`, startPage: i+1, endPage: i+1 }));
+        }
+        
         for (let i = 0; i < imageFiles.length; i++) {
           process.stdout.write(`\rProcessing page ${i + 1}/${imageFiles.length}... `);
           const buffer = await zip.files[imageFiles[i]].async('nodebuffer');
@@ -318,7 +438,7 @@ Example:
         }
         process.stdout.write("Done.\n");
 
-        if (!outputPath) outputPath = inputPath.replace(/\.cbz$/i, is2bit ? '.xtch' : '.xtc');
+        if (!outputPath) outputPath = inputPath.replace(/\.[^.]+$/, is2bit ? '.xtch' : '.xtc');
 
       } else if (stats.isDirectory()) {
         console.log(`Processing directory: ${inputPath}`);
@@ -326,11 +446,12 @@ Example:
           .filter(name => /\.(jpg|jpeg|png|webp|bmp)$/i.test(name))
           .sort();
 
+        files.forEach((f, i) => chapterInfo.push({ title: `Page ${i+1}`, startPage: i+1, endPage: i+1 }));
+
         for (let i = 0; i < files.length; i++) {
           process.stdout.write(`\rEncoding image ${i + 1}/${files.length}... `);
           const buffer = fs.readFileSync(path.join(inputPath, files[i]));
-          const blob = await processImage(sharp, buffer, is2bit, ditherAlgo, gamma);
-          blobs.push(blob);
+          await addImage(buffer);
         }
         process.stdout.write("Done.\n");
 
@@ -339,12 +460,15 @@ Example:
         // Single image
         console.log(`Processing image: ${inputPath}`);
         const buffer = fs.readFileSync(inputPath);
-        const blob = await processImage(sharp, buffer, is2bit, ditherAlgo, gamma);
-        blobs.push(blob);
+        await addImage(buffer);
         if (!outputPath) outputPath = inputPath.replace(/\.[^.]+$/, is2bit ? '.xtch' : '.xtc');
       }
+      
+      if (stitcher) {
+         blobs.push(...stitcher.finish());
+      }
 
-      const finalFile = buildXtcFile(blobs, is2bit, { title: path.basename(inputPath) });
+      const finalFile = buildXtcFile(blobs, is2bit, { title: path.basename(inputPath), toc: chapterInfo });
       fs.writeFileSync(outputPath, finalFile);
       console.log(`Saved to ${outputPath} (${(finalFile.length / 1024).toFixed(1)} KB)`);
 
@@ -363,14 +487,30 @@ Please install them using:
   })();
 }
 
-/**
- * Processes a single image buffer using sharp and the XTC encoders.
- */
-async function processImage(sharp, buffer, is2bit, ditherAlgo, gamma) {
+// Updated helper functions with new options support
+
+async function processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, sideways) {
+  const blobs = [];
+  const bg = padBlack ? { r:0, g:0, b:0, alpha:1 } : { r:255, g:255, b:255, alpha:1 };
+  
+  if (sideways) {
+     // Create sideways overview
+     let ovPipeline = sharp(buffer)
+       .rotate(90) // 90 or -90? Webapp uses -90.
+       .resize(TARGET_WIDTH, TARGET_HEIGHT, { fit: 'contain', background: bg })
+       .grayscale();
+     if (gamma !== 1.0) ovPipeline = ovPipeline.gamma(gamma);
+     const { data: ovData } = await ovPipeline.raw().toBuffer({ resolveWithObject: true });
+     const ovPixels = new Uint8ClampedArray(ovData);
+     if (ditherAlgo === 'atkinson') ditherAtkinson(ovPixels, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
+     else if (ditherAlgo === 'floyd') ditherFloydSteinberg(ovPixels, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
+     blobs.push(is2bit ? packXth(ovPixels, TARGET_WIDTH, TARGET_HEIGHT) : packXtg(ovPixels, TARGET_WIDTH, TARGET_HEIGHT));
+  }
+
   let pipeline = sharp(buffer)
     .resize(TARGET_WIDTH, TARGET_HEIGHT, {
       fit: 'contain',
-      background: { r: 255, g: 255, b: 255, alpha: 1 }
+      background: bg
     })
     .grayscale();
 
@@ -382,22 +522,21 @@ async function processImage(sharp, buffer, is2bit, ditherAlgo, gamma) {
   if (ditherAlgo === 'atkinson') ditherAtkinson(pixels, info.width, info.height, is2bit);
   else if (ditherAlgo === 'floyd') ditherFloydSteinberg(pixels, info.width, info.height, is2bit);
 
-  return is2bit ? packXth(pixels, info.width, info.height) : packXtg(pixels, info.width, info.height);
+  blobs.push(is2bit ? packXth(pixels, info.width, info.height) : packXtg(pixels, info.width, info.height));
+  
+  return blobs;
 }
 
-/**
- * Processes a wide image by splitting it into parts.
- */
-async function processSplit(sharp, buffer, is2bit, ditherAlgo, gamma, rtl = false) {
+async function processSplit(sharp, buffer, is2bit, ditherAlgo, gamma, rtl, padBlack) {
   const metadata = await sharp(buffer).metadata();
+  const bg = padBlack ? { r:0, g:0, b:0, alpha:1 } : { r:255, g:255, b:255, alpha:1 };
+  
   if (metadata.width < metadata.height) {
-    // Already portrait, don't split
-    return [await processImage(sharp, buffer, is2bit, ditherAlgo, gamma)];
+    return await processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, false);
   }
 
-  // Split into 2 halves with overlap (typical manga spread)
   const results = [];
-  const overlap = 40; // Overlap in pixels
+  const overlap = 40;
   const halfWidth = Math.floor(metadata.width / 2) + overlap;
   
   const regions = rtl 
@@ -408,50 +547,9 @@ async function processSplit(sharp, buffer, is2bit, ditherAlgo, gamma, rtl = fals
 
   for (const region of regions) {
     const partBuffer = await sharp(buffer).extract(region).toBuffer();
-    results.push(await processImage(sharp, partBuffer, is2bit, ditherAlgo, gamma));
-  }
-  return results;
-}
-
-/**
- * Processes a long strip (manhwa) by slicing it.
- */
-async function processManhwa(sharp, buffer, is2bit, ditherAlgo, gamma) {
-  const metadata = await sharp(buffer).metadata();
-  const scale = TARGET_WIDTH / metadata.width;
-  const newHeight = Math.floor(metadata.height * scale);
-
-  const resizedBuffer = await sharp(buffer)
-    .resize(TARGET_WIDTH, newHeight)
-    .grayscale()
-    .toBuffer();
-
-  const results = [];
-  const sliceHeight = TARGET_HEIGHT;
-  const overlap = 100; // Overlap for continuous scrolling feel
-  
-  for (let y = 0; y < newHeight; y += (sliceHeight - overlap)) {
-    if (y + sliceHeight > newHeight && results.length > 0) {
-      // Last slice, align to bottom
-      const region = { left: 0, top: newHeight - sliceHeight, width: TARGET_WIDTH, height: sliceHeight };
-      const sliceBuffer = await sharp(resizedBuffer).extract(region).toBuffer();
-      results.push(await processImage(sharp, sliceBuffer, is2bit, ditherAlgo, gamma));
-      break;
-    }
-    const region = { left: 0, top: y, width: TARGET_WIDTH, height: Math.min(sliceHeight, newHeight - y) };
-    let slicePipeline = sharp(resizedBuffer).extract(region);
-    
-    if (region.height < sliceHeight) {
-      slicePipeline = slicePipeline.extend({
-        bottom: sliceHeight - region.height,
-        background: { r: 255, g: 255, b: 255, alpha: 1 }
-      });
-    }
-
-    const sliceBuffer = await slicePipeline.toBuffer();
-    results.push(await processImage(sharp, sliceBuffer, is2bit, ditherAlgo, gamma));
-    
-    if (y + sliceHeight >= newHeight) break;
+    // Recursive call to processImage for each part
+    const parts = await processImage(sharp, partBuffer, is2bit, ditherAlgo, gamma, padBlack, false);
+    results.push(...parts);
   }
   return results;
 }

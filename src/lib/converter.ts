@@ -6,7 +6,7 @@ import unrarWasm from 'node-unrar-js/esm/js/unrar.wasm?url'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { applyDithering } from './processing/dithering'
-import { toGrayscale, applyContrast, calculateOverlapSegments, isSolidColor } from './processing/image'
+import { toGrayscale, applyContrast, calculateOverlapSegments, isSolidColor, applyGamma } from './processing/image'
 import { rotateCanvas, extractAndRotate, extractRegion, resizeWithPadding, TARGET_WIDTH, TARGET_HEIGHT } from './processing/canvas'
 import { buildXtc } from './xtc-format'
 import { extractPdfMetadata } from './metadata/pdf-outline'
@@ -28,6 +28,10 @@ export interface ConversionOptions {
   manhwa: boolean
   manhwaOverlap: number
   sidewaysOverviews: boolean
+  includeOverviews: boolean
+  landscapeRtl: boolean
+  padBlack: boolean
+  gamma: number
 }
 
 export interface ConversionResult {
@@ -73,6 +77,9 @@ class ManhwaStitcher {
     
     if (this.options.contrast > 0) {
        applyContrast(tempCtx, TARGET_WIDTH, newHeight, this.options.contrast)
+    }
+    if (this.options.gamma !== 1.0) {
+       applyGamma(tempCtx, TARGET_WIDTH, newHeight, this.options.gamma)
     }
     toGrayscale(tempCtx, TARGET_WIDTH, newHeight)
 
@@ -140,14 +147,15 @@ class ManhwaStitcher {
     const pages: ProcessedPage[] = []
     if (this.buffer && this.buffer.height > 0) {
         // Last chunk
-        // Align to top (content at top, white at bottom)
+        // Align to top (content at top, padding at bottom)
         const final = document.createElement('canvas')
         final.width = TARGET_WIDTH
         final.height = TARGET_HEIGHT
         const ctx = final.getContext('2d')!
         
-        // Fill white
-        ctx.fillStyle = 'white'
+        // Fill with padding color
+        const padColor = this.options.padBlack ? 'black' : 'white'
+        ctx.fillStyle = padColor
         ctx.fillRect(0, 0, TARGET_WIDTH, TARGET_HEIGHT)
         
         // Draw content at top
@@ -640,15 +648,31 @@ function processCanvasAsImage(
     applyContrast(ctx, width, height, options.contrast)
   }
 
+  if (options.gamma !== 1.0) {
+    applyGamma(ctx, width, height, options.gamma)
+  }
+
   toGrayscale(ctx, width, height)
+
+  const padColor = options.padBlack ? 0 : 255
 
   // Add sideways overview if requested
   if (options.sidewaysOverviews && !options.manhwa) {
     const rotatedOverview = rotateCanvas(canvas, -90)
-    const finalOverview = resizeWithPadding(rotatedOverview)
+    const finalOverview = resizeWithPadding(rotatedOverview, padColor)
     applyDithering(finalOverview.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
     results.push({
-      name: `${String(pageNum).padStart(4, '0')}_0_overview.png`,
+      name: `${String(pageNum).padStart(4, '0')}_0_overview_s.png`,
+      canvas: finalOverview
+    })
+  }
+
+  // Add upright overview if requested
+  if (options.includeOverviews && !options.manhwa) {
+    const finalOverview = resizeWithPadding(canvas, padColor)
+    applyDithering(finalOverview.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
+    results.push({
+      name: `${String(pageNum).padStart(4, '0')}_0_overview_u.png`,
       canvas: finalOverview
     })
   }
@@ -666,7 +690,10 @@ function processCanvasAsImage(
     applyDithering(resizedCanvas.getContext('2d')!, TARGET_WIDTH, newHeight, options.dithering, options.is2bit)
 
     const sliceHeight = TARGET_HEIGHT
-    const overlap = 200 // 25% overlap for seamless context
+    const overlapPercent = options.manhwaOverlap || 50
+    const overlapPixels = Math.floor(TARGET_HEIGHT * (overlapPercent / 100))
+    const sliceStep = TARGET_HEIGHT - overlapPixels
+
     for (let y = 0; y < newHeight; ) {
       let h = Math.min(sliceHeight, newHeight - y)
       
@@ -678,7 +705,7 @@ function processCanvasAsImage(
       }
 
       const sliceCanvas = extractRegion(resizedCanvas, 0, y, TARGET_WIDTH, h)
-      const finalCanvas = resizeWithPadding(sliceCanvas)
+      const finalCanvas = resizeWithPadding(sliceCanvas, padColor)
       // Dithering already applied
       
       results.push({
@@ -687,7 +714,7 @@ function processCanvasAsImage(
       })
       
       if (y + h >= newHeight) break
-      y += (sliceHeight - overlap)
+      y += sliceStep
     }
     return results
   }
@@ -811,16 +838,32 @@ function processLoadedImage(
     applyContrast(ctx, width, height, options.contrast)
   }
 
+  if (options.gamma !== 1.0) {
+    applyGamma(ctx, width, height, options.gamma)
+  }
+
   // Convert to grayscale
   toGrayscale(ctx, width, height)
+
+  const padColor = options.padBlack ? 0 : 255
 
   // Add sideways overview if requested
   if (options.sidewaysOverviews && !options.manhwa) {
     const rotatedOverview = rotateCanvas(canvas, -90)
-    const finalOverview = resizeWithPadding(rotatedOverview)
+    const finalOverview = resizeWithPadding(rotatedOverview, padColor)
     applyDithering(finalOverview.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
     results.push({
-      name: `${String(pageNum).padStart(4, '0')}_0_overview.png`,
+      name: `${String(pageNum).padStart(4, '0')}_0_overview_s.png`,
+      canvas: finalOverview
+    })
+  }
+
+  // Add upright overview if requested
+  if (options.includeOverviews && !options.manhwa) {
+    const finalOverview = resizeWithPadding(canvas, padColor)
+    applyDithering(finalOverview.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
+    results.push({
+      name: `${String(pageNum).padStart(4, '0')}_0_overview_u.png`,
       canvas: finalOverview
     })
   }
@@ -838,7 +881,10 @@ function processLoadedImage(
     applyDithering(resizedCanvas.getContext('2d')!, TARGET_WIDTH, newHeight, options.dithering, options.is2bit)
 
     const sliceHeight = TARGET_HEIGHT
-    const overlap = 200 // 25% overlap for seamless context
+    const overlapPercent = options.manhwaOverlap || 50
+    const overlapPixels = Math.floor(TARGET_HEIGHT * (overlapPercent / 100))
+    const sliceStep = TARGET_HEIGHT - overlapPixels
+
     for (let y = 0; y < newHeight; ) {
       let h = Math.min(sliceHeight, newHeight - y)
       
@@ -850,7 +896,7 @@ function processLoadedImage(
       }
 
       const sliceCanvas = extractRegion(resizedCanvas, 0, y, TARGET_WIDTH, h)
-      const finalCanvas = resizeWithPadding(sliceCanvas)
+      const finalCanvas = resizeWithPadding(sliceCanvas, padColor)
       // Dithering already applied
       
       results.push({
@@ -859,7 +905,7 @@ function processLoadedImage(
       })
       
       if (y + h >= newHeight) break
-      y += (sliceHeight - overlap)
+      y += sliceStep
     }
     return results
   }

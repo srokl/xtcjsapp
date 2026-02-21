@@ -52,12 +52,6 @@ function RootLayout() {
           <Link to="/pdf" className={`nav-tab${location.pathname === '/pdf' ? ' active' : ''}`}>
             PDF
           </Link>
-          <Link to="/merge" className={`nav-tab${location.pathname === '/merge' ? ' active' : ''}`}>
-            Merge / Split
-          </Link>
-          <Link to="/feature4" className={`nav-tab${location.pathname === '/feature4' ? ' active' : ''}`}>
-            Soon
-          </Link>
         </nav>
 
         <Outlet />

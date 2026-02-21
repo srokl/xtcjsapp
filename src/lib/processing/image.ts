@@ -156,3 +156,32 @@ export function isSolidColor(
   // Python script uses < 5.0
   return stdDev < 5.0;
 }
+
+/**
+ * Apply gamma correction to the canvas
+ */
+export function applyGamma(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  gamma: number
+): void {
+  if (gamma === 1.0) return;
+
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const data = imageData.data;
+
+  // Pre-calculate LUT
+  const lut = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) {
+    lut[i] = Math.round(Math.pow(i / 255, gamma) * 255);
+  }
+
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = lut[data[i]];
+    data[i + 1] = lut[data[i + 1]];
+    data[i + 2] = lut[data[i + 2]];
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+}
