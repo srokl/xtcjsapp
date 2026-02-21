@@ -248,40 +248,40 @@ export async function convertCbzToXtc(
     throw new Error('No images found in CBZ')
   }
 
-  // Extract metadata from ComicInfo.xml if present
+  // Extract metadata and generate TOC entries for every page (Python style)
+  const pageTitles = new Map<number, string>()
   let metadata: BookMetadata = { toc: [] }
+  
   if (comicInfoEntry) {
     try {
       const xmlContent = await comicInfoEntry.async('string')
-      metadata = parseComicInfo(xmlContent)
-    } catch {
-      // ComicInfo parsing failed, continue without metadata
-    }
+      const cmMeta = parseComicInfo(xmlContent)
+      cmMeta.toc.forEach(entry => pageTitles.set(entry.startPage, entry.title))
+      if (cmMeta.title) metadata.title = cmMeta.title
+      if (cmMeta.author) metadata.author = cmMeta.author
+    } catch { }
   }
 
-  // If no TOC from ComicInfo, try folder-based chapters (inspired by cbz2xtc.py)
-  if (metadata.toc.length === 0) {
-    const chapters = new Map<string, number>()
-    imageFiles.forEach((file, index) => {
-      const parts = file.path.split('/')
-      if (parts.length > 1) {
-        const folderName = parts[parts.length - 2]
-        if (!chapters.has(folderName)) {
-          chapters.set(folderName, index + 1)
-        }
+  // Also extract titles from folders if not already present
+  imageFiles.forEach((file, index) => {
+    const parts = file.path.split('/')
+    if (parts.length > 1) {
+      const folderName = parts[parts.length - 2]
+      if (!pageTitles.has(index + 1)) {
+        pageTitles.set(index + 1, folderName)
       }
-    })
-
-    if (chapters.size > 1) { // Only create TOC if there's more than one folder (chapter)
-      const chapterList = Array.from(chapters.entries())
-      metadata.toc = chapterList.map(([name, startPage], idx) => {
-        const endPage = idx < chapterList.length - 1 
-          ? chapterList[idx + 1][1] - 1 
-          : imageFiles.length
-        return { title: name, startPage, endPage }
-      })
     }
-  }
+  })
+
+  // Create TOC entry for every original page to match Python logic
+  metadata.toc = imageFiles.map((_, index) => {
+    const pg = index + 1
+    let title = `Page ${pg}`
+    if (pageTitles.has(pg)) {
+      title = `${title} - ${pageTitles.get(pg)}`
+    }
+    return { title, startPage: pg, endPage: pg }
+  })
 
   const processedPages: ProcessedPage[] = []
   const mappingCtx = new PageMappingContext()
@@ -411,39 +411,39 @@ export async function convertCbrToXtc(
     throw new Error('No images found in CBR')
   }
 
-  // Extract metadata from ComicInfo.xml if present
+  // Extract metadata and generate TOC entries for every page (Python style)
+  const pageTitles = new Map<number, string>()
   let metadata: BookMetadata = { toc: [] }
+  
   if (comicInfoContent) {
     try {
-      metadata = parseComicInfo(comicInfoContent)
-    } catch {
-      // ComicInfo parsing failed, continue without metadata
-    }
+      const cmMeta = parseComicInfo(comicInfoContent)
+      cmMeta.toc.forEach(entry => pageTitles.set(entry.startPage, entry.title))
+      if (cmMeta.title) metadata.title = cmMeta.title
+      if (cmMeta.author) metadata.author = cmMeta.author
+    } catch { }
   }
 
-  // If no TOC from ComicInfo, try folder-based chapters
-  if (metadata.toc.length === 0) {
-    const chapters = new Map<string, number>()
-    imageFiles.forEach((file, index) => {
-      const parts = file.path.split(/[\\/]/) // Handle both / and \ for RAR
-      if (parts.length > 1) {
-        const folderName = parts[parts.length - 2]
-        if (!chapters.has(folderName)) {
-          chapters.set(folderName, index + 1)
-        }
+  // Also extract titles from folders if not already present
+  imageFiles.forEach((file, index) => {
+    const parts = file.path.split(/[\\/]/)
+    if (parts.length > 1) {
+      const folderName = parts[parts.length - 2]
+      if (!pageTitles.has(index + 1)) {
+        pageTitles.set(index + 1, folderName)
       }
-    })
-
-    if (chapters.size > 1) {
-      const chapterList = Array.from(chapters.entries())
-      metadata.toc = chapterList.map(([name, startPage], idx) => {
-        const endPage = idx < chapterList.length - 1 
-          ? chapterList[idx + 1][1] - 1 
-          : imageFiles.length
-        return { title: name, startPage, endPage }
-      })
     }
-  }
+  })
+
+  // Create TOC entry for every original page to match Python logic
+  metadata.toc = imageFiles.map((_, index) => {
+    const pg = index + 1
+    let title = `Page ${pg}`
+    if (pageTitles.has(pg)) {
+      title = `${title} - ${pageTitles.get(pg)}`
+    }
+    return { title, startPage: pg, endPage: pg }
+  })
 
   const processedPages: ProcessedPage[] = []
   const mappingCtx = new PageMappingContext()
@@ -526,6 +526,19 @@ async function convertPdfToXtc(
     metadata = await extractPdfMetadata(pdf)
   } catch {
     // Metadata extraction failed, continue without it
+  }
+
+  // Generate TOC entries for every page to match Python logic
+  const pageTitles = new Map<number, string>()
+  metadata.toc.forEach(entry => pageTitles.set(entry.startPage, entry.title))
+
+  metadata.toc = []
+  for (let i = 1; i <= numPages; i++) {
+    let title = `Page ${i}`
+    if (pageTitles.has(i)) {
+      title = `${title} - ${pageTitles.get(i)}`
+    }
+    metadata.toc.push({ title, startPage: i, endPage: i })
   }
 
   const processedPages: ProcessedPage[] = []
