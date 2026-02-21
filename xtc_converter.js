@@ -319,7 +319,7 @@ Example:
           const newH = Math.floor(meta.height * scale);
           
           let pipeline = image.resize(TARGET_WIDTH, newH).grayscale();
-          if (gamma !== 1.0) pipeline = pipeline.gamma(gamma);
+          if (gamma !== 1.0 && is2bit) pipeline = pipeline.gamma(gamma);
           
           const { data } = await pipeline.raw().toBuffer({ resolveWithObject: true });
           
@@ -499,7 +499,7 @@ async function processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, 
        .rotate(90)
        .resize(TARGET_WIDTH, TARGET_HEIGHT, { fit: 'contain', background: bg })
        .grayscale();
-     if (gamma !== 1.0) ovPipeline = ovPipeline.gamma(gamma);
+     if (gamma !== 1.0 && is2bit) ovPipeline = ovPipeline.gamma(gamma);
      const { data: ovData } = await ovPipeline.raw().toBuffer({ resolveWithObject: true });
      const ovPixels = new Uint8ClampedArray(ovData);
      if (ditherAlgo === 'atkinson') ditherAtkinson(ovPixels, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
@@ -514,7 +514,7 @@ async function processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, 
     })
     .grayscale();
 
-  if (gamma !== 1.0) pipeline = pipeline.gamma(gamma);
+  if (gamma !== 1.0 && is2bit) pipeline = pipeline.gamma(gamma);
 
   const { data, info } = await pipeline.raw().toBuffer({ resolveWithObject: true });
   const pixels = new Uint8ClampedArray(data);

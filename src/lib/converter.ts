@@ -533,7 +533,7 @@ function processCanvasAsImage(
     applyContrast(ctx, width, height, options.contrast)
   }
 
-  if (options.gamma !== 1.0) {
+  if (options.gamma !== 1.0 && options.is2bit) {
     applyGamma(ctx, width, height, options.gamma)
   }
 
@@ -739,7 +739,7 @@ function processLoadedImage(
     applyContrast(ctx, width, height, options.contrast)
   }
 
-  if (options.gamma !== 1.0) {
+  if (options.gamma !== 1.0 && options.is2bit) {
     applyGamma(ctx, width, height, options.gamma)
   }
 

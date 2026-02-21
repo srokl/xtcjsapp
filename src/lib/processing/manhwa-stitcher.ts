@@ -26,7 +26,7 @@ export class ManhwaStitcher {
     if (this.options.contrast > 0) {
        applyContrast(tempCtx, TARGET_WIDTH, newHeight, this.options.contrast)
     }
-    if (this.options.gamma !== 1.0) {
+    if (this.options.gamma !== 1.0 && this.options.is2bit) {
        applyGamma(tempCtx, TARGET_WIDTH, newHeight, this.options.gamma)
     }
     toGrayscale(tempCtx, TARGET_WIDTH, newHeight)
