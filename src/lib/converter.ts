@@ -4,7 +4,6 @@ import JSZip from 'jszip'
 import { createExtractorFromData } from 'node-unrar-js'
 import unrarWasm from 'node-unrar-js/esm/js/unrar.wasm?url'
 import * as pdfjsLib from 'pdfjs-dist'
-import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { applyDithering } from './processing/dithering'
 import { toGrayscale, applyContrast, calculateOverlapSegments, isSolidColor, applyGamma } from './processing/image'
 import { rotateCanvas, extractAndRotate, extractRegion, resizeWithPadding, TARGET_WIDTH, TARGET_HEIGHT } from './processing/canvas'
@@ -14,8 +13,8 @@ import { parseComicInfo } from './metadata/comicinfo'
 import { PageMappingContext, adjustTocForMapping } from './page-mapping'
 import type { BookMetadata } from './metadata/types'
 
-// Set up PDF.js worker from bundled asset
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
+// Set up PDF.js worker from CDN to avoid build asset path issues
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@5.4.624/build/pdf.worker.min.mjs'
 
 import { ManhwaStitcher } from './processing/manhwa-stitcher'
 import type { ConversionOptions, ConversionResult, ProcessedPage, CropRect } from './types'
