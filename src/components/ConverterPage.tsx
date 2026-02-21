@@ -89,6 +89,7 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
   const handleConvert = useCallback(async () => {
     if (selectedFiles.length === 0) return
 
+    console.log('[Converter] Starting conversion batch', { files: selectedFiles.length, options })
     setIsConverting(true)
     await clearSession() // Clear previous session results
     setProgress(0)
@@ -97,23 +98,27 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
 
     for (let i = 0; i < selectedFiles.length; i++) {
       const file = selectedFiles[i]
+      console.log(`[Converter] Processing file ${i + 1}/${selectedFiles.length}:`, file.name)
       setProgressText(file.name)
       setProgress(i / selectedFiles.length)
 
       try {
         // Determine actual file type (cbz vs cbr)
         const actualFileType = file.name.toLowerCase().endsWith('.cbr') ? 'cbr' : fileType
+        console.log(`[Converter] Calling convertToXtc for ${file.name} as ${actualFileType}`)
         const result = await convertToXtc(file, actualFileType, options, (pageProgress, preview) => {
+          // console.log(`[Converter] Progress for ${file.name}: ${pageProgress}`) // Verbose
           setProgress((i + pageProgress) / selectedFiles.length)
           if (preview) setPreviewUrl(preview)
         })
+        console.log(`[Converter] Result for ${file.name}:`, result)
 
         // Store result immediately - progressive display
         await addResult(result)
 
         recordConversion(fileType).catch(() => {})
       } catch (err) {
-        console.error(`Error converting ${file.name}:`, err)
+        console.error(`[Converter] Error converting ${file.name}:`, err)
         // Store error result
         await addResult({
           name: file.name.replace(/\.(cbz|cbr|pdf)$/i, '.xtc'),

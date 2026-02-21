@@ -344,15 +344,19 @@ async function convertPdfToXtc(
   options: ConversionOptions,
   onProgress: (progress: number, previewUrl: string | null) => void
 ): Promise<ConversionResult> {
+  console.log('[PDF] convertPdfToXtc started', { options })
   const arrayBuffer = await file.arrayBuffer()
+  console.log('[PDF] Loading document...')
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+  console.log('[PDF] Document loaded, pages:', pdf.numPages)
 
   // Extract metadata (title, author, TOC) from PDF
   let metadata: BookMetadata = { toc: [] }
   try {
     metadata = await extractPdfMetadata(pdf)
-  } catch {
-    // Metadata extraction failed, continue without it
+    console.log('[PDF] Metadata extracted')
+  } catch (e) {
+    console.warn('[PDF] Metadata extraction failed', e)
   }
 
   // Generate TOC entries for every page to match Python logic
@@ -378,6 +382,7 @@ async function convertPdfToXtc(
   }
 
   for (let i = 1; i <= numPages; i++) {
+    console.log(`[PDF] Processing page ${i}/${numPages}`)
     const page = await pdf.getPage(i)
     const scale = 2.0 // Render at 2x for better quality
     const viewport = page.getViewport({ scale })
@@ -395,10 +400,18 @@ async function convertPdfToXtc(
     let pages: ProcessedPage[] = []
     
     if (stitcher) {
+        console.log('[PDF] Stitching...')
         pages = await stitcher.append(canvas)
     } else {
-        pages = processCanvasAsImage(canvas, i, options)
+        console.log('[PDF] Processing as image...')
+        try {
+          pages = processCanvasAsImage(canvas, i, options)
+        } catch (e) {
+          console.error(`[PDF] processCanvasAsImage failed for page ${i}`, e)
+          throw e
+        }
     }
+    console.log(`[PDF] Page ${i} processed, generated ${pages.length} XTC pages`)
     
     processedPages.push(...pages)
 
@@ -444,11 +457,13 @@ function processCanvasAsImage(
   pageNum: number,
   options: ConversionOptions
 ): ProcessedPage[] {
+  console.log('[Image] processCanvasAsImage', { pageNum, options })
   const results: ProcessedPage[] = []
   const canvas = document.createElement('canvas')
   const ctx = canvas.getContext('2d')!
   const padColor = options.padBlack ? 0 : 255
 
+  console.log('[Image] Calculating crop')
   const crop = getAxisCropRect(sourceCanvas.width, sourceCanvas.height, options)
   canvas.width = crop.width
   canvas.height = crop.height
