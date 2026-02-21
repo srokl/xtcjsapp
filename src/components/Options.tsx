@@ -32,6 +32,18 @@ export function Options({ options, onChange }: OptionsProps) {
         </label>
       </div>
 
+      <div className="option checkbox-option">
+        <label htmlFor="sidewaysOverviews">
+          <input
+            type="checkbox"
+            id="sidewaysOverviews"
+            checked={options.sidewaysOverviews}
+            onChange={(e) => onChange({ ...options, sidewaysOverviews: e.target.checked })}
+          />
+          Include Sideways Overviews
+        </label>
+      </div>
+
       {options.manhwa && (
         <div className="option">
           <label htmlFor="manhwaOverlap">Manhwa Overlap</label>

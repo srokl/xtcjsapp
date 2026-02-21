@@ -71,6 +71,7 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
     is2bit: false,
     manhwa: false,
     manhwaOverlap: 50,
+    sidewaysOverviews: false,
   })
 
   const handleFiles = useCallback((files: File[]) => {

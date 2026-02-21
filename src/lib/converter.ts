@@ -27,6 +27,7 @@ export interface ConversionOptions {
   is2bit: boolean
   manhwa: boolean
   manhwaOverlap: number
+  sidewaysOverviews: boolean
 }
 
 export interface ConversionResult {
@@ -641,6 +642,17 @@ function processCanvasAsImage(
 
   toGrayscale(ctx, width, height)
 
+  // Add sideways overview if requested
+  if (options.sidewaysOverviews && !options.manhwa) {
+    const rotatedOverview = rotateCanvas(canvas, -90)
+    const finalOverview = resizeWithPadding(rotatedOverview)
+    applyDithering(finalOverview.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
+    results.push({
+      name: `${String(pageNum).padStart(4, '0')}_0_overview.png`,
+      canvas: finalOverview
+    })
+  }
+
   // Manhwa Mode
   if (options.manhwa) {
     const scale = TARGET_WIDTH / width
@@ -801,6 +813,17 @@ function processLoadedImage(
 
   // Convert to grayscale
   toGrayscale(ctx, width, height)
+
+  // Add sideways overview if requested
+  if (options.sidewaysOverviews && !options.manhwa) {
+    const rotatedOverview = rotateCanvas(canvas, -90)
+    const finalOverview = resizeWithPadding(rotatedOverview)
+    applyDithering(finalOverview.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
+    results.push({
+      name: `${String(pageNum).padStart(4, '0')}_0_overview.png`,
+      canvas: finalOverview
+    })
+  }
 
   // Manhwa Mode
   if (options.manhwa) {
