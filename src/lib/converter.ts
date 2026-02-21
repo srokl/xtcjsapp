@@ -8,6 +8,16 @@ import { applyDithering } from './processing/dithering'
 import { toGrayscale, applyContrast, calculateOverlapSegments, isSolidColor, applyGamma, applyInvert } from './processing/image'
 import { rotateCanvas, extractAndRotate, extractRegion, resizeWithPadding, resizeFill, resizeCover, resizeCrop, TARGET_WIDTH, TARGET_HEIGHT } from './processing/canvas'
 import { buildXtc, imageDataToXth, imageDataToXtg } from './xtc-format'
+
+function getOrientationAngle(orientation: string): number {
+  switch (orientation) {
+    case 'landscape': return 90
+    case 'landscape-flipped': return -90
+    case 'portrait-flipped': return 180
+    case 'portrait':
+    default: return 0
+  }
+}
 import { extractPdfMetadata } from './metadata/pdf-outline'
 import { parseComicInfo } from './metadata/comicinfo'
 import type { BookMetadata } from './metadata/types'
@@ -559,8 +569,9 @@ async function convertVideoToXtc(
     let height = frameCanvas.height
     let canvas = frameCanvas
 
-    if (options.orientation === 'landscape' && width >= height) {
-      canvas = rotateCanvas(frameCanvas, 90)
+    const angle = getOrientationAngle(options.orientation)
+    if (angle !== 0 && (angle === 180 || width >= height)) {
+      canvas = rotateCanvas(frameCanvas, angle)
       width = canvas.width
       height = canvas.height
     }
@@ -762,9 +773,11 @@ function processCanvasAsImage(
     return results
   }
 
-  // Portrait mode: no rotation, 1 page = 1 page on e-reader
-  if (options.orientation === 'portrait') {
-    const finalCanvas = resizeWithPadding(canvas, padColor)
+  // Portrait mode: 0 or 180 degrees
+  if (options.orientation === 'portrait' || options.orientation === 'portrait-flipped') {
+    const angle = getOrientationAngle(options.orientation)
+    const rotated = angle === 0 ? canvas : rotateCanvas(canvas, angle)
+    const finalCanvas = resizeWithPadding(rotated, padColor)
     applyDithering(finalCanvas.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 
     results.push({
@@ -775,6 +788,7 @@ function processCanvasAsImage(
   }
 
   // Landscape mode: rotate and optionally split
+  const angle = getOrientationAngle(options.orientation)
   const shouldSplit = width < height && options.splitMode !== 'nosplit'
 
   if (shouldSplit) {
@@ -787,7 +801,7 @@ function processCanvasAsImage(
 
       segments.forEach((seg, idx) => {
         const letter = String.fromCharCode(97 + idx)
-        const pageCanvas = extractAndRotate(canvas, seg.x, seg.y, seg.w, seg.h)
+        const pageCanvas = extractAndRotate(canvas, seg.x, seg.y, seg.w, seg.h, angle)
         const finalCanvas = resizeWithPadding(pageCanvas, padColor)
         applyDithering(finalCanvas.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 
@@ -799,11 +813,11 @@ function processCanvasAsImage(
     } else {
       const halfHeight = Math.floor(height / 2)
 
-      const topCanvas = extractAndRotate(canvas, 0, 0, width, halfHeight)
+      const topCanvas = extractAndRotate(canvas, 0, 0, width, halfHeight, angle)
       const topFinal = resizeWithPadding(topCanvas, padColor)
       applyDithering(topFinal.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 
-      const bottomCanvas = extractAndRotate(canvas, 0, halfHeight, width, halfHeight)
+      const bottomCanvas = extractAndRotate(canvas, 0, halfHeight, width, halfHeight, angle)
       const bottomFinal = resizeWithPadding(bottomCanvas, padColor)
       applyDithering(bottomFinal.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 
@@ -828,7 +842,7 @@ function processCanvasAsImage(
       }
     }
   } else {
-    const rotatedCanvas = rotateCanvas(canvas, 90)
+    const rotatedCanvas = rotateCanvas(canvas, angle)
     const finalCanvas = resizeWithPadding(rotatedCanvas, padColor)
     applyDithering(finalCanvas.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 
@@ -916,8 +930,9 @@ function processLoadedImage(
 
   if (isSingleImage && options.is2bit) {
     let processingCanvas = canvas
-    if (options.orientation === 'landscape') {
-      processingCanvas = rotateCanvas(canvas, 90)
+    const angle = getOrientationAngle(options.orientation)
+    if (angle !== 0) {
+      processingCanvas = rotateCanvas(canvas, angle)
     }
 
     let finalCanvas: HTMLCanvasElement
@@ -1008,9 +1023,11 @@ function processLoadedImage(
     return results
   }
 
-  // Portrait mode: no rotation, 1 page = 1 page on e-reader
-  if (options.orientation === 'portrait') {
-    const finalCanvas = resizeWithPadding(canvas, padColor)
+  // Portrait mode: 0 or 180 degrees
+  if (options.orientation === 'portrait' || options.orientation === 'portrait-flipped') {
+    const angle = getOrientationAngle(options.orientation)
+    const rotated = angle === 0 ? canvas : rotateCanvas(canvas, angle)
+    const finalCanvas = resizeWithPadding(rotated, padColor)
     applyDithering(finalCanvas.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 
     results.push({
@@ -1021,6 +1038,7 @@ function processLoadedImage(
   }
 
   // Landscape mode: rotate and optionally split
+  const angle = getOrientationAngle(options.orientation)
   const shouldSplit = width < height && options.splitMode !== 'nosplit'
 
   if (shouldSplit) {
@@ -1033,7 +1051,7 @@ function processLoadedImage(
 
       segments.forEach((seg, idx) => {
         const letter = String.fromCharCode(97 + idx)
-        const pageCanvas = extractAndRotate(canvas, seg.x, seg.y, seg.w, seg.h)
+        const pageCanvas = extractAndRotate(canvas, seg.x, seg.y, seg.w, seg.h, angle)
         const finalCanvas = resizeWithPadding(pageCanvas, padColor)
         applyDithering(finalCanvas.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 
@@ -1045,11 +1063,11 @@ function processLoadedImage(
     } else {
       const halfHeight = Math.floor(height / 2)
 
-      const topCanvas = extractAndRotate(canvas, 0, 0, width, halfHeight)
+      const topCanvas = extractAndRotate(canvas, 0, 0, width, halfHeight, angle)
       const topFinal = resizeWithPadding(topCanvas, padColor)
       applyDithering(topFinal.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 
-      const bottomCanvas = extractAndRotate(canvas, 0, halfHeight, width, halfHeight)
+      const bottomCanvas = extractAndRotate(canvas, 0, halfHeight, width, halfHeight, angle)
       const bottomFinal = resizeWithPadding(bottomCanvas, padColor)
       applyDithering(bottomFinal.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 
@@ -1074,7 +1092,7 @@ function processLoadedImage(
       }
     }
   } else {
-    const rotatedCanvas = rotateCanvas(canvas, 90)
+    const rotatedCanvas = rotateCanvas(canvas, angle)
     const finalCanvas = resizeWithPadding(rotatedCanvas, padColor)
     applyDithering(finalCanvas.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 

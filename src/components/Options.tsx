@@ -206,11 +206,13 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
         <select
           id="orientation"
           value={options.orientation}
-          onChange={(e) => onChange({ ...options, orientation: e.target.value as 'landscape' | 'portrait' })}
+          onChange={(e) => onChange({ ...options, orientation: e.target.value as any })}
           disabled={options.manhwa}
         >
-          <option value="landscape">Landscape</option>
-          <option value="portrait">Portrait</option>
+          <option value="landscape">Landscape (90°)</option>
+          <option value="landscape-flipped">Landscape Flipped (-90°)</option>
+          <option value="portrait">Portrait (0°)</option>
+          <option value="portrait-flipped">Portrait Flipped (180°)</option>
         </select>
       </div>
 

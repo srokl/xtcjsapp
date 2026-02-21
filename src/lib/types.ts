@@ -4,7 +4,7 @@ export interface ConversionOptions {
   contrast: number
   horizontalMargin: number
   verticalMargin: number
-  orientation: 'landscape' | 'portrait'
+  orientation: 'landscape' | 'portrait' | 'landscape-flipped' | 'portrait-flipped'
   is2bit: boolean
   manhwa: boolean
   manhwaOverlap: number
