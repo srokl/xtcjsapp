@@ -40,7 +40,7 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
                 checked={options.is2bit}
                 onChange={(e) => onChange({ ...options, is2bit: e.target.checked })}
               />
-              2-bit (High Quality XTCH)
+              2-bit (High Quality XTCH) (not recommended)
             </label>
           </div>
         </>
@@ -74,7 +74,7 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
                 checked={options.is2bit}
                 onChange={(e) => onChange({ ...options, is2bit: e.target.checked })}
               />
-              2-bit (High Quality XTCH)
+              2-bit (High Quality XTCH) (not recommended)
             </label>
           </div>
         </>
@@ -88,7 +88,7 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
                 checked={options.is2bit}
                 onChange={(e) => onChange({ ...options, is2bit: e.target.checked })}
               />
-              2-bit (High Quality XTCH)
+              2-bit (High Quality XTCH) (not recommended)
             </label>
           </div>
 
@@ -201,7 +201,7 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
         </div>
       )}
 
-      {!isImageMode && !isVideoMode && (
+      {!isImageMode && (
         <div className="option">
           <label htmlFor="orientation">Orientation</label>
           <select

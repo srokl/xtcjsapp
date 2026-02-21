@@ -18,7 +18,7 @@ export class ManhwaStitcher {
     const tempCanvas = document.createElement('canvas')
     tempCanvas.width = TARGET_WIDTH
     tempCanvas.height = newHeight
-    const tempCtx = tempCanvas.getContext('2d')!
+    const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true })!
     
     // Draw and apply pre-processing
     tempCtx.drawImage(source, 0, 0, source.width, source.height, 0, 0, TARGET_WIDTH, newHeight)
@@ -42,7 +42,7 @@ export class ManhwaStitcher {
       const combinedCanvas = document.createElement('canvas')
       combinedCanvas.width = TARGET_WIDTH
       combinedCanvas.height = combinedHeight
-      const combinedCtx = combinedCanvas.getContext('2d')!
+      const combinedCtx = combinedCanvas.getContext('2d', { willReadFrequently: true })!
       
       combinedCtx.drawImage(this.buffer, 0, 0)
       combinedCtx.drawImage(tempCanvas, 0, this.buffer.height)
@@ -54,7 +54,7 @@ export class ManhwaStitcher {
     while (this.buffer && this.buffer.height >= TARGET_HEIGHT) {
        // Extract top page
        const slice = extractRegion(this.buffer, 0, 0, TARGET_WIDTH, TARGET_HEIGHT)
-       const sliceCtx = slice.getContext('2d')!
+       const sliceCtx = slice.getContext('2d', { willReadFrequently: true })!
        
        // Check if solid color (blank/filler)
        const isSolid = isSolidColor(sliceCtx, 0, 0, TARGET_WIDTH, TARGET_HEIGHT)
@@ -86,7 +86,7 @@ export class ManhwaStitcher {
        const newBuffer = document.createElement('canvas')
        newBuffer.width = TARGET_WIDTH
        newBuffer.height = remainingHeight
-       newBuffer.getContext('2d')!.drawImage(this.buffer, 0, step, TARGET_WIDTH, remainingHeight, 0, 0, TARGET_WIDTH, remainingHeight)
+       newBuffer.getContext('2d', { willReadFrequently: true })!.drawImage(this.buffer, 0, step, TARGET_WIDTH, remainingHeight, 0, 0, TARGET_WIDTH, remainingHeight)
        
        this.buffer = newBuffer
     }
@@ -102,7 +102,7 @@ export class ManhwaStitcher {
         const final = document.createElement('canvas')
         final.width = TARGET_WIDTH
         final.height = TARGET_HEIGHT
-        const ctx = final.getContext('2d')!
+        const ctx = final.getContext('2d', { willReadFrequently: true })!
         
         // Fill with padding color
         const padColor = this.options.padBlack ? 'black' : 'white'

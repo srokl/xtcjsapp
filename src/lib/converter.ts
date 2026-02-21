@@ -519,7 +519,7 @@ async function convertImageToXtc(
   if (pages.length === 0) throw new Error('Failed to process image')
 
   const page = pages[0]
-  const imageData = page.canvas.getContext('2d')!.getImageData(0, 0, TARGET_WIDTH, TARGET_HEIGHT)
+  const imageData = page.canvas.getContext('2d', { willReadFrequently: true })!.getImageData(0, 0, TARGET_WIDTH, TARGET_HEIGHT)
   
   // Produce standalone format (XTH/XTG) instead of XTC container for single images
   const xtcData = options.is2bit ? imageDataToXth(imageData) : imageDataToXtg(imageData)
@@ -559,15 +559,15 @@ async function convertVideoToXtc(
     let height = frameCanvas.height
     let canvas = frameCanvas
 
-    if (width >= height) {
-      canvas = rotateCanvas(frameCanvas, -90)
+    if (options.orientation === 'landscape' && width >= height) {
+      canvas = rotateCanvas(frameCanvas, 90)
       width = canvas.width
       height = canvas.height
     }
 
     // Process like a normal image but with black background default for video
     const finalCanvas = resizeWithPadding(canvas, 0) // Black background
-    const ctx = finalCanvas.getContext('2d')!
+    const ctx = finalCanvas.getContext('2d', { willReadFrequently: true })!
 
     if (options.contrast > 0) {
       applyContrast(ctx, TARGET_WIDTH, TARGET_HEIGHT, options.contrast)
@@ -626,7 +626,7 @@ async function extractFramesFromVideo(file: File, fps: number): Promise<HTMLCanv
       const canvas = document.createElement('canvas')
       canvas.width = video.videoWidth
       canvas.height = video.videoHeight
-      const ctx = canvas.getContext('2d')!
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })!
 
       for (let i = 0; i < frameCount; i++) {
         const time = i / fps
@@ -638,7 +638,7 @@ async function extractFramesFromVideo(file: File, fps: number): Promise<HTMLCanv
             const frameCopy = document.createElement('canvas')
             frameCopy.width = canvas.width
             frameCopy.height = canvas.height
-            frameCopy.getContext('2d')!.drawImage(canvas, 0, 0)
+            frameCopy.getContext('2d', { willReadFrequently: true })!.drawImage(canvas, 0, 0)
             frames.push(frameCopy)
             r(null)
           }
@@ -651,7 +651,7 @@ async function extractFramesFromVideo(file: File, fps: number): Promise<HTMLCanv
 
     video.onerror = (e) => {
       URL.revokeObjectURL(url)
-      reject(new Error('Failed to load video'))
+      reject(new Error('Failed to load video. This format or codec might not be supported by your browser (try .mp4 or .webm).'))
     }
   })
 }
@@ -667,7 +667,7 @@ function processCanvasAsImage(
   console.log('[Image] processCanvasAsImage', { pageNum, options })
   const results: ProcessedPage[] = []
   const canvas = document.createElement('canvas')
-  const ctx = canvas.getContext('2d')!
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!
   const padColor = options.padBlack ? 0 : 255
 
   console.log('[Image] Calculating crop')
@@ -703,7 +703,7 @@ function processCanvasAsImage(
   if (options.sidewaysOverviews && !options.manhwa) {
     const rotatedOverview = rotateCanvas(canvas, 90)
     const finalOverview = resizeWithPadding(rotatedOverview, padColor)
-    applyDithering(finalOverview.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
+    applyDithering(finalOverview.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
     results.push({
       name: `${String(pageNum).padStart(4, '0')}_0_overview_s.png`,
       canvas: finalOverview
@@ -713,7 +713,7 @@ function processCanvasAsImage(
   // Add upright overview if requested
   if (options.includeOverviews && !options.manhwa) {
     const finalOverview = resizeWithPadding(canvas, padColor)
-    applyDithering(finalOverview.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
+    applyDithering(finalOverview.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
     results.push({
       name: `${String(pageNum).padStart(4, '0')}_0_overview_u.png`,
       canvas: finalOverview
@@ -727,10 +727,10 @@ function processCanvasAsImage(
     const resizedCanvas = document.createElement('canvas')
     resizedCanvas.width = TARGET_WIDTH
     resizedCanvas.height = newHeight
-    resizedCanvas.getContext('2d')!.drawImage(canvas, 0, 0, width, height, 0, 0, TARGET_WIDTH, newHeight)
+    resizedCanvas.getContext('2d', { willReadFrequently: true })!.drawImage(canvas, 0, 0, width, height, 0, 0, TARGET_WIDTH, newHeight)
     
     // Dither the entire strip first to ensure seamless pixel continuity across page boundaries
-    applyDithering(resizedCanvas.getContext('2d')!, TARGET_WIDTH, newHeight, options.dithering, options.is2bit)
+    applyDithering(resizedCanvas.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, newHeight, options.dithering, options.is2bit)
 
     const sliceHeight = TARGET_HEIGHT
     const overlapPercent = options.manhwaOverlap || 50
@@ -765,7 +765,7 @@ function processCanvasAsImage(
   // Portrait mode: no rotation, 1 page = 1 page on e-reader
   if (options.orientation === 'portrait') {
     const finalCanvas = resizeWithPadding(canvas, padColor)
-    applyDithering(finalCanvas.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
+    applyDithering(finalCanvas.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 
     results.push({
       name: `${String(pageNum).padStart(4, '0')}_0_page.png`,
@@ -789,7 +789,7 @@ function processCanvasAsImage(
         const letter = String.fromCharCode(97 + idx)
         const pageCanvas = extractAndRotate(canvas, seg.x, seg.y, seg.w, seg.h)
         const finalCanvas = resizeWithPadding(pageCanvas, padColor)
-        applyDithering(finalCanvas.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
+        applyDithering(finalCanvas.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 
         results.push({
           name: `${String(pageNum).padStart(4, '0')}_3_${letter}.png`,
@@ -801,11 +801,11 @@ function processCanvasAsImage(
 
       const topCanvas = extractAndRotate(canvas, 0, 0, width, halfHeight)
       const topFinal = resizeWithPadding(topCanvas, padColor)
-      applyDithering(topFinal.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
+      applyDithering(topFinal.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 
       const bottomCanvas = extractAndRotate(canvas, 0, halfHeight, width, halfHeight)
       const bottomFinal = resizeWithPadding(bottomCanvas, padColor)
-      applyDithering(bottomFinal.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
+      applyDithering(bottomFinal.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 
       if (options.landscapeRtl) {
         results.push({
@@ -830,7 +830,7 @@ function processCanvasAsImage(
   } else {
     const rotatedCanvas = rotateCanvas(canvas, 90)
     const finalCanvas = resizeWithPadding(rotatedCanvas, padColor)
-    applyDithering(finalCanvas.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
+    applyDithering(finalCanvas.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 
     results.push({
       name: `${String(pageNum).padStart(4, '0')}_0_spread.png`,
@@ -877,7 +877,7 @@ function processLoadedImage(
 ): ProcessedPage[] {
   const results: ProcessedPage[] = []
   const canvas = document.createElement('canvas')
-  const ctx = canvas.getContext('2d')!
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!
   const padColor = options.padBlack ? 0 : 255
 
   const crop = getAxisCropRect(img.width, img.height, options)
@@ -932,7 +932,7 @@ function processLoadedImage(
         break
     }
 
-    applyDithering(finalCanvas.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
+    applyDithering(finalCanvas.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
     
     return [{
       name: `${String(pageNum).padStart(4, '0')}_image.png`,
@@ -944,7 +944,7 @@ function processLoadedImage(
   if (options.sidewaysOverviews && !options.manhwa) {
     const rotatedOverview = rotateCanvas(canvas, 90)
     const finalOverview = resizeWithPadding(rotatedOverview, padColor)
-    applyDithering(finalOverview.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
+    applyDithering(finalOverview.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
     results.push({
       name: `${String(pageNum).padStart(4, '0')}_0_overview_s.png`,
       canvas: finalOverview
@@ -954,7 +954,7 @@ function processLoadedImage(
   // Add upright overview if requested
   if (options.includeOverviews && !options.manhwa) {
     const finalOverview = resizeWithPadding(canvas, padColor)
-    applyDithering(finalOverview.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
+    applyDithering(finalOverview.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
     results.push({
       name: `${String(pageNum).padStart(4, '0')}_0_overview_u.png`,
       canvas: finalOverview
@@ -968,10 +968,10 @@ function processLoadedImage(
     const resizedCanvas = document.createElement('canvas')
     resizedCanvas.width = TARGET_WIDTH
     resizedCanvas.height = newHeight
-    resizedCanvas.getContext('2d')!.drawImage(canvas, 0, 0, width, height, 0, 0, TARGET_WIDTH, newHeight)
+    resizedCanvas.getContext('2d', { willReadFrequently: true })!.drawImage(canvas, 0, 0, width, height, 0, 0, TARGET_WIDTH, newHeight)
     
     // Dither the entire strip first to ensure seamless pixel continuity across page boundaries
-    applyDithering(resizedCanvas.getContext('2d')!, TARGET_WIDTH, newHeight, options.dithering, options.is2bit)
+    applyDithering(resizedCanvas.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, newHeight, options.dithering, options.is2bit)
 
     const sliceHeight = TARGET_HEIGHT
     const overlapPercent = options.manhwaOverlap || 50
@@ -1006,7 +1006,7 @@ function processLoadedImage(
   // Portrait mode: no rotation, 1 page = 1 page on e-reader
   if (options.orientation === 'portrait') {
     const finalCanvas = resizeWithPadding(canvas, padColor)
-    applyDithering(finalCanvas.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
+    applyDithering(finalCanvas.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 
     results.push({
       name: `${String(pageNum).padStart(4, '0')}_0_page.png`,
@@ -1030,7 +1030,7 @@ function processLoadedImage(
         const letter = String.fromCharCode(97 + idx)
         const pageCanvas = extractAndRotate(canvas, seg.x, seg.y, seg.w, seg.h)
         const finalCanvas = resizeWithPadding(pageCanvas, padColor)
-        applyDithering(finalCanvas.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
+        applyDithering(finalCanvas.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 
         results.push({
           name: `${String(pageNum).padStart(4, '0')}_3_${letter}.png`,
@@ -1042,11 +1042,11 @@ function processLoadedImage(
 
       const topCanvas = extractAndRotate(canvas, 0, 0, width, halfHeight)
       const topFinal = resizeWithPadding(topCanvas, padColor)
-      applyDithering(topFinal.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
+      applyDithering(topFinal.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 
       const bottomCanvas = extractAndRotate(canvas, 0, halfHeight, width, halfHeight)
       const bottomFinal = resizeWithPadding(bottomCanvas, padColor)
-      applyDithering(bottomFinal.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
+      applyDithering(bottomFinal.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 
       if (options.landscapeRtl) {
         results.push({
@@ -1071,7 +1071,7 @@ function processLoadedImage(
   } else {
     const rotatedCanvas = rotateCanvas(canvas, 90)
     const finalCanvas = resizeWithPadding(rotatedCanvas, padColor)
-    applyDithering(finalCanvas.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
+    applyDithering(finalCanvas.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 
     results.push({
       name: `${String(pageNum).padStart(4, '0')}_0_spread.png`,
