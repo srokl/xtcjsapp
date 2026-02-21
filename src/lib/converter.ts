@@ -569,7 +569,7 @@ function processCanvasAsImage(
 
   // Portrait mode: no rotation, 1 page = 1 page on e-reader
   if (options.orientation === 'portrait') {
-    const finalCanvas = resizeWithPadding(canvas)
+    const finalCanvas = resizeWithPadding(canvas, padColor)
     applyDithering(finalCanvas.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 
     results.push({
@@ -585,10 +585,15 @@ function processCanvasAsImage(
   if (shouldSplit) {
     if (options.splitMode === 'overlap') {
       const segments = calculateOverlapSegments(width, height)
+      
+      if (options.landscapeRtl) {
+        segments.reverse()
+      }
+
       segments.forEach((seg, idx) => {
         const letter = String.fromCharCode(97 + idx)
         const pageCanvas = extractAndRotate(canvas, seg.x, seg.y, seg.w, seg.h)
-        const finalCanvas = resizeWithPadding(pageCanvas)
+        const finalCanvas = resizeWithPadding(pageCanvas, padColor)
         applyDithering(finalCanvas.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 
         results.push({
@@ -600,24 +605,36 @@ function processCanvasAsImage(
       const halfHeight = Math.floor(height / 2)
 
       const topCanvas = extractAndRotate(canvas, 0, 0, width, halfHeight)
-      const topFinal = resizeWithPadding(topCanvas)
+      const topFinal = resizeWithPadding(topCanvas, padColor)
       applyDithering(topFinal.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
-      results.push({
-        name: `${String(pageNum).padStart(4, '0')}_2_a.png`,
-        canvas: topFinal
-      })
 
       const bottomCanvas = extractAndRotate(canvas, 0, halfHeight, width, halfHeight)
-      const bottomFinal = resizeWithPadding(bottomCanvas)
+      const bottomFinal = resizeWithPadding(bottomCanvas, padColor)
       applyDithering(bottomFinal.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
-      results.push({
-        name: `${String(pageNum).padStart(4, '0')}_2_b.png`,
-        canvas: bottomFinal
-      })
+
+      if (options.landscapeRtl) {
+        results.push({
+          name: `${String(pageNum).padStart(4, '0')}_2_a.png`,
+          canvas: bottomFinal
+        })
+        results.push({
+          name: `${String(pageNum).padStart(4, '0')}_2_b.png`,
+          canvas: topFinal
+        })
+      } else {
+        results.push({
+          name: `${String(pageNum).padStart(4, '0')}_2_a.png`,
+          canvas: topFinal
+        })
+        results.push({
+          name: `${String(pageNum).padStart(4, '0')}_2_b.png`,
+          canvas: bottomFinal
+        })
+      }
     }
   } else {
     const rotatedCanvas = rotateCanvas(canvas, 90)
-    const finalCanvas = resizeWithPadding(rotatedCanvas)
+    const finalCanvas = resizeWithPadding(rotatedCanvas, padColor)
     applyDithering(finalCanvas.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 
     results.push({
@@ -759,7 +776,7 @@ function processLoadedImage(
 
   // Portrait mode: no rotation, 1 page = 1 page on e-reader
   if (options.orientation === 'portrait') {
-    const finalCanvas = resizeWithPadding(canvas)
+    const finalCanvas = resizeWithPadding(canvas, padColor)
     applyDithering(finalCanvas.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 
     results.push({
@@ -775,10 +792,15 @@ function processLoadedImage(
   if (shouldSplit) {
     if (options.splitMode === 'overlap') {
       const segments = calculateOverlapSegments(width, height)
+      
+      if (options.landscapeRtl) {
+        segments.reverse()
+      }
+
       segments.forEach((seg, idx) => {
         const letter = String.fromCharCode(97 + idx)
         const pageCanvas = extractAndRotate(canvas, seg.x, seg.y, seg.w, seg.h)
-        const finalCanvas = resizeWithPadding(pageCanvas)
+        const finalCanvas = resizeWithPadding(pageCanvas, padColor)
         applyDithering(finalCanvas.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 
         results.push({
@@ -790,24 +812,36 @@ function processLoadedImage(
       const halfHeight = Math.floor(height / 2)
 
       const topCanvas = extractAndRotate(canvas, 0, 0, width, halfHeight)
-      const topFinal = resizeWithPadding(topCanvas)
+      const topFinal = resizeWithPadding(topCanvas, padColor)
       applyDithering(topFinal.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
-      results.push({
-        name: `${String(pageNum).padStart(4, '0')}_2_a.png`,
-        canvas: topFinal
-      })
 
       const bottomCanvas = extractAndRotate(canvas, 0, halfHeight, width, halfHeight)
-      const bottomFinal = resizeWithPadding(bottomCanvas)
+      const bottomFinal = resizeWithPadding(bottomCanvas, padColor)
       applyDithering(bottomFinal.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
-      results.push({
-        name: `${String(pageNum).padStart(4, '0')}_2_b.png`,
-        canvas: bottomFinal
-      })
+
+      if (options.landscapeRtl) {
+        results.push({
+          name: `${String(pageNum).padStart(4, '0')}_2_a.png`,
+          canvas: bottomFinal
+        })
+        results.push({
+          name: `${String(pageNum).padStart(4, '0')}_2_b.png`,
+          canvas: topFinal
+        })
+      } else {
+        results.push({
+          name: `${String(pageNum).padStart(4, '0')}_2_a.png`,
+          canvas: topFinal
+        })
+        results.push({
+          name: `${String(pageNum).padStart(4, '0')}_2_b.png`,
+          canvas: bottomFinal
+        })
+      }
     }
   } else {
     const rotatedCanvas = rotateCanvas(canvas, 90)
-    const finalCanvas = resizeWithPadding(rotatedCanvas)
+    const finalCanvas = resizeWithPadding(rotatedCanvas, padColor)
     applyDithering(finalCanvas.getContext('2d')!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
 
     results.push({
