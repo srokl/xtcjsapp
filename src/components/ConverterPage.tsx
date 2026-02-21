@@ -134,12 +134,6 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
         })
       }
     }
-        await addResult({
-          name: file.name.replace(/\.(cbz|cbr|pdf)$/i, '.xtc'),
-          error: err instanceof Error ? err.message : 'Unknown error',
-        })
-      }
-    }
 
     setProgress(1)
     setProgressText('Complete')
