@@ -9,6 +9,7 @@ Usage:
     image2xth image.jpg --pad black           # Black background for letterbox
     image2xth image.jpg --dither floyd        # Floyd-Steinberg dithering
     image2xth image.jpg --gamma 0.7           # Adjust brightness
+    image2xth image.jpg --orientation landscape # Rotate 90 degrees
     image2xth folder/                         # Convert all images in folder
 
 Modes:
@@ -16,6 +17,9 @@ Modes:
     letterbox       - Scale to fit within screen and add padding
     fill            - Stretch to fill 480x800 (ignores aspect ratio)
     crop            - Center crop 480x800 from original without scaling
+
+Orientation:
+    portrait (default), landscape (90), landscape-flipped (-90), portrait-flipped (180)
 
 Dithering:
     atkinson (default), stucki, floyd, none
@@ -132,11 +136,20 @@ def dither_atkinson(img):
     final_arr = np.clip(res_arr[0:h, 1:w+1], 0, 255).astype(np.uint8)
     return Image.fromarray(final_arr, 'L')
 
-def convert_to_xth(input_path, output_path, dither_algo='atkinson', gamma=1.0, invert=False, mode='cover', pad_color=255):
+def convert_to_xth(input_path, output_path, dither_algo='atkinson', gamma=1.0, invert=False, mode='cover', pad_color=255, orientation='portrait'):
     try:
         img = Image.open(input_path)
         if img.mode != 'L':
             img = img.convert('L')
+        
+        # Handle orientation (rotate BEFORE any resizing)
+        if orientation == 'landscape':
+            img = img.rotate(90, expand=True) # Clockwise 90
+        elif orientation == 'landscape-flipped':
+            img = img.rotate(-90, expand=True) # Counter-clockwise 90
+        elif orientation == 'portrait-flipped':
+            img = img.rotate(180, expand=True)
+        # 'portrait' does nothing
         
         img_width, img_height = img.size
         
@@ -245,10 +258,14 @@ def main():
     invert = "--invert" in args
     mode = 'cover'
     pad_color = 255 # White
+    orientation = 'portrait'
     
     if '--dither' in args:
         idx = args.index('--dither')
         if idx + 1 < len(args): dither_algo = args[idx+1].lower()
+    if '--orientation' in args:
+        idx = args.index('--orientation')
+        if idx + 1 < len(args): orientation = args[idx+1].lower()
     if '--downscale' in args:
         idx = args.index('--downscale')
         if idx + 1 < len(args):
@@ -286,11 +303,11 @@ def main():
         return 1
     
     if input_path.is_file():
-        convert_to_xth(input_path, input_path.with_suffix('.xth'), dither_algo, gamma, invert, mode, pad_color)
+        convert_to_xth(input_path, input_path.with_suffix('.xth'), dither_algo, gamma, invert, mode, pad_color, orientation)
     else:
         for ext in SUPPORTED_FORMATS:
             for f in sorted(input_path.glob(f"*{ext}")):
-                convert_to_xth(f, f.with_suffix('.xth'), dither_algo, gamma, invert, mode, pad_color)
+                convert_to_xth(f, f.with_suffix('.xth'), dither_algo, gamma, invert, mode, pad_color, orientation)
 
 if __name__ == "__main__":
     main()
