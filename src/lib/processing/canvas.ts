@@ -73,6 +73,8 @@ export function resizeWithPadding(canvas: HTMLCanvasElement, padColor = 255): HT
   result.width = TARGET_WIDTH;
   result.height = TARGET_HEIGHT;
   const ctx = result.getContext('2d', { willReadFrequently: true })!;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
 
   // Fill with padding color (white by default)
   ctx.fillStyle = `rgb(${padColor}, ${padColor}, ${padColor})`;
@@ -100,6 +102,8 @@ export function resizeFill(canvas: HTMLCanvasElement): HTMLCanvasElement {
   result.width = TARGET_WIDTH;
   result.height = TARGET_HEIGHT;
   const ctx = result.getContext('2d', { willReadFrequently: true })!;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, TARGET_WIDTH, TARGET_HEIGHT);
   return result;
 }
@@ -112,6 +116,8 @@ export function resizeCover(canvas: HTMLCanvasElement): HTMLCanvasElement {
   result.width = TARGET_WIDTH;
   result.height = TARGET_HEIGHT;
   const ctx = result.getContext('2d', { willReadFrequently: true })!;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
 
   const scale = Math.max(TARGET_WIDTH / canvas.width, TARGET_HEIGHT / canvas.height);
   const newWidth = Math.floor(canvas.width * scale);

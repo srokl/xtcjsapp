@@ -436,7 +436,7 @@ Example:
           const scale = TARGET_WIDTH / meta.width;
           const newH = Math.floor(meta.height * scale);
           
-          let pipeline = image.resize(TARGET_WIDTH, newH).grayscale();
+          let pipeline = image.resize(TARGET_WIDTH, newH, { kernel: 'cubic' }).grayscale();
           if (gamma !== 1.0 && is2bit) pipeline = pipeline.gamma(gamma);
           
           const { data } = await pipeline.raw().toBuffer({ resolveWithObject: true });
@@ -619,7 +619,7 @@ async function processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, 
      // Create sideways overview
      let ovPipeline = sharp(buffer)
        .rotate(90)
-       .resize(TARGET_WIDTH, TARGET_HEIGHT, { fit: 'contain', background: bg })
+       .resize(TARGET_WIDTH, TARGET_HEIGHT, { fit: 'contain', background: bg, kernel: 'cubic' })
        .grayscale();
      if (gamma !== 1.0 && is2bit) ovPipeline = ovPipeline.gamma(gamma);
      if (invert) ovPipeline = ovPipeline.negate();
@@ -634,7 +634,8 @@ async function processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, 
 
   let resizeOptions = {
     fit: 'contain',
-    background: bg
+    background: bg,
+    kernel: 'cubic'
   };
 
   if (imageMode === 'fill') resizeOptions.fit = 'fill';
@@ -644,7 +645,7 @@ async function processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, 
 
   if (imageMode === 'crop') {
     // Center crop without scaling
-    pipeline = pipeline.resize(TARGET_WIDTH, TARGET_HEIGHT, { fit: 'cover', position: 'center' });
+    pipeline = pipeline.resize(TARGET_WIDTH, TARGET_HEIGHT, { fit: 'cover', position: 'center', kernel: 'cubic' });
     // Note: This still scales if smaller. True crop without scale:
     // const meta = await pipeline.metadata();
     // pipeline = pipeline.extract({ 
