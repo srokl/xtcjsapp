@@ -22,7 +22,7 @@ Orientation:
     portrait (default), landscape (90), landscape-flipped (-90), portrait-flipped (180)
 
 Dithering:
-    atkinson (default), stucki, floyd, none
+    atkinson (default), stucki, ostromoukhov, floyd, none
 """
 
 import os
@@ -56,6 +56,50 @@ DOWNSCALE_MAP = {
 TARGET_WIDTH = 480
 TARGET_HEIGHT = 800
 SUPPORTED_FORMATS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp', '.tiff', '.tif'}
+
+@njit
+def _ostromoukhov_loop(data, w, h, stride):
+    for y in range(h):
+        row_start = y * stride
+        for x in range(1, w + 1):
+            idx = row_start + x
+            old_val = data[idx]
+            if old_val < 42: new_val = 0
+            elif old_val < 127: new_val = 85
+            elif old_val < 212: new_val = 170
+            else: new_val = 255
+            data[idx] = new_val
+            err = old_val - new_val
+            if err != 0:
+                v = max(0, min(255, old_val))
+                if v <= 128:
+                    t = v / 128.0
+                    d1 = 0.7 * (1 - t) + 0.3 * t
+                    d2 = 0.2 * (1 - t) + 0.4 * t
+                    d3 = 0.1 * (1 - t) + 0.3 * t
+                else:
+                    t = (v - 128) / 127.0
+                    d1 = 0.3 * (1 - t) + 0.7 * t
+                    d2 = 0.4 * (1 - t) + 0.2 * t
+                    d3 = 0.3 * (1 - t) + 0.1 * t
+                
+                if x + 1 < w: data[idx + 1] += int(err * d1)
+                idx_n = idx + stride
+                if idx_n < len(data):
+                    if x - 1 > 0: data[idx_n - 1] += int(err * d2)
+                    data[idx_n] += int(err * d3)
+
+def dither_ostromoukhov(img):
+    w, h = img.size
+    stride = w + 3
+    buff = np.zeros((h + 3, stride), dtype=np.int16)
+    img_arr = np.array(img, dtype=np.int16)
+    buff[0:h, 1:w+1] = img_arr
+    data = buff.flatten()
+    _ostromoukhov_loop(data, w, h, stride)
+    res_arr = data.reshape((h + 3, stride))
+    final_arr = np.clip(res_arr[0:h, 1:w+1], 0, 255).astype(np.uint8)
+    return Image.fromarray(final_arr, 'L')
 
 @njit
 def _stucki_loop(data, w, h, stride):
@@ -188,6 +232,8 @@ def convert_to_xth(input_path, output_path, dither_algo='atkinson', gamma=1.0, i
             result = dither_atkinson(result)
         elif dither_algo == 'stucki':
             result = dither_stucki(result)
+        elif dither_algo == 'ostromoukhov':
+            result = dither_ostromoukhov(result)
         elif dither_algo == 'floyd':
             pal_img = Image.new("P", (1, 1))
             pal_img.putpalette([0,0,0, 85,85,85, 170,170,170, 255,255,255] + [0,0,0]*252)
