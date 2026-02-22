@@ -375,7 +375,7 @@ Usage: node xtc_converter.js [input_file_or_dir] [options]
 
 Options:
   --2bit           Use 2-bit (XTCH) format (default: 1-bit XTC)
-  --dither [algo]  Dithering: atkinson (default), stucki, ostromoukhov, floyd, none
+  --dither [algo]  Dithering: stucki (default), atkinson, ostromoukhov, floyd, none
   --gamma [val]    Gamma correction (default: 1.0)
   --out [file]     Output filename
   --clean          Delete temporary files (not applicable for single file conversion)
@@ -397,7 +397,7 @@ Example:
 
       const inputPath = args.find(a => !a.startsWith('--'));
       const is2bit = args.includes('--2bit');
-      const ditherAlgo = args.includes('--dither') ? args[args.indexOf('--dither') + 1] : 'atkinson';
+      const ditherAlgo = args.includes('--dither') ? args[args.indexOf('--dither') + 1] : 'stucki';
       const gamma = args.includes('--gamma') ? parseFloat(args[args.indexOf('--gamma') + 1]) : 1.0;
       const mode = args.includes('--manhwa') ? 'manhwa' : (args.includes('--split') ? 'split' : 'simple');
       const rtl = args.includes('--rtl');

@@ -69,7 +69,7 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
   const [viewerPages, setViewerPages] = useState<string[]>([])
   const [options, setOptions] = useState<ConversionOptions>({
     splitMode: 'nosplit',
-    dithering: (fileType === 'pdf' || fileType === 'video') ? 'atkinson' : 'floyd',
+    dithering: 'stucki',
     contrast: fileType === 'pdf' ? 8 : (fileType === 'image' || fileType === 'video' ? 0 : 4),
     horizontalMargin: 0,
     verticalMargin: 0,
