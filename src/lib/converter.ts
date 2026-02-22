@@ -789,10 +789,30 @@ function processCanvasAsImage(
 
   // Landscape mode: rotate and optionally split
   const angle = getOrientationAngle(options.orientation)
-  const shouldSplit = width < height && options.splitMode !== 'nosplit'
+  const shouldSplit = (width < height && options.splitMode !== 'nosplit') || (options.hSplitCount > 1)
 
   if (shouldSplit) {
-    if (options.splitMode === 'overlap') {
+    if (options.hSplitCount > 1) {
+      // Horizontal Split Count
+      const count = options.hSplitCount
+      const step = Math.floor(width / count)
+      const segments = Array.from({ length: count }, (_, i) => i)
+      if (options.landscapeRtl) segments.reverse()
+
+      segments.forEach(i => {
+        const x = i * step
+        const w = (i === count - 1) ? width - x : step
+        
+        const pageCanvas = extractAndRotate(canvas, x, 0, w, height, angle)
+        const finalCanvas = resizeWithPadding(pageCanvas, padColor)
+        applyDithering(finalCanvas.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
+
+        results.push({
+          name: `${String(pageNum).padStart(4, '0')}_h_${i+1}.png`,
+          canvas: finalCanvas
+        })
+      })
+    } else if (options.splitMode === 'overlap') {
       const segments = calculateOverlapSegments(width, height)
       
       if (options.landscapeRtl) {
@@ -1039,10 +1059,30 @@ function processLoadedImage(
 
   // Landscape mode: rotate and optionally split
   const angle = getOrientationAngle(options.orientation)
-  const shouldSplit = width < height && options.splitMode !== 'nosplit'
+  const shouldSplit = (width < height && options.splitMode !== 'nosplit') || (options.hSplitCount > 1)
 
   if (shouldSplit) {
-    if (options.splitMode === 'overlap') {
+    if (options.hSplitCount > 1) {
+      // Horizontal Split Count
+      const count = options.hSplitCount
+      const step = Math.floor(width / count)
+      const segments = Array.from({ length: count }, (_, i) => i)
+      if (options.landscapeRtl) segments.reverse()
+
+      segments.forEach(i => {
+        const x = i * step
+        const w = (i === count - 1) ? width - x : step
+        
+        const pageCanvas = extractAndRotate(canvas, x, 0, w, height, angle)
+        const finalCanvas = resizeWithPadding(pageCanvas, padColor)
+        applyDithering(finalCanvas.getContext('2d', { willReadFrequently: true })!, TARGET_WIDTH, TARGET_HEIGHT, options.dithering, options.is2bit)
+
+        results.push({
+          name: `${String(pageNum).padStart(4, '0')}_h_${i+1}.png`,
+          canvas: finalCanvas
+        })
+      })
+    } else if (options.splitMode === 'overlap') {
       const segments = calculateOverlapSegments(width, height)
       
       if (options.landscapeRtl) {

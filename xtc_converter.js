@@ -387,6 +387,7 @@ Options:
   --pad-black      Pad with black instead of white
   --mode [mode]    Scaling mode: cover (default), letterbox, fill, crop
   --invert         Invert colors
+  --hsplit-count [N] Split image horizontally into N segments
 
 Example:
   node xtc_converter.js manga.cbz --2bit --dither floyd --manhwa --overlap 75
@@ -404,6 +405,7 @@ Example:
       const padBlack = args.includes('--pad-black');
       const invert = args.includes('--invert');
       const imageMode = args.includes('--mode') ? args[args.indexOf('--mode') + 1] : 'cover';
+      const hSplitCount = args.includes('--hsplit-count') ? parseInt(args[args.indexOf('--hsplit-count') + 1]) : 0;
       
       let overlapPct = 50;
       if (args.includes('--overlap')) {
@@ -506,8 +508,8 @@ Example:
         if (stitcher) {
           const pages = await stitcher.append(buffer);
           blobs.push(...pages);
-        } else if (mode === 'split') {
-          const processed = await processSplit(sharp, buffer, is2bit, ditherAlgo, gamma, rtl, padBlack, invert);
+        } else if (mode === 'split' || hSplitCount > 1) {
+          const processed = await processSplit(sharp, buffer, is2bit, ditherAlgo, gamma, rtl, padBlack, invert, hSplitCount);
           blobs.push(...processed);
         } else {
           // Standard processing
@@ -682,23 +684,37 @@ async function processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, 
   return blobs;
 }
 
-async function processSplit(sharp, buffer, is2bit, ditherAlgo, gamma, rtl, padBlack, invert = false) {
+async function processSplit(sharp, buffer, is2bit, ditherAlgo, gamma, rtl, padBlack, invert = false, hSplitCount = 0) {
   const metadata = await sharp(buffer).metadata();
   const bg = padBlack ? { r:0, g:0, b:0, alpha:1 } : { r:255, g:255, b:255, alpha:1 };
   
-  if (metadata.width < metadata.height) {
+  if (metadata.width < metadata.height && hSplitCount <= 1) {
     return await processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, false, 'cover', invert);
   }
 
   const results = [];
-  const overlap = 40;
-  const halfWidth = Math.floor(metadata.width / 2) + overlap;
-  
-  const regions = rtl 
-    ? [{ left: metadata.width - halfWidth, top: 0, width: halfWidth, height: metadata.height },
-       { left: 0, top: 0, width: halfWidth, height: metadata.height }]
-    : [{ left: 0, top: 0, width: halfWidth, height: metadata.height },
-       { left: metadata.width - halfWidth, top: 0, width: halfWidth, height: metadata.height }];
+  let regions = [];
+
+  if (hSplitCount > 1) {
+    const step = Math.floor(metadata.width / hSplitCount);
+    for (let i = 0; i < hSplitCount; i++) {
+        regions.push({
+            left: i * step,
+            top: 0,
+            width: (i === hSplitCount - 1) ? (metadata.width - i * step) : step,
+            height: metadata.height
+        });
+    }
+    if (rtl) regions.reverse();
+  } else {
+    const overlap = 40;
+    const halfWidth = Math.floor(metadata.width / 2) + overlap;
+    regions = rtl 
+      ? [{ left: metadata.width - halfWidth, top: 0, width: halfWidth, height: metadata.height },
+         { left: 0, top: 0, width: halfWidth, height: metadata.height }]
+      : [{ left: 0, top: 0, width: halfWidth, height: metadata.height },
+         { left: metadata.width - halfWidth, top: 0, width: halfWidth, height: metadata.height }];
+  }
 
   for (const region of regions) {
     const partBuffer = await sharp(buffer).extract(region).toBuffer();

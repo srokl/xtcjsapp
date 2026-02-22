@@ -231,6 +231,23 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
         </div>
       )}
 
+      {!isImageMode && !isVideoMode && !options.manhwa && (
+        <div className="option">
+          <label htmlFor="hSplitCount">Horizontal Splits (Segments)</label>
+          <div className="input-with-unit">
+            <input
+              type="number"
+              id="hSplitCount"
+              min="0"
+              max="10"
+              step="1"
+              value={options.hSplitCount}
+              onChange={(e) => onChange({ ...options, hSplitCount: parseInt(e.target.value) || 0 })}
+            />
+          </div>
+        </div>
+      )}
+
       <div className="option">
         <label htmlFor="dithering">Dithering</label>
         <select

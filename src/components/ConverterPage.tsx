@@ -85,6 +85,7 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
     imageMode: 'cover',
     invert: false,
     videoFps: 1.0,
+    hSplitCount: 0,
   })
 
   const handleFiles = useCallback((files: File[]) => {

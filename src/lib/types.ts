@@ -16,6 +16,7 @@ export interface ConversionOptions {
   imageMode: 'cover' | 'letterbox' | 'fill' | 'crop'
   invert: boolean
   videoFps: number
+  hSplitCount: number
 }
 
 export interface ConversionResult {
