@@ -24,6 +24,9 @@ export function applyDithering(
     case 'floyd':
       applyFloydSteinberg(data, width, height, is2bit);
       break;
+    case 'stucki':
+      applyStucki(data, width, height, is2bit);
+      break;
     case 'ordered':
       applyOrdered(data, width, height);
       break;
@@ -49,6 +52,68 @@ function applyThreshold(data: Uint8ClampedArray, is2bit: boolean): void {
       val = val < 128 ? 0 : 255;
     }
     data[i] = data[i + 1] = data[i + 2] = val;
+  }
+}
+
+/**
+ * Stucki dithering (High quality experimental)
+ * 8   4
+ * 2   4   8   4
+ * 1   2   4   2
+ * Divisor: 42
+ */
+function applyStucki(pixels: Uint8ClampedArray, width: number, height: number, is2bit: boolean): void {
+  const data = new Int16Array(width * height);
+  for (let i = 0; i < data.length; i++) data[i] = pixels[i * 4];
+
+  const stride = width;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * stride + x;
+      const oldVal = data[idx];
+      let newVal;
+
+      if (is2bit) {
+        if (oldVal < 42) newVal = 0;
+        else if (oldVal < 127) newVal = 85;
+        else if (oldVal < 212) newVal = 170;
+        else newVal = 255;
+      } else {
+        newVal = oldVal < 128 ? 0 : 255;
+      }
+
+      data[idx] = newVal;
+      const err = oldVal - newVal;
+
+      if (err !== 0) {
+        // Row 1
+        if (x + 1 < width) data[idx + 1] += (err * 8) / 42;
+        if (x + 2 < width) data[idx + 2] += (err * 4) / 42;
+        
+        // Row 2
+        if (y + 1 < height) {
+          if (x - 2 >= 0) data[idx + stride - 2] += (err * 2) / 42;
+          if (x - 1 >= 0) data[idx + stride - 1] += (err * 4) / 42;
+          data[idx + stride] += (err * 8) / 42;
+          if (x + 1 < width) data[idx + stride + 1] += (err * 4) / 42;
+          if (x + 2 < width) data[idx + stride + 2] += (err * 2) / 42;
+        }
+
+        // Row 3
+        if (y + 2 < height) {
+          if (x - 2 >= 0) data[idx + (stride * 2) - 2] += (err * 1) / 42;
+          if (x - 1 >= 0) data[idx + (stride * 2) - 1] += (err * 2) / 42;
+          data[idx + (stride * 2)] += (err * 4) / 42;
+          if (x + 1 < width) data[idx + (stride * 2) + 1] += (err * 2) / 42;
+          if (x + 2 < width) data[idx + (stride * 2) + 2] += (err * 1) / 42;
+        }
+      }
+    }
+  }
+
+  for (let i = 0; i < data.length; i++) {
+    const val = Math.max(0, Math.min(255, data[i]));
+    pixels[i * 4] = pixels[i * 4 + 1] = pixels[i * 4 + 2] = val;
   }
 }
 

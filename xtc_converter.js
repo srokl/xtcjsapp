@@ -104,6 +104,62 @@ function ditherFloydSteinberg(pixels, width, height, is2bit = false) {
 }
 
 /**
+ * Stucki Dithering (High Quality)
+ */
+function ditherStucki(pixels, width, height, is2bit = false) {
+  const data = new Int16Array(pixels);
+  const stride = width;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * stride + x;
+      const oldVal = data[idx];
+      let newVal;
+
+      if (is2bit) {
+        if (oldVal < 42) newVal = 0;
+        else if (oldVal < 127) newVal = 85;
+        else if (oldVal < 212) newVal = 170;
+        else newVal = 255;
+      } else {
+        newVal = oldVal < 128 ? 0 : 255;
+      }
+
+      data[idx] = newVal;
+      const err = oldVal - newVal;
+
+      if (err !== 0) {
+        // Row 1
+        if (x + 1 < width) data[idx + 1] += (err * 8) / 42;
+        if (x + 2 < width) data[idx + 2] += (err * 4) / 42;
+        
+        // Row 2
+        if (y + 1 < height) {
+          if (x - 2 >= 0) data[idx + stride - 2] += (err * 2) / 42;
+          if (x - 1 >= 0) data[idx + stride - 1] += (err * 4) / 42;
+          data[idx + stride] += (err * 8) / 42;
+          if (x + 1 < width) data[idx + stride + 1] += (err * 4) / 42;
+          if (x + 2 < width) data[idx + stride + 2] += (err * 2) / 42;
+        }
+
+        // Row 3
+        if (y + 2 < height) {
+          if (x - 2 >= 0) data[idx + (stride * 2) - 2] += (err * 1) / 42;
+          if (x - 1 >= 0) data[idx + (stride * 2) - 1] += (err * 2) / 42;
+          data[idx + (stride * 2)] += (err * 4) / 42;
+          if (x + 1 < width) data[idx + (stride * 2) + 1] += (err * 2) / 42;
+          if (x + 2 < width) data[idx + (stride * 2) + 2] += (err * 1) / 42;
+        }
+      }
+    }
+  }
+
+  for (let i = 0; i < pixels.length; i++) {
+    pixels[i] = Math.max(0, Math.min(255, data[i]));
+  }
+}
+
+/**
  * Packs 1-bit grayscale pixels into XTG data (Horizontal scan, Row-major)
  */
 function packXtg(pixels, width, height) {
@@ -261,7 +317,7 @@ Usage: node xtc_converter.js [input_file_or_dir] [options]
 
 Options:
   --2bit           Use 2-bit (XTCH) format (default: 1-bit XTC)
-  --dither [algo]  Dithering: atkinson (default), floyd, none
+  --dither [algo]  Dithering: atkinson (default), stucki, floyd, none
   --gamma [val]    Gamma correction (default: 1.0)
   --out [file]     Output filename
   --clean          Delete temporary files (not applicable for single file conversion)
@@ -347,6 +403,7 @@ Example:
             
             // Dither in place (on the copy)
             if (ditherAlgo === 'atkinson') ditherAtkinson(slice, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
+            else if (ditherAlgo === 'stucki') ditherStucki(slice, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
             else if (ditherAlgo === 'floyd') ditherFloydSteinberg(slice, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
             
             results.push(is2bit ? packXth(slice, TARGET_WIDTH, TARGET_HEIGHT) : packXtg(slice, TARGET_WIDTH, TARGET_HEIGHT));
@@ -374,6 +431,7 @@ Example:
              final.set(src, 0); // Align top
              
              if (ditherAlgo === 'atkinson') ditherAtkinson(final, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
+             else if (ditherAlgo === 'stucki') ditherStucki(final, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
              else if (ditherAlgo === 'floyd') ditherFloydSteinberg(final, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
              
              results.push(is2bit ? packXth(final, TARGET_WIDTH, TARGET_HEIGHT) : packXtg(final, TARGET_WIDTH, TARGET_HEIGHT));
@@ -508,6 +566,7 @@ async function processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, 
      const { data: ovData } = await ovPipeline.raw().toBuffer({ resolveWithObject: true });
      const ovPixels = new Uint8ClampedArray(ovData);
      if (ditherAlgo === 'atkinson') ditherAtkinson(ovPixels, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
+     else if (ditherAlgo === 'stucki') ditherStucki(ovPixels, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
      else if (ditherAlgo === 'floyd') ditherFloydSteinberg(ovPixels, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
      blobs.push(is2bit ? packXth(ovPixels, TARGET_WIDTH, TARGET_HEIGHT) : packXtg(ovPixels, TARGET_WIDTH, TARGET_HEIGHT));
   }
@@ -552,6 +611,7 @@ async function processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, 
   const pixels = new Uint8ClampedArray(data);
 
   if (ditherAlgo === 'atkinson') ditherAtkinson(pixels, info.width, info.height, is2bit);
+  else if (ditherAlgo === 'stucki') ditherStucki(pixels, info.width, info.height, is2bit);
   else if (ditherAlgo === 'floyd') ditherFloydSteinberg(pixels, info.width, info.height, is2bit);
 
   blobs.push(is2bit ? packXth(pixels, info.width, info.height) : packXtg(pixels, info.width, info.height));
