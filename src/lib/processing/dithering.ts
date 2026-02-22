@@ -63,7 +63,9 @@ function applyThreshold(data: Uint8ClampedArray, is2bit: boolean): void {
  * Divisor: 42
  */
 function applyStucki(pixels: Uint8ClampedArray, width: number, height: number, is2bit: boolean): void {
-  const data = new Int16Array(width * height);
+  // Use Float32Array to preserve fractional error, preventing banding artifacts ("shiny skin")
+  // caused by integer truncation with the large divisor (42).
+  const data = new Float32Array(width * height);
   for (let i = 0; i < data.length; i++) data[i] = pixels[i * 4];
 
   const stride = width;

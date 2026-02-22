@@ -107,7 +107,8 @@ function ditherFloydSteinberg(pixels, width, height, is2bit = false) {
  * Stucki Dithering (High Quality)
  */
 function ditherStucki(pixels, width, height, is2bit = false) {
-  const data = new Int16Array(pixels);
+  // Use Float32Array to preserve fractional error precision
+  const data = new Float32Array(pixels);
   const stride = width;
 
   for (let y = 0; y < height; y++) {
