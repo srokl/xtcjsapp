@@ -240,6 +240,7 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
         >
           <option value="floyd">Floyd-Steinberg</option>
           <option value="stucki">Stucki (Experimental)</option>
+          <option value="ostromoukhov">Ostromoukhov (Experimental)</option>
           <option value="atkinson">Atkinson</option>
           <option value="sierra-lite">Sierra Lite</option>
           <option value="ordered">Ordered</option>

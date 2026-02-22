@@ -27,6 +27,9 @@ export function applyDithering(
     case 'stucki':
       applyStucki(data, width, height, is2bit);
       break;
+    case 'ostromoukhov':
+      applyOstromoukhov(data, width, height, is2bit);
+      break;
     case 'ordered':
       applyOrdered(data, width, height);
       break;
@@ -45,13 +48,77 @@ function applyThreshold(data: Uint8ClampedArray, is2bit: boolean): void {
     let val = data[i];
     if (is2bit) {
       if (val < 42) val = 0;
-      else if (val < 127) val = 85;
-      else if (val < 212) val = 170;
+      else if (val < 127) val = 1;
+      else if (val < 212) val = 2;
       else val = 255;
     } else {
       val = val < 128 ? 0 : 255;
     }
     data[i] = data[i + 1] = data[i + 2] = val;
+  }
+}
+
+/**
+ * Ostromoukhov Variable-Coefficient Dithering (Experimental)
+ * Uses input-dependent weights to optimize blue noise properties.
+ * Coefs interpolated: [Right, Down-Left, Down]
+ */
+function applyOstromoukhov(pixels: Uint8ClampedArray, width: number, height: number, is2bit: boolean): void {
+  const data = new Float32Array(width * height);
+  for (let i = 0; i < data.length; i++) data[i] = pixels[i * 4];
+
+  const stride = width;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * stride + x;
+      const oldVal = data[idx];
+      let newVal;
+
+      if (is2bit) {
+        if (oldVal < 42) newVal = 0;
+        else if (oldVal < 127) newVal = 85;
+        else if (oldVal < 212) newVal = 170;
+        else newVal = 255;
+      } else {
+        newVal = oldVal < 128 ? 0 : 255;
+      }
+
+      data[idx] = newVal;
+      const err = oldVal - newVal;
+
+      if (err !== 0) {
+        // Calculate coefficients based on input value (0-255)
+        // Simplified 3-point piecewise linear interpolation
+        // 0/255: [0.7, 0.2, 0.1]
+        // 128:   [0.3, 0.4, 0.3]
+        let v = Math.min(255, Math.max(0, oldVal));
+        let d1, d2, d3;
+        
+        if (v <= 128) {
+          const t = v / 128.0;
+          d1 = 0.7 * (1 - t) + 0.3 * t;
+          d2 = 0.2 * (1 - t) + 0.4 * t;
+          d3 = 0.1 * (1 - t) + 0.3 * t;
+        } else {
+          const t = (v - 128) / 127.0;
+          d1 = 0.3 * (1 - t) + 0.7 * t;
+          d2 = 0.4 * (1 - t) + 0.2 * t;
+          d3 = 0.3 * (1 - t) + 0.1 * t;
+        }
+
+        // Distribute error
+        if (x + 1 < width) data[idx + 1] += err * d1;
+        if (y + 1 < height) {
+          if (x > 0) data[idx + stride - 1] += err * d2;
+          data[idx + stride] += err * d3;
+        }
+      }
+    }
+  }
+
+  for (let i = 0; i < data.length; i++) {
+    const val = Math.max(0, Math.min(255, data[i]));
+    pixels[i * 4] = pixels[i * 4 + 1] = pixels[i * 4 + 2] = val;
   }
 }
 
@@ -124,7 +191,8 @@ function applyStucki(pixels: Uint8ClampedArray, width: number, height: number, i
  * Optimized single-pass implementation using TypedArrays.
  */
 function applyAtkinson(pixels: Uint8ClampedArray, width: number, height: number, is2bit: boolean): void {
-  const data = new Int16Array(width * height);
+  // Use Float32Array to preserve fractional error precision
+  const data = new Float32Array(width * height);
   for (let i = 0; i < data.length; i++) data[i] = pixels[i * 4];
   
   const stride = width;
@@ -169,7 +237,8 @@ function applyAtkinson(pixels: Uint8ClampedArray, width: number, height: number,
  * Floyd-Steinberg dithering
  */
 function applyFloydSteinberg(pixels: Uint8ClampedArray, width: number, height: number, is2bit: boolean): void {
-  const data = new Int16Array(width * height);
+  // Use Float32Array to preserve fractional error precision
+  const data = new Float32Array(width * height);
   for (let i = 0; i < data.length; i++) data[i] = pixels[i * 4];
 
   const stride = width;

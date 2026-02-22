@@ -614,6 +614,43 @@ def optimize_image(img_data, output_path_base, page_num, suffix="", overlap_perc
         # Handle landscape images (Spreads)
         is_landscape = width >= height
 
+        # Override is_landscape if user specified orientation
+        if ORIENTATION == 'landscape' or ORIENTATION == 'landscape-flipped':
+            is_landscape = True
+        elif ORIENTATION == 'portrait' or ORIENTATION == 'portrait-flipped':
+            is_landscape = False # Treat even wide images as portrait if forced? No, usually refers to output.
+            # But the user logic "is_landscape" determines if we rotate -90.
+            # If ORIENTATION is set, we should probably follow it.
+        
+        # Let's refine:
+        # Default behavior (portrait): 
+        #   If image is Wide (Spread) -> Rotate -90 (to make Tall).
+        #   If image is Tall (Page) -> Keep Tall.
+        
+        # New behavior:
+        #   If 'landscape': Rotate 90 (Clockwise).
+        #   If 'landscape-flipped': Rotate -90 (Counter-Clockwise).
+        #   If 'portrait-flipped': Rotate 180.
+        #   If 'portrait': Standard behavior (Auto-rotate spreads).
+        
+        angle = 0
+        if ORIENTATION == 'landscape': angle = 90
+        elif ORIENTATION == 'landscape-flipped': angle = -90
+        elif ORIENTATION == 'portrait-flipped': angle = 180
+        
+        if angle != 0:
+             img = img.rotate(angle, expand=True)
+             width, height = img.size
+             is_landscape = width >= height # Re-evaluate after rotation
+        
+        # Standard auto-rotation for spreads (if still in standard portrait mode)
+        if ORIENTATION == 'portrait' and is_landscape:
+             # Rotate landscape pages -90 first so they can be treated as tall portrait pages
+             # This is the legacy behavior for spreads
+             img = img.rotate(-90, expand=True)
+             width, height = img.size
+             is_landscape = False # Now it's tall
+
         # We split most pages that are vertical. 
         should_this_split = True if not is_solid else False
         
@@ -645,11 +682,8 @@ def optimize_image(img_data, output_path_base, page_num, suffix="", overlap_perc
                     output_page = output_path_base.parent / f"{page_num:04d}{suffix}_0_overview.png"
                     save_with_padding(page_view, output_page, padcolor=PADDING_COLOR)
 
-        if is_landscape:
-            # Rotate landscape pages -90 first so they can be treated as tall portrait pages
-            img = img.rotate(-90, expand=True)
-            width, height = img.size
-
+        # Legacy rotation block removed (handled above by ORIENTATION logic)
+        
         half_height = height // 2
         total_size = 0
 
@@ -1289,6 +1323,7 @@ def main():
         print("  cbz2xtc --gamma <float>           # Adjust brightness (0.5 = brighter, 1.0 = normal)")
         print("  cbz2xtc --invert                  # Invert colors (White <-> Black)")
         print("  cbz2xtc --clean                   # Auto-delete temp PNG files")
+        print("  cbz2xtc --orientation <mode>      # Set orientation: portrait, landscape, landscape-flipped, portrait-flipped")
         print("\nDithering Algorithms:")
         print("  atkinson   - Atkinson (Default, sharp shading)")
         print("  stucki     - Stucki (High quality, sharpest)")
@@ -1372,6 +1407,7 @@ def main():
     global PADDING_COLOR
     global LANDSCAPE_RTL
     global MANHWA
+    global ORIENTATION # New
     
     # New globals
     global XTC_MODE
@@ -1385,6 +1421,18 @@ def main():
     INVERT_COLORS = "--invert" in sys.argv
     LANDSCAPE_RTL = "--landscape-rtl" in sys.argv
     MANHWA = "--manhwa" in sys.argv
+    ORIENTATION = "portrait"
+
+    if "--orientation" in sys.argv:
+        try:
+            idx = sys.argv.index("--orientation")
+            val = sys.argv[idx + 1].lower()
+            if val in ["portrait", "landscape", "landscape-flipped", "portrait-flipped"]:
+                ORIENTATION = val
+            else:
+                print(f"Warning: Invalid orientation '{val}', using default 'portrait'")
+        except (ValueError, IndexError):
+            print("Warning: Invalid orientation, using default 'portrait'")
     
     if "--gamma" in sys.argv:
         try:

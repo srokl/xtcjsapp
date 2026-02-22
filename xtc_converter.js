@@ -22,7 +22,8 @@ const TARGET_HEIGHT = 800;
  * @param {boolean} is2bit - If true, dither to 4 levels (0, 85, 170, 255)
  */
 function ditherAtkinson(pixels, width, height, is2bit = false) {
-  const data = new Int16Array(pixels);
+  // Use Float32Array to preserve fractional error precision
+  const data = new Float32Array(pixels);
   const stride = width;
 
   for (let y = 0; y < height; y++) {
@@ -68,7 +69,8 @@ function ditherAtkinson(pixels, width, height, is2bit = false) {
  * Floyd-Steinberg Dithering
  */
 function ditherFloydSteinberg(pixels, width, height, is2bit = false) {
-  const data = new Int16Array(pixels);
+  // Use Float32Array to preserve fractional error precision
+  const data = new Float32Array(pixels);
   const stride = width;
 
   for (let y = 0; y < height; y++) {
@@ -150,6 +152,61 @@ function ditherStucki(pixels, width, height, is2bit = false) {
           data[idx + (stride * 2)] += (err * 4) / 42;
           if (x + 1 < width) data[idx + (stride * 2) + 1] += (err * 2) / 42;
           if (x + 2 < width) data[idx + (stride * 2) + 2] += (err * 1) / 42;
+        }
+      }
+    }
+  }
+
+  for (let i = 0; i < pixels.length; i++) {
+    pixels[i] = Math.max(0, Math.min(255, data[i]));
+  }
+}
+
+/**
+ * Ostromoukhov Variable-Coefficient Dithering
+ */
+function ditherOstromoukhov(pixels, width, height, is2bit = false) {
+  const data = new Float32Array(pixels);
+  const stride = width;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * stride + x;
+      const oldVal = data[idx];
+      let newVal;
+
+      if (is2bit) {
+        if (oldVal < 42) newVal = 0;
+        else if (oldVal < 127) newVal = 85;
+        else if (oldVal < 212) newVal = 170;
+        else newVal = 255;
+      } else {
+        newVal = oldVal < 128 ? 0 : 255;
+      }
+
+      data[idx] = newVal;
+      const err = oldVal - newVal;
+
+      if (err !== 0) {
+        let v = Math.min(255, Math.max(0, oldVal));
+        let d1, d2, d3;
+        
+        if (v <= 128) {
+          const t = v / 128.0;
+          d1 = 0.7 * (1 - t) + 0.3 * t;
+          d2 = 0.2 * (1 - t) + 0.4 * t;
+          d3 = 0.1 * (1 - t) + 0.3 * t;
+        } else {
+          const t = (v - 128) / 127.0;
+          d1 = 0.3 * (1 - t) + 0.7 * t;
+          d2 = 0.4 * (1 - t) + 0.2 * t;
+          d3 = 0.3 * (1 - t) + 0.1 * t;
+        }
+
+        if (x + 1 < width) data[idx + 1] += err * d1;
+        if (y + 1 < height) {
+          if (x > 0) data[idx + stride - 1] += err * d2;
+          data[idx + stride] += err * d3;
         }
       }
     }
@@ -318,7 +375,7 @@ Usage: node xtc_converter.js [input_file_or_dir] [options]
 
 Options:
   --2bit           Use 2-bit (XTCH) format (default: 1-bit XTC)
-  --dither [algo]  Dithering: atkinson (default), stucki, floyd, none
+  --dither [algo]  Dithering: atkinson (default), stucki, ostromoukhov, floyd, none
   --gamma [val]    Gamma correction (default: 1.0)
   --out [file]     Output filename
   --clean          Delete temporary files (not applicable for single file conversion)
@@ -405,6 +462,7 @@ Example:
             // Dither in place (on the copy)
             if (ditherAlgo === 'atkinson') ditherAtkinson(slice, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
             else if (ditherAlgo === 'stucki') ditherStucki(slice, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
+            else if (ditherAlgo === 'ostromoukhov') ditherOstromoukhov(slice, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
             else if (ditherAlgo === 'floyd') ditherFloydSteinberg(slice, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
             
             results.push(is2bit ? packXth(slice, TARGET_WIDTH, TARGET_HEIGHT) : packXtg(slice, TARGET_WIDTH, TARGET_HEIGHT));
@@ -433,6 +491,7 @@ Example:
              
              if (ditherAlgo === 'atkinson') ditherAtkinson(final, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
              else if (ditherAlgo === 'stucki') ditherStucki(final, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
+             else if (ditherAlgo === 'ostromoukhov') ditherOstromoukhov(final, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
              else if (ditherAlgo === 'floyd') ditherFloydSteinberg(final, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
              
              results.push(is2bit ? packXth(final, TARGET_WIDTH, TARGET_HEIGHT) : packXtg(final, TARGET_WIDTH, TARGET_HEIGHT));
@@ -568,6 +627,7 @@ async function processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, 
      const ovPixels = new Uint8ClampedArray(ovData);
      if (ditherAlgo === 'atkinson') ditherAtkinson(ovPixels, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
      else if (ditherAlgo === 'stucki') ditherStucki(ovPixels, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
+     else if (ditherAlgo === 'ostromoukhov') ditherOstromoukhov(ovPixels, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
      else if (ditherAlgo === 'floyd') ditherFloydSteinberg(ovPixels, TARGET_WIDTH, TARGET_HEIGHT, is2bit);
      blobs.push(is2bit ? packXth(ovPixels, TARGET_WIDTH, TARGET_HEIGHT) : packXtg(ovPixels, TARGET_WIDTH, TARGET_HEIGHT));
   }
@@ -613,6 +673,7 @@ async function processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, 
 
   if (ditherAlgo === 'atkinson') ditherAtkinson(pixels, info.width, info.height, is2bit);
   else if (ditherAlgo === 'stucki') ditherStucki(pixels, info.width, info.height, is2bit);
+  else if (ditherAlgo === 'ostromoukhov') ditherOstromoukhov(pixels, info.width, info.height, is2bit);
   else if (ditherAlgo === 'floyd') ditherFloydSteinberg(pixels, info.width, info.height, is2bit);
 
   blobs.push(is2bit ? packXth(pixels, info.width, info.height) : packXtg(pixels, info.width, info.height));
