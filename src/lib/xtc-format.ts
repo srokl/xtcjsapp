@@ -302,8 +302,8 @@ export function imageDataToXth(imageData: ImageData): ArrayBuffer {
       
       let val;
       if (gray >= 212) val = 0;      // White (00)
-      else if (gray >= 127) val = 2; // Light Gray (10)
-      else if (gray >= 42) val = 1;  // Dark Gray (01)
+      else if (gray >= 127) val = 1; // Light Gray (01)
+      else if (gray >= 42) val = 2;  // Dark Gray (10)
       else val = 3;               // Black (11)
 
       const byteIdx = colOffset + (y >> 3);
