@@ -22,7 +22,7 @@ function AboutPage() {
           <li><strong>Privacy-first:</strong> All processing happens locally in your browser. No uploads, no servers, no tracking.</li>
           <li><strong>Multiple formats:</strong> Convert CBZ (manga/comics), PDF documents, single images, and video files to XTC.</li>
           <li><strong>2-bit Support:</strong> Support for the enhanced 4-level grayscale XTCH format for superior image quality.</li>
-          <li><strong>Advanced Dithering:</strong> Choose from <strong>Stucki</strong> (Default), Atkinson, Floyd-Steinberg, or experimental <strong>Zhou-Fang</strong> and <strong>Ostromoukhov</strong> variable-coefficient algorithms.</li>
+          <li><strong>Advanced Dithering:</strong> Choose from <strong>Stucki</strong> (Default), Atkinson, Floyd-Steinberg, or experimental <strong>Zhou-Fang</strong>, <strong>Ostromoukhov</strong>, and <strong>Stochastic</strong> (Hilbert Curve) algorithms.</li>
           <li><strong>Manhwa Mode:</strong> Continuous vertical stitching for webtoons with customizable overlap (30/50/75%).</li>
           <li><strong>Smart Splitting:</strong> Automatically split landscape pages into portrait segments with custom horizontal split counts.</li>
           <li><strong>Video to XTC:</strong> Extract and convert video frames at customizable FPS.</li>
@@ -59,7 +59,7 @@ function AboutPage() {
         </details>
         <details className="faq-item">
           <summary>What dithering algorithm should I use?</summary>
-          <p><strong>Stucki</strong> is now the default and provides the best balance of sharpness and detail. For a smoother "blue noise" look, try <strong>Zhou-Fang</strong> or <strong>Ostromoukhov</strong>. For crisp text, use <strong>Atkinson</strong> or <strong>None</strong>.</p>
+          <p><strong>Stucki</strong> is now the default and provides the best balance of sharpness and detail. For a smoother "blue noise" look, try <strong>Zhou-Fang</strong> or <strong>Ostromoukhov</strong>. <strong>Stochastic</strong> uses a Hilbert Space-Filling Curve to provide organic, grain-free diffusion. For crisp text, use <strong>Atkinson</strong> or <strong>None</strong>.</p>
         </details>
         <details className="faq-item">
           <summary>Why are my pages split?</summary>
