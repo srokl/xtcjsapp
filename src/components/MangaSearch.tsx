@@ -362,6 +362,17 @@ export function MangaSearch({ open, onClose }: { open: boolean; onClose: () => v
                 <span>{r.date}</span>
               </div>
               <div className="manga-search-item-actions" onClick={(e) => e.stopPropagation()}>
+                {r.magnet && (
+                  <a href={r.magnet} className="manga-search-magnet" title="Magnet link" onClick={(e) => e.stopPropagation()}>
+                    Magnet
+                  </a>
+                )}
+                {r.torrent && (
+                  <a href={r.torrent} className="manga-search-magnet" title="Torrent file" onClick={(e) => e.stopPropagation()}>
+                    .torrent
+                  </a>
+                )}
+
                 {/* Active Download Progress Inline */}
                 {(() => {
                   const parsedId = r.magnet ? r.magnet.match(/xt=urn:btih:([a-zA-Z0-9]+)/i) : null
@@ -370,7 +381,7 @@ export function MangaSearch({ open, onClose }: { open: boolean; onClose: () => v
 
                   if (activeDl) {
                     return (
-                      <div className="manga-search-inline-progress" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', color: 'var(--ink)' }}>
+                      <div className="manga-search-inline-progress" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', color: 'var(--ink)', marginLeft: '8px' }}>
                         <div style={{ width: '60px', height: '4px', background: 'var(--paper-dark)', borderRadius: '2px', overflow: 'hidden' }}>
                           <div style={{ width: `${activeDl.progress * 100}%`, height: '100%', background: 'var(--accent)' }} />
                         </div>
@@ -390,23 +401,12 @@ export function MangaSearch({ open, onClose }: { open: boolean; onClose: () => v
                         e.preventDefault()
                         downloadTorrent(r.magnet, r.title)
                       }}
-                      style={{ cursor: 'pointer' }}
+                      style={{ cursor: 'pointer', marginLeft: 'auto' }}
                     >
                       Download (WebRTC)
                     </button>
                   )
                 })()}
-
-                {r.magnet && (
-                  <a href={r.magnet} className="manga-search-magnet" title="Magnet link" onClick={(e) => e.stopPropagation()}>
-                    Magnet
-                  </a>
-                )}
-                {r.torrent && (
-                  <a href={r.torrent} className="manga-search-magnet" title="Torrent file" onClick={(e) => e.stopPropagation()}>
-                    .torrent
-                  </a>
-                )}
               </div>
             </a>
           ))}
