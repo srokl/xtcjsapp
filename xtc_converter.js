@@ -278,26 +278,62 @@ function ditherZhouFang(pixels, width, height, is2bit = false) {
 }
 
 /**
- * Stochastic (Random) Dithering
+ * Space-Filling Curve Dithering (Velho/Hilbert)
  */
 function ditherStochastic(pixels, width, height, is2bit = false) {
-  const data = new Float32Array(pixels);
+  // Use a Float32 array to track error propagation without clipping
+  // But since we process in-place and modify `pixels` (which is usually Uint8),
+  // we just track error in a variable 'err'.
+  // However, pixels[] is clamped to 0-255.
+  // We need to read the *original* value? 
+  // Actually, we visit each pixel exactly once. We can read, add error, write back.
   
-  for (let i = 0; i < pixels.length; i++) {
-    const val = data[i];
-    let newVal;
+  const maxDim = Math.max(width, height);
+  let n = 1;
+  while (n < maxDim) n *= 2;
 
-    if (is2bit) {
-      const norm = val / 85;
-      let level = Math.floor(norm);
-      const rem = norm - level;
-      if (Math.random() < rem) level++;
-      if (level > 3) level = 3;
-      newVal = level * 85;
-    } else {
-      newVal = val > (Math.random() * 255) ? 255 : 0;
+  let error = 0;
+  const totalPoints = n * n;
+
+  for (let i = 0; i < totalPoints; i++) {
+    let t = i;
+    let x = 0;
+    let y = 0;
+    
+    // Hilbert mapping
+    for (let s = 1; s < n; s *= 2) {
+      const rx = 1 & (t / 2);
+      const ry = 1 & (t ^ rx);
+      if (ry === 0) {
+        if (rx === 1) {
+          x = s - 1 - x;
+          y = s - 1 - y;
+        }
+        [x, y] = [y, x];
+      }
+      x += s * rx;
+      y += s * ry;
+      t = Math.floor(t / 4);
     }
-    pixels[i] = newVal;
+
+    if (x < width && y < height) {
+      const idx = y * width + x;
+      const oldVal = pixels[idx];
+      const currentVal = oldVal + error;
+      
+      let newVal;
+      if (is2bit) {
+        if (currentVal < 42) newVal = 0;
+        else if (currentVal < 127) newVal = 85;
+        else if (currentVal < 212) newVal = 170;
+        else newVal = 255;
+      } else {
+        newVal = currentVal < 128 ? 0 : 255;
+      }
+
+      pixels[idx] = newVal;
+      error = currentVal - newVal;
+    }
   }
 }
 

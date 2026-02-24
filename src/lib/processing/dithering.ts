@@ -47,27 +47,66 @@ export function applyDithering(
 }
 
 /**
- * Stochastic (Random) Dithering
- * Uses random noise to determine pixel value.
+ * Space-Filling Curve Dithering (Velho/Hilbert)
+ * Traverses the image using a Hilbert curve and propagates error.
+ * Reduces graininess compared to random noise.
  */
 function applyStochastic(data: Uint8ClampedArray, width: number, height: number, is2bit: boolean): void {
-  for (let i = 0; i < data.length; i += 4) {
-    const val = data[i]; // Grayscale
-    let newVal;
+  // Determine size of Hilbert curve (power of 2 >= max dimension)
+  const maxDim = Math.max(width, height);
+  let n = 1;
+  while (n < maxDim) n *= 2;
 
-    if (is2bit) {
-      // 4 levels: 0, 85, 170, 255
-      const norm = val / 85;
-      let level = Math.floor(norm);
-      const rem = norm - level;
-      if (Math.random() < rem) level++;
-      if (level > 3) level = 3;
-      newVal = level * 85;
-    } else {
-      newVal = val > (Math.random() * 255) ? 255 : 0;
+  let error = 0;
+  
+  // Iterate along the Hilbert curve
+  const totalPoints = n * n;
+  for (let i = 0; i < totalPoints; i++) {
+    // Map d (index) to (x, y) coordinates
+    let t = i;
+    let x = 0;
+    let y = 0;
+    for (let s = 1; s < n; s *= 2) {
+      const rx = 1 & (t / 2);
+      const ry = 1 & (t ^ rx);
+      
+      // Rotate/Flip
+      if (ry === 0) {
+        if (rx === 1) {
+          x = s - 1 - x;
+          y = s - 1 - y;
+        }
+        // Swap x, y
+        const tmp = x; x = y; y = tmp;
+      }
+      
+      x += s * rx;
+      y += s * ry;
+      t = Math.floor(t / 4);
     }
 
-    data[i] = data[i + 1] = data[i + 2] = newVal;
+    // Check if point is within image bounds
+    if (x < width && y < height) {
+      const idx = (y * width + x) * 4;
+      const oldVal = data[idx];
+      
+      const currentVal = oldVal + error;
+      let newVal;
+
+      if (is2bit) {
+        if (currentVal < 42) newVal = 0;
+        else if (currentVal < 127) newVal = 85;
+        else if (currentVal < 212) newVal = 170;
+        else newVal = 255;
+      } else {
+        newVal = currentVal < 128 ? 0 : 255;
+      }
+
+      data[idx] = data[idx + 1] = data[idx + 2] = newVal;
+      
+      // Propagate error to the next pixel in the curve
+      error = currentVal - newVal;
+    }
   }
 }
 
