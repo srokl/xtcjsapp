@@ -402,15 +402,17 @@
 .viewer-section {
   grid-column: 1 / -1;
   background: var(--ink);
-  margin: 0 calc(-1 * var(--space-lg));
+  width: 100vw;
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
   padding: var(--space-lg);
   position: relative;
   z-index: var(--z-overlay); /* Above grain overlay */
+  box-sizing: border-box;
 }
 
 @media (min-width: 768px) {
   .viewer-section {
-    margin: 0 calc(-1 * var(--space-2xl));
     padding: var(--space-xl) var(--space-2xl);
   }
 }
