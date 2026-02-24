@@ -21,7 +21,7 @@ export function FileList({ files, onRemove, onConvert, isConverting }: FileListP
       <div className="files-grid">
         {files.map((file, idx) => (
           <div key={`${file.name}-${idx}`} className="file-item">
-            <span className="name">{file.name}</span>
+            <span className="name"><span>{file.name}</span></span>
             <span className="size">{formatSize(file.size)}</span>
             <button
               className="remove"

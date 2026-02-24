@@ -31,6 +31,11 @@
   50% { opacity: 0.5; }
 }
 
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-100%); }
+}
+
 /* Staggered entrance */
 .header {
   animation: fadeUp 0.5s ease-out;

@@ -155,11 +155,28 @@ body {
 .nav-tabs {
   display: flex;
   gap: var(--space-md);
-  justify-content: center;
+  justify-content: flex-start; /* Left align for scroll */
   margin-top: calc(-1 * var(--space-lg));
+  overflow-x: auto;
+  white-space: nowrap;
+  padding-bottom: var(--space-xs); /* Space for scrollbar if visible */
+  scrollbar-width: none; /* Firefox */
+  -webkit-overflow-scrolling: touch;
+}
+
+.nav-tabs::-webkit-scrollbar {
+  display: none; /* Chrome/Safari */
+}
+
+@media (min-width: 768px) {
+  .nav-tabs {
+    justify-content: center;
+    overflow-x: visible;
+  }
 }
 
 .nav-tab {
+  flex: 0 0 auto; /* Prevent shrinking */
   font-family: var(--font-mono);
   font-size: 1rem;
   font-weight: 500;
