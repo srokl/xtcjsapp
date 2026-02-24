@@ -53,6 +53,16 @@ export function MangaSearch({ open, onClose }: { open: boolean; onClose: () => v
   const downloadTorrent = useCallback((magnet: string, title: string) => {
     if (!clientRef.current) return
 
+    // Public WebSocket trackers (Required for browser-based WebTorrent)
+    const wsTrackers = [
+      'wss://tracker.openwebtorrent.com',
+      'wss://tracker.btorrent.xyz',
+      'wss://tracker.webtorrent.dev',
+      'wss://tracker.files.fm:7073/announce',
+      'wss://tracker.novage.com.ua:443/announce',
+      'wss://open.pieceofshit.net:443/announce'
+    ]
+
     // Check if torrent already exists by magnet URI or infoHash
     const parsedId = magnet.match(/xt=urn:btih:([a-zA-Z0-9]+)/i)
     const infoHash = parsedId ? parsedId[1].toLowerCase() : null
@@ -64,12 +74,26 @@ export function MangaSearch({ open, onClose }: { open: boolean; onClose: () => v
 
     if (existing) {
       console.log('Torrent already exists:', existing.name)
-      // Optional: Flash the existing download item or show a toast
+      // Provide visual feedback
+      const el = document.getElementById(`dl-${existing.infoHash}`)
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
       return
     }
 
     try {
-      clientRef.current.add(magnet, (torrent) => {
+      // Inject WS trackers into the magnet link or options
+      // We'll append them to the magnet link string
+      let enhancedMagnet = magnet
+      const currentTrackers = magnet.match(/tr=([^&]+)/g) || []
+      
+      // Only append if not already present (naive check)
+      wsTrackers.forEach(tr => {
+        if (!magnet.includes(encodeURIComponent(tr))) {
+          enhancedMagnet += `&tr=${encodeURIComponent(tr)}`
+        }
+      })
+
+      clientRef.current.add(enhancedMagnet, { announce: wsTrackers }, (torrent) => {
         console.log('Torrent added:', torrent.infoHash)
         
         const updateState = () => {
@@ -390,11 +414,12 @@ export function MangaSearch({ open, onClose }: { open: boolean; onClose: () => v
           <div className="manga-search-downloads">
             <h3>Active Downloads</h3>
             {Object.values(downloads).map((d) => (
-              <div key={d.infoHash} className="manga-download-item">
+              <div key={d.infoHash} id={`dl-${d.infoHash}`} className="manga-download-item">
                 <div className="download-info">
                   <div className="download-name" title={d.name}>{d.name}</div>
                   <div className="download-meta">
                     {formatSize(d.downloaded)} / {formatSize(d.total)} · {(d.progress * 100).toFixed(1)}% · {formatSize(d.speed)}/s · {d.peers} peers
+                    {d.peers === 0 && !d.ready && <span style={{ color: 'var(--accent)', marginLeft: '8px' }}>Searching for peers...</span>}
                   </div>
                   <div className="download-progress-bar">
                     <div className="download-progress-fill" style={{ width: `${d.progress * 100}%` }} />
