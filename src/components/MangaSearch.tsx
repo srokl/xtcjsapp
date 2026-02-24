@@ -1,6 +1,4 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import axios from 'axios'
-import { API_BASE } from '../lib/api'
 import '../styles/manga-search.css'
 
 interface NyaaResult {
@@ -13,10 +11,6 @@ interface NyaaResult {
   leechers: number
   downloads: number
   magnet: string
-}
-
-function trackTorrentClick() {
-  axios.post(`${API_BASE}/stats/conversion`, { type: 'torrent' }).catch(() => {})
 }
 
 export function MangaSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -34,13 +28,56 @@ export function MangaSearch({ open, onClose }: { open: boolean; onClose: () => v
     }
     setLoading(true)
     setError('')
+    
     try {
-      const { data } = await axios.get(`${API_BASE}/nyaa`, {
-        params: { q },
+      // Use Nyaa RSS feed via allorigins proxy
+      // c=3_1: Literature - English
+      // f=0: No filter (Show all)
+      const targetUrl = `https://nyaa.si/?page=rss&q=${encodeURIComponent(q)}&c=3_1&f=0`
+      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`
+      
+      const response = await fetch(proxyUrl)
+      if (!response.ok) throw new Error('Network response was not ok')
+      
+      const text = await response.text()
+      const parser = new DOMParser()
+      const xml = parser.parseFromString(text, 'text/xml')
+      const nyaaNS = 'https://nyaa.si/xmlns/nyaa/'
+      
+      const items = Array.from(xml.querySelectorAll('item'))
+      const parsedResults: NyaaResult[] = items.map(item => {
+        const title = item.querySelector('title')?.textContent || 'Unknown'
+        const link = item.querySelector('guid')?.textContent || ''
+        const torrent = item.querySelector('link')?.textContent || ''
+        const pubDate = item.querySelector('pubDate')?.textContent || ''
+        
+        const getSize = () => item.getElementsByTagNameNS(nyaaNS, 'size')[0]?.textContent || '??'
+        const getSeeders = () => item.getElementsByTagNameNS(nyaaNS, 'seeders')[0]?.textContent || '0'
+        const getLeechers = () => item.getElementsByTagNameNS(nyaaNS, 'leechers')[0]?.textContent || '0'
+        const getDownloads = () => item.getElementsByTagNameNS(nyaaNS, 'downloads')[0]?.textContent || '0'
+        const getInfoHash = () => item.getElementsByTagNameNS(nyaaNS, 'infoHash')[0]?.textContent || ''
+        
+        const infoHash = getInfoHash()
+        const magnet = infoHash 
+          ? `magnet:?xt=urn:btih:${infoHash}&dn=${encodeURIComponent(title)}&tr=http%3A%2F%2Fnyaa.tracker.wf%3A7777%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce`
+          : ''
+
+        return {
+          title,
+          link,
+          torrent,
+          size: getSize(),
+          date: new Date(pubDate).toLocaleDateString(),
+          seeders: parseInt(getSeeders(), 10),
+          leechers: parseInt(getLeechers(), 10),
+          downloads: parseInt(getDownloads(), 10),
+          magnet
+        }
       })
-      if (!Array.isArray(data)) throw new Error('Invalid response')
-      setResults(data)
-    } catch {
+
+      setResults(parsedResults)
+    } catch (err) {
+      console.error('Search failed:', err)
       setError('search-unavailable')
       setResults([])
     } finally {
@@ -100,8 +137,7 @@ export function MangaSearch({ open, onClose }: { open: boolean; onClose: () => v
             </button>
           </div>
           <p className="manga-search-hint">
-            If you are experiencing high latency, visit{' '}
-            <a href="https://nyaa.si" target="_blank" rel="noopener">nyaa.si</a>
+            Searching via nyaa.si RSS feed (English Translated)
           </p>
         </div>
 
@@ -121,7 +157,7 @@ export function MangaSearch({ open, onClose }: { open: boolean; onClose: () => v
         <div className="manga-search-results">
           {error === 'search-unavailable' && (
             <div className="manga-search-error">
-              <p>The search server is currently unavailable.</p>
+              <p>Unable to fetch results via proxy.</p>
               <p>
                 You can search directly on{' '}
                 <a
@@ -148,12 +184,16 @@ export function MangaSearch({ open, onClose }: { open: boolean; onClose: () => v
                 <span>{r.date}</span>
               </div>
               <div className="manga-search-item-actions" onClick={(e) => e.stopPropagation()}>
-                <a href={r.magnet} className="manga-search-magnet" title="Magnet link" onClick={(e) => { e.stopPropagation(); trackTorrentClick() }}>
-                  Magnet
-                </a>
-                <a href={r.torrent} className="manga-search-magnet" title="Torrent file" onClick={(e) => { e.stopPropagation(); trackTorrentClick() }}>
-                  .torrent
-                </a>
+                {r.magnet && (
+                  <a href={r.magnet} className="manga-search-magnet" title="Magnet link" onClick={(e) => e.stopPropagation()}>
+                    Magnet
+                  </a>
+                )}
+                {r.torrent && (
+                  <a href={r.torrent} className="manga-search-magnet" title="Torrent file" onClick={(e) => e.stopPropagation()}>
+                    .torrent
+                  </a>
+                )}
               </div>
             </a>
           ))}
