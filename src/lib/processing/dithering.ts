@@ -36,11 +36,39 @@ export function applyDithering(
     case 'ordered':
       applyOrdered(data, width, height);
       break;
+    case 'stochastic':
+      applyStochastic(data, width, height, is2bit);
+      break;
     default:
       applyFloydSteinberg(data, width, height, is2bit);
   }
 
   ctx.putImageData(imageData, 0, 0);
+}
+
+/**
+ * Stochastic (Random) Dithering
+ * Uses random noise to determine pixel value.
+ */
+function applyStochastic(data: Uint8ClampedArray, width: number, height: number, is2bit: boolean): void {
+  for (let i = 0; i < data.length; i += 4) {
+    const val = data[i]; // Grayscale
+    let newVal;
+
+    if (is2bit) {
+      // 4 levels: 0, 85, 170, 255
+      const norm = val / 85;
+      let level = Math.floor(norm);
+      const rem = norm - level;
+      if (Math.random() < rem) level++;
+      if (level > 3) level = 3;
+      newVal = level * 85;
+    } else {
+      newVal = val > (Math.random() * 255) ? 255 : 0;
+    }
+
+    data[i] = data[i + 1] = data[i + 2] = newVal;
+  }
 }
 
 /**

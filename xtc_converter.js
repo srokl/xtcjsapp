@@ -278,6 +278,30 @@ function ditherZhouFang(pixels, width, height, is2bit = false) {
 }
 
 /**
+ * Stochastic (Random) Dithering
+ */
+function ditherStochastic(pixels, width, height, is2bit = false) {
+  const data = new Float32Array(pixels);
+  
+  for (let i = 0; i < pixels.length; i++) {
+    const val = data[i];
+    let newVal;
+
+    if (is2bit) {
+      const norm = val / 85;
+      let level = Math.floor(norm);
+      const rem = norm - level;
+      if (Math.random() < rem) level++;
+      if (level > 3) level = 3;
+      newVal = level * 85;
+    } else {
+      newVal = val > (Math.random() * 255) ? 255 : 0;
+    }
+    pixels[i] = newVal;
+  }
+}
+
+/**
  * Packs 1-bit grayscale pixels into XTG data (Horizontal scan, Row-major)
  */
 function packXtg(pixels, width, height) {
@@ -532,6 +556,7 @@ Example:
             else if (ditherAlgo === 'stucki') ditherStucki(slice, targetWidth, targetHeight, is2bit);
             else if (ditherAlgo === 'ostromoukhov') ditherOstromoukhov(slice, targetWidth, targetHeight, is2bit);
             else if (ditherAlgo === 'zhoufang') ditherZhouFang(slice, targetWidth, targetHeight, is2bit);
+            else if (ditherAlgo === 'stochastic') ditherStochastic(slice, targetWidth, targetHeight, is2bit);
             else if (ditherAlgo === 'floyd') ditherFloydSteinberg(slice, targetWidth, targetHeight, is2bit);
             
             results.push(is2bit ? packXth(slice, targetWidth, targetHeight) : packXtg(slice, targetWidth, targetHeight));
@@ -562,6 +587,7 @@ Example:
              else if (ditherAlgo === 'stucki') ditherStucki(final, targetWidth, targetHeight, is2bit);
              else if (ditherAlgo === 'ostromoukhov') ditherOstromoukhov(final, targetWidth, targetHeight, is2bit);
              else if (ditherAlgo === 'zhoufang') ditherZhouFang(final, targetWidth, targetHeight, is2bit);
+             else if (ditherAlgo === 'stochastic') ditherStochastic(final, targetWidth, targetHeight, is2bit);
              else if (ditherAlgo === 'floyd') ditherFloydSteinberg(final, targetWidth, targetHeight, is2bit);
              
              results.push(is2bit ? packXth(final, targetWidth, targetHeight) : packXtg(final, targetWidth, targetHeight));
@@ -699,6 +725,7 @@ async function processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, 
      else if (ditherAlgo === 'stucki') ditherStucki(ovPixels, targetWidth, targetHeight, is2bit);
      else if (ditherAlgo === 'ostromoukhov') ditherOstromoukhov(ovPixels, targetWidth, targetHeight, is2bit);
      else if (ditherAlgo === 'zhoufang') ditherZhouFang(ovPixels, targetWidth, targetHeight, is2bit);
+     else if (ditherAlgo === 'stochastic') ditherStochastic(ovPixels, targetWidth, targetHeight, is2bit);
      else if (ditherAlgo === 'floyd') ditherFloydSteinberg(ovPixels, targetWidth, targetHeight, is2bit);
      blobs.push(is2bit ? packXth(ovPixels, targetWidth, targetHeight) : packXtg(ovPixels, targetWidth, targetHeight));
   }
@@ -747,6 +774,7 @@ async function processImage(sharp, buffer, is2bit, ditherAlgo, gamma, padBlack, 
   else if (ditherAlgo === 'stucki') ditherStucki(pixels, info.width, info.height, is2bit);
   else if (ditherAlgo === 'ostromoukhov') ditherOstromoukhov(pixels, info.width, info.height, is2bit);
   else if (ditherAlgo === 'zhoufang') ditherZhouFang(pixels, info.width, info.height, is2bit);
+  else if (ditherAlgo === 'stochastic') ditherStochastic(pixels, info.width, info.height, is2bit);
   else if (ditherAlgo === 'floyd') ditherFloydSteinberg(pixels, info.width, info.height, is2bit);
 
   blobs.push(is2bit ? packXth(pixels, info.width, info.height) : packXtg(pixels, info.width, info.height));
