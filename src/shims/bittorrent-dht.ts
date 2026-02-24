@@ -7,6 +7,9 @@ export class Client extends EventEmitter {
   destroy() {}
   listen() {}
   addNode() {}
+  announce() {}
+  lookup() {}
+  toJSON() { return { nodes: [] } }
 }
 
 export default Client;
