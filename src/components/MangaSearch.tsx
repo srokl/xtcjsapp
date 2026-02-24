@@ -53,10 +53,18 @@ export function MangaSearch({ open, onClose }: { open: boolean; onClose: () => v
   const downloadTorrent = useCallback((magnet: string, title: string) => {
     if (!clientRef.current) return
 
-    // Avoid duplicate add
-    const parsed = clientRef.current.get(magnet)
-    if (parsed) {
-      console.log('Torrent already exists')
+    // Check if torrent already exists by magnet URI or infoHash
+    const parsedId = magnet.match(/xt=urn:btih:([a-zA-Z0-9]+)/i)
+    const infoHash = parsedId ? parsedId[1].toLowerCase() : null
+    
+    // Check against current client torrents
+    const existing = clientRef.current.torrents.find(t => 
+      t.magnetURI === magnet || (infoHash && t.infoHash.toLowerCase() === infoHash)
+    )
+
+    if (existing) {
+      console.log('Torrent already exists:', existing.name)
+      // Optional: Flash the existing download item or show a toast
       return
     }
 
@@ -134,7 +142,9 @@ export function MangaSearch({ open, onClose }: { open: boolean; onClose: () => v
     // Proxies to try in order
     const proxies = [
       (url: string) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
-      (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
+      (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+      (url: string) => `https://thingproxy.freeboard.io/fetch/${url}`,
+      (url: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`
     ]
 
     let responseText = ''
