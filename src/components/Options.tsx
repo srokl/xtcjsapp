@@ -121,26 +121,26 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
           </div>
 
           <div className="option checkbox-option">
-            <label htmlFor="sidewaysOverviews" className={options.manhwa ? 'disabled' : ''}>
+            <label htmlFor="sidewaysOverviews" className={options.manhwa || options.includeOverviews ? 'disabled' : ''}>
               <input
                 type="checkbox"
                 id="sidewaysOverviews"
                 checked={options.sidewaysOverviews}
                 onChange={(e) => onChange({ ...options, sidewaysOverviews: e.target.checked })}
-                disabled={options.manhwa}
+                disabled={options.manhwa || options.includeOverviews}
               />
               Include Sideways Overviews
             </label>
           </div>
 
           <div className="option checkbox-option">
-            <label htmlFor="includeOverviews" className={options.manhwa ? 'disabled' : ''}>
+            <label htmlFor="includeOverviews" className={options.manhwa || options.sidewaysOverviews ? 'disabled' : ''}>
               <input
                 type="checkbox"
                 id="includeOverviews"
                 checked={options.includeOverviews}
                 onChange={(e) => onChange({ ...options, includeOverviews: e.target.checked })}
-                disabled={options.manhwa}
+                disabled={options.manhwa || options.sidewaysOverviews}
               />
               Include Upright Overviews
             </label>
