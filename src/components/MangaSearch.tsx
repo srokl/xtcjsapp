@@ -78,13 +78,29 @@ export function MangaSearch({ open, onClose }: { open: boolean; onClose: () => v
         const torrent = item.querySelector('link')?.textContent || ''
         const pubDate = item.querySelector('pubDate')?.textContent || ''
         
-        const getSize = () => item.getElementsByTagNameNS(nyaaNS, 'size')[0]?.textContent || '??'
-        const getSeeders = () => item.getElementsByTagNameNS(nyaaNS, 'seeders')[0]?.textContent || '0'
-        const getLeechers = () => item.getElementsByTagNameNS(nyaaNS, 'leechers')[0]?.textContent || '0'
-        const getDownloads = () => item.getElementsByTagNameNS(nyaaNS, 'downloads')[0]?.textContent || '0'
-        const getInfoHash = () => item.getElementsByTagNameNS(nyaaNS, 'infoHash')[0]?.textContent || ''
+        // Helper to extracting Nyaa tags robustly (handling namespace issues)
+        const getTag = (tagName: string) => {
+          // Try 1: Standard Namespace
+          let el = item.getElementsByTagNameNS(nyaaNS, tagName)[0]
+          if (el) return el.textContent || ''
+          
+          // Try 2: Tag name with colon (e.g. nyaa:size)
+          el = item.getElementsByTagName(`nyaa:${tagName}`)[0]
+          if (el) return el.textContent || ''
+          
+          // Try 3: Just local name (last resort, might conflict in other feeds but okay here)
+          el = item.getElementsByTagName(tagName)[0]
+          if (el) return el.textContent || ''
+          
+          return ''
+        }
+
+        const size = getTag('size') || '??'
+        const seeders = getTag('seeders') || '0'
+        const leechers = getTag('leechers') || '0'
+        const downloads = getTag('downloads') || '0'
+        const infoHash = getTag('infoHash')
         
-        const infoHash = getInfoHash()
         const magnet = infoHash 
           ? `magnet:?xt=urn:btih:${infoHash}&dn=${encodeURIComponent(title)}&tr=http%3A%2F%2Fnyaa.tracker.wf%3A7777%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce`
           : ''
@@ -93,11 +109,11 @@ export function MangaSearch({ open, onClose }: { open: boolean; onClose: () => v
           title,
           link,
           torrent,
-          size: getSize(),
+          size,
           date: new Date(pubDate).toLocaleDateString(),
-          seeders: parseInt(getSeeders(), 10),
-          leechers: parseInt(getLeechers(), 10),
-          downloads: parseInt(getDownloads(), 10),
+          seeders: parseInt(seeders, 10),
+          leechers: parseInt(leechers, 10),
+          downloads: parseInt(downloads, 10),
           magnet
         }
       })
