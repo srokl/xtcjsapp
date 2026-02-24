@@ -29,19 +29,46 @@ export function MangaSearch({ open, onClose }: { open: boolean; onClose: () => v
     setLoading(true)
     setError('')
     
+    // Nyaa RSS URL: c=3_1 (Literature - English), f=0 (No filter)
+    const targetUrl = `https://nyaa.si/?page=rss&q=${encodeURIComponent(q)}&c=3_1&f=0`
+    
+    // Proxies to try in order
+    const proxies = [
+      (url: string) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+      (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
+    ]
+
+    let responseText = ''
+    let success = false
+
+    for (const proxyFn of proxies) {
+      try {
+        const proxyUrl = proxyFn(targetUrl)
+        const response = await fetch(proxyUrl)
+        if (!response.ok) throw new Error('Network response was not ok')
+        responseText = await response.text()
+        // Basic check if it looks like XML
+        if (responseText.includes('<?xml') || responseText.includes('<rss')) {
+          success = true
+          break
+        }
+      } catch (err) {
+        console.warn(`Proxy failed:`, err)
+        continue
+      }
+    }
+
+    if (!success) {
+      console.error('All proxies failed')
+      setError('search-unavailable')
+      setResults([])
+      setLoading(false)
+      return
+    }
+    
     try {
-      // Use Nyaa RSS feed via allorigins proxy
-      // c=3_1: Literature - English
-      // f=0: No filter (Show all)
-      const targetUrl = `https://nyaa.si/?page=rss&q=${encodeURIComponent(q)}&c=3_1&f=0`
-      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`
-      
-      const response = await fetch(proxyUrl)
-      if (!response.ok) throw new Error('Network response was not ok')
-      
-      const text = await response.text()
       const parser = new DOMParser()
-      const xml = parser.parseFromString(text, 'text/xml')
+      const xml = parser.parseFromString(responseText, 'text/xml')
       const nyaaNS = 'https://nyaa.si/xmlns/nyaa/'
       
       const items = Array.from(xml.querySelectorAll('item'))
@@ -77,7 +104,7 @@ export function MangaSearch({ open, onClose }: { open: boolean; onClose: () => v
 
       setResults(parsedResults)
     } catch (err) {
-      console.error('Search failed:', err)
+      console.error('Parsing failed:', err)
       setError('search-unavailable')
       setResults([])
     } finally {
