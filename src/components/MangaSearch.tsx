@@ -336,20 +336,41 @@ export function MangaSearch({ open, onClose }: { open: boolean; onClose: () => v
                 <span>{r.date}</span>
               </div>
               <div className="manga-search-item-actions" onClick={(e) => e.stopPropagation()}>
-                {r.magnet && (
-                  <button 
-                    className="manga-search-magnet" 
-                    title="Download in Browser (WebRTC Only - may not work with all peers)" 
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      e.preventDefault()
-                      downloadTorrent(r.magnet, r.title)
-                    }}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    Download (WebRTC)
-                  </button>
-                )}
+                {/* Active Download Progress Inline */}
+                {(() => {
+                  const parsedId = r.magnet ? r.magnet.match(/xt=urn:btih:([a-zA-Z0-9]+)/i) : null
+                  const infoHash = parsedId ? parsedId[1].toLowerCase() : null
+                  const activeDl = infoHash ? Object.values(downloads).find(d => d.infoHash === infoHash) : null
+
+                  if (activeDl) {
+                    return (
+                      <div className="manga-search-inline-progress" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', color: 'var(--ink)' }}>
+                        <div style={{ width: '60px', height: '4px', background: 'var(--paper-dark)', borderRadius: '2px', overflow: 'hidden' }}>
+                          <div style={{ width: `${activeDl.progress * 100}%`, height: '100%', background: 'var(--accent)' }} />
+                        </div>
+                        <span>{(activeDl.progress * 100).toFixed(0)}%</span>
+                        <span style={{ color: 'var(--ink-faded)' }}>{activeDl.peers} peers</span>
+                        <span>{formatSize(activeDl.speed)}/s</span>
+                      </div>
+                    )
+                  }
+                  
+                  return r.magnet && (
+                    <button 
+                      className="manga-search-magnet" 
+                      title="Download in Browser (WebRTC Only - may not work with all peers)" 
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        e.preventDefault()
+                        downloadTorrent(r.magnet, r.title)
+                      }}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      Download (WebRTC)
+                    </button>
+                  )
+                })()}
+
                 {r.magnet && (
                   <a href={r.magnet} className="manga-search-magnet" title="Magnet link" onClick={(e) => e.stopPropagation()}>
                     Magnet
