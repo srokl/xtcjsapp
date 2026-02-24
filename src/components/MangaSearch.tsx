@@ -54,11 +54,13 @@ export function MangaSearch({ open, onClose }: { open: boolean; onClose: () => v
     if (!clientRef.current) return
 
     // Public WebSocket trackers (Required for browser-based WebTorrent)
+    // Source: https://github.com/ngosang/trackerslist
     const wsTrackers = [
+      'wss://tracker.files.fm:7073/announce',
+      'ws://tracker.files.fm:7072/announce',
       'wss://tracker.openwebtorrent.com',
       'wss://tracker.btorrent.xyz',
       'wss://tracker.webtorrent.dev',
-      'wss://tracker.files.fm:7073/announce',
       'wss://tracker.novage.com.ua:443/announce',
       'wss://open.pieceofshit.net:443/announce'
     ]
