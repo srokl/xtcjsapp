@@ -8,6 +8,7 @@ import { applyDithering } from './processing/dithering'
 import { toGrayscale, applyContrast, calculateOverlapSegments, isSolidColor, applyGamma, applyInvert } from './processing/image'
 import { rotateCanvas, extractAndRotate, extractRegion, resizeWithPadding, resizeFill, resizeCover, resizeCrop, TARGET_WIDTH, TARGET_HEIGHT, DEVICE_DIMENSIONS } from './processing/canvas'
 import { buildXtc, imageDataToXth, imageDataToXtg } from './xtc-format'
+import { getWebglProcessor } from './processing/webgl'
 
 function getTargetDimensions(options: ConversionOptions) {
   return DEVICE_DIMENSIONS[options.device] || DEVICE_DIMENSIONS.X4;
@@ -697,19 +698,28 @@ function processCanvasAsImage(
   let width = crop.width
   let height = crop.height
 
-  if (options.contrast > 0) {
-    applyContrast(ctx, width, height, options.contrast)
+  if (options.useWebgl) {
+    try {
+      const processor = getWebglProcessor()
+      const processed = processor.process(canvas, width, height, {
+        contrast: options.contrast,
+        gamma: (options.is2bit) ? options.gamma : 1.0,
+        invert: options.invert
+      })
+      ctx.drawImage(processed, 0, 0)
+    } catch (err) {
+      console.warn('WebGL failed, fallback to CPU', err)
+      if (options.contrast > 0) applyContrast(ctx, width, height, options.contrast)
+      if (options.gamma !== 1.0 && options.is2bit) applyGamma(ctx, width, height, options.gamma)
+      if (options.invert) applyInvert(ctx, width, height)
+      toGrayscale(ctx, width, height)
+    }
+  } else {
+    if (options.contrast > 0) applyContrast(ctx, width, height, options.contrast)
+    if (options.gamma !== 1.0 && options.is2bit) applyGamma(ctx, width, height, options.gamma)
+    if (options.invert) applyInvert(ctx, width, height)
+    toGrayscale(ctx, width, height)
   }
-
-  if (options.gamma !== 1.0 && options.is2bit) {
-    applyGamma(ctx, width, height, options.gamma)
-  }
-
-  if (options.invert) {
-    applyInvert(ctx, width, height)
-  }
-
-  toGrayscale(ctx, width, height)
 
   // Add sideways overview if requested
   if (options.sidewaysOverviews && !options.manhwa) {
@@ -927,20 +937,28 @@ function processLoadedImage(
   let height = crop.height
 
   // Apply contrast enhancement
-  if (options.contrast > 0) {
-    applyContrast(ctx, width, height, options.contrast)
+  if (options.useWebgl) {
+    try {
+      const processor = getWebglProcessor()
+      const processed = processor.process(canvas, width, height, {
+        contrast: options.contrast,
+        gamma: (options.is2bit) ? options.gamma : 1.0,
+        invert: options.invert
+      })
+      ctx.drawImage(processed, 0, 0)
+    } catch (err) {
+      console.warn('WebGL failed, fallback to CPU', err)
+      if (options.contrast > 0) applyContrast(ctx, width, height, options.contrast)
+      if (options.gamma !== 1.0 && options.is2bit) applyGamma(ctx, width, height, options.gamma)
+      if (options.invert) applyInvert(ctx, width, height)
+      toGrayscale(ctx, width, height)
+    }
+  } else {
+    if (options.contrast > 0) applyContrast(ctx, width, height, options.contrast)
+    if (options.gamma !== 1.0 && options.is2bit) applyGamma(ctx, width, height, options.gamma)
+    if (options.invert) applyInvert(ctx, width, height)
+    toGrayscale(ctx, width, height)
   }
-
-  if (options.gamma !== 1.0 && options.is2bit) {
-    applyGamma(ctx, width, height, options.gamma)
-  }
-
-  if (options.invert) {
-    applyInvert(ctx, width, height)
-  }
-
-  // Convert to grayscale
-  toGrayscale(ctx, width, height)
 
   // Add sideways overview if requested
   if (options.sidewaysOverviews && !options.manhwa) {

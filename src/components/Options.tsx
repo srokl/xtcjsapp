@@ -172,6 +172,18 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
         </label>
       </div>
 
+      <div className="option checkbox-option">
+        <label htmlFor="useWebgl">
+          <input
+            type="checkbox"
+            id="useWebgl"
+            checked={options.useWebgl}
+            onChange={(e) => onChange({ ...options, useWebgl: e.target.checked })}
+          />
+          Use WebGL (Experimental Speed Boost)
+        </label>
+      </div>
+
       {options.is2bit && (
         <div className="option">
           <label htmlFor="gamma">Gamma Correction</label>

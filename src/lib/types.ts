@@ -17,6 +17,7 @@ export interface ConversionOptions {
   videoFps: number
   device: 'X4' | 'X3'
   sourceType: 'cbz' | 'pdf' | 'image' | 'video'
+  useWebgl: boolean
 }
 
 export interface ConversionResult {

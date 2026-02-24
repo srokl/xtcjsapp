@@ -86,6 +86,7 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
     videoFps: 1.0,
     device: 'X4',
     sourceType: fileType,
+    useWebgl: false,
   })
 
   const handleFiles = useCallback((files: File[]) => {
