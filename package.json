@@ -16,7 +16,8 @@
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^5.4.624",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "webtorrent": "^2.8.5"
   },
   "devDependencies": {
     "@tanstack/router-plugin": "^1.158.1",
@@ -26,6 +27,7 @@
     "sharp": "^0.33.5",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
+    "vite-plugin-node-polyfills": "^0.25.0",
     "vite-plugin-pwa": "^1.2.0"
   }
 }

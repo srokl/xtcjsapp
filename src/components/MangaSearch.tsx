@@ -1,5 +1,19 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import WebTorrent from 'webtorrent'
+import { formatSize } from '../utils/format'
 import '../styles/manga-search.css'
+
+interface TorrentProgress {
+  name: string
+  progress: number
+  speed: number
+  downloaded: number
+  total: number
+  peers: number
+  timeRemaining: number
+  ready?: boolean
+  infoHash: string
+}
 
 interface NyaaResult {
   title: string
@@ -18,8 +32,93 @@ export function MangaSearch({ open, onClose }: { open: boolean; onClose: () => v
   const [results, setResults] = useState<NyaaResult[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [downloads, setDownloads] = useState<Record<string, TorrentProgress>>({})
   const inputRef = useRef<HTMLInputElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout>>()
+  const clientRef = useRef<WebTorrent.Instance | null>(null)
+
+  useEffect(() => {
+    if (open && !clientRef.current) {
+      const client = new WebTorrent()
+      clientRef.current = client
+      client.on('error', (err) => {
+        console.error('[WebTorrent] Error:', err)
+      })
+    }
+    // Note: We keep the client alive even if modal closes to continue downloads
+    // But we should probably destroy it on unmount of the app?
+    // Since MangaSearch is in __root, it basically persists.
+  }, [open])
+
+  const downloadTorrent = useCallback((magnet: string, title: string) => {
+    if (!clientRef.current) return
+
+    // Avoid duplicate add
+    const parsed = clientRef.current.get(magnet)
+    if (parsed) {
+      console.log('Torrent already exists')
+      return
+    }
+
+    try {
+      clientRef.current.add(magnet, (torrent) => {
+        console.log('Torrent added:', torrent.infoHash)
+        
+        const updateState = () => {
+          setDownloads(prev => ({
+            ...prev,
+            [torrent.infoHash]: {
+              name: torrent.name || title,
+              progress: torrent.progress,
+              speed: torrent.downloadSpeed,
+              downloaded: torrent.downloaded,
+              total: torrent.length,
+              peers: torrent.numPeers,
+              timeRemaining: torrent.timeRemaining,
+              infoHash: torrent.infoHash,
+              ready: torrent.done
+            }
+          }))
+        }
+
+        torrent.on('download', updateState)
+        torrent.on('done', updateState)
+        updateState() // Initial
+      })
+    } catch (err) {
+      console.error('Failed to add torrent:', err)
+    }
+  }, [])
+
+  const saveFile = useCallback((infoHash: string) => {
+    const torrent = clientRef.current?.get(infoHash)
+    if (!torrent) return
+
+    // For simplicity, download the largest file or zip?
+    // Let's iterate files and trigger download for each (or ask user).
+    // Just downloading all files as a naive approach.
+    torrent.files.forEach(file => {
+      file.getBlobURL((err, url) => {
+        if (err || !url) return
+        const a = document.createElement('a')
+        a.href = url
+        a.download = file.name
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+      })
+    })
+  }, [])
+
+  const removeTorrent = useCallback((infoHash: string) => {
+    clientRef.current?.remove(infoHash)
+    setDownloads(prev => {
+      const next = { ...prev }
+      delete next[infoHash]
+      return next
+    })
+  }, [])
 
   const search = useCallback(async (q: string) => {
     if (!q.trim()) {
@@ -228,6 +327,20 @@ export function MangaSearch({ open, onClose }: { open: boolean; onClose: () => v
               </div>
               <div className="manga-search-item-actions" onClick={(e) => e.stopPropagation()}>
                 {r.magnet && (
+                  <button 
+                    className="manga-search-magnet" 
+                    title="Download in Browser (WebRTC Only - may not work with all peers)" 
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      e.preventDefault()
+                      downloadTorrent(r.magnet, r.title)
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    Download (WebRTC)
+                  </button>
+                )}
+                {r.magnet && (
                   <a href={r.magnet} className="manga-search-magnet" title="Magnet link" onClick={(e) => e.stopPropagation()}>
                     Magnet
                   </a>
@@ -241,6 +354,31 @@ export function MangaSearch({ open, onClose }: { open: boolean; onClose: () => v
             </a>
           ))}
         </div>
+
+        {Object.values(downloads).length > 0 && (
+          <div className="manga-search-downloads">
+            <h3>Active Downloads</h3>
+            {Object.values(downloads).map((d) => (
+              <div key={d.infoHash} className="manga-download-item">
+                <div className="download-info">
+                  <div className="download-name" title={d.name}>{d.name}</div>
+                  <div className="download-meta">
+                    {formatSize(d.downloaded)} / {formatSize(d.total)} · {(d.progress * 100).toFixed(1)}% · {formatSize(d.speed)}/s · {d.peers} peers
+                  </div>
+                  <div className="download-progress-bar">
+                    <div className="download-progress-fill" style={{ width: `${d.progress * 100}%` }} />
+                  </div>
+                </div>
+                <div className="download-actions">
+                  {d.ready && (
+                    <button className="btn-save" onClick={() => saveFile(d.infoHash)}>Save</button>
+                  )}
+                  <button className="btn-cancel" onClick={() => removeTorrent(d.infoHash)}>&times;</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )

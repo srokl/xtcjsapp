@@ -201,6 +201,9 @@
 
 .manga-search-item-actions {
   margin-top: var(--space-xs);
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
 }
 
 .manga-search-magnet {
@@ -214,6 +217,7 @@
   padding: 2px var(--space-sm);
   border: var(--border-light);
   transition: all 0.15s;
+  background: none;
 }
 
 .manga-search-magnet:hover {
@@ -252,4 +256,103 @@
 .manga-search-trigger svg {
   width: 16px;
   height: 16px;
+}
+
+/* Active Downloads */
+.manga-search-downloads {
+  border-top: var(--border);
+  background: var(--paper-dark);
+  padding: var(--space-md) var(--space-lg);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.manga-search-downloads h3 {
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: var(--space-sm);
+  color: var(--ink-faded);
+}
+
+.manga-download-item {
+  background: var(--paper);
+  border: var(--border-light);
+  padding: var(--space-sm);
+  margin-bottom: var(--space-xs);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.download-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.download-name {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+
+.download-meta {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--ink-faded);
+  margin-bottom: 4px;
+}
+
+.download-progress-bar {
+  height: 4px;
+  background: var(--paper-dark);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.download-progress-fill {
+  height: 100%;
+  background: var(--ink);
+  transition: width 0.3s;
+}
+
+.download-actions {
+  display: flex;
+  gap: var(--space-xs);
+  align-items: center;
+}
+
+.btn-save {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  background: var(--ink);
+  color: var(--paper);
+  border: none;
+  cursor: pointer;
+}
+
+.btn-save:hover {
+  background: var(--accent);
+}
+
+.btn-cancel {
+  font-size: 1.2rem;
+  line-height: 1;
+  background: none;
+  border: none;
+  color: var(--ink-faded);
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.btn-cancel:hover {
+  color: var(--accent);
 }
