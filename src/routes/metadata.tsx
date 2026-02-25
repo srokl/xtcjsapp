@@ -105,6 +105,21 @@ function MetadataEditor() {
     })
   }
 
+  const handleMoveChapter = (index: number, direction: 'up' | 'down') => {
+    if (direction === 'up' && index === 0) return;
+    if (direction === 'down' && index === metadata.toc.length - 1) return;
+
+    setMetadata(prev => {
+      const newToc = [...prev.toc];
+      const targetIndex = direction === 'up' ? index - 1 : index + 1;
+      // Swap elements
+      const temp = newToc[index];
+      newToc[index] = newToc[targetIndex];
+      newToc[targetIndex] = temp;
+      return { ...prev, toc: newToc };
+    });
+  }
+
   return (
     <div className="content-section" style={{ gridColumn: '1 / -1' }}>
       <div className="section-header" style={{ marginBottom: 'var(--space-xl)' }}>
@@ -206,14 +221,38 @@ function MetadataEditor() {
                         style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border-light)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
                       />
                     </div>
-                    <button 
-                      onClick={() => handleRemoveChapter(idx)}
-                      style={{ marginTop: '22px', padding: 'var(--space-xs) var(--space-sm)', background: 'var(--accent)', color: 'white', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '0.8rem', fontWeight: 500 }}
-                    >
-                      Delete
-                    </button>
+                    <div style={{ display: 'flex', gap: 'var(--space-xs)', marginTop: '22px' }}>
+                      <button 
+                        onClick={() => handleMoveChapter(idx, 'up')}
+                        disabled={idx === 0}
+                        style={{ padding: 'var(--space-xs)', background: 'var(--paper-dark)', color: 'var(--ink)', border: 'var(--border-light)', cursor: idx === 0 ? 'not-allowed' : 'pointer', opacity: idx === 0 ? 0.5 : 1 }}
+                        aria-label="Move Up"
+                        title="Move Up"
+                      >
+                        ↑
+                      </button>
+                      <button 
+                        onClick={() => handleMoveChapter(idx, 'down')}
+                        disabled={idx === metadata.toc.length - 1}
+                        style={{ padding: 'var(--space-xs)', background: 'var(--paper-dark)', color: 'var(--ink)', border: 'var(--border-light)', cursor: idx === metadata.toc.length - 1 ? 'not-allowed' : 'pointer', opacity: idx === metadata.toc.length - 1 ? 0.5 : 1 }}
+                        aria-label="Move Down"
+                        title="Move Down"
+                      >
+                        ↓
+                      </button>
+                      <button 
+                        onClick={() => handleRemoveChapter(idx)}
+                        style={{ padding: 'var(--space-xs) var(--space-sm)', background: 'var(--accent)', color: 'white', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '0.8rem', fontWeight: 500 }}
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </div>
                 ))}
+                
+                <div style={{ marginTop: 'var(--space-md)', textAlign: 'center' }}>
+                  <button className="btn-preview" onClick={handleAddChapter} style={{ padding: 'var(--space-sm) var(--space-md)', width: '100%' }}>+ Add Chapter</button>
+                </div>
               </div>
             )}
           </div>
