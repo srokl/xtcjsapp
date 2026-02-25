@@ -156,6 +156,21 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
               </select>
             </div>
           )}
+
+          {!isImageMode && !isVideoMode && options.orientation === 'landscape' && !options.manhwa && (
+            <div className="option">
+              <label htmlFor="splitMode">Page Split</label>
+              <select
+                id="splitMode"
+                value={options.splitMode}
+                onChange={(e) => onChange({ ...options, splitMode: e.target.value })}
+              >
+                <option value="overlap">Overlapping thirds</option>
+                <option value="split">Split in half</option>
+                <option value="nosplit">No split</option>
+              </select>
+            </div>
+          )}
         </>
       )}
 
@@ -224,21 +239,6 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
           <option value="portrait">Portrait</option>
         </select>
       </div>
-
-      {!isImageMode && !isVideoMode && options.orientation === 'landscape' && !options.manhwa && (
-        <div className="option">
-          <label htmlFor="splitMode">Page Split</label>
-          <select
-            id="splitMode"
-            value={options.splitMode}
-            onChange={(e) => onChange({ ...options, splitMode: e.target.value })}
-          >
-            <option value="overlap">Overlapping thirds</option>
-            <option value="split">Split in half</option>
-            <option value="nosplit">No split</option>
-          </select>
-        </div>
-      )}
 
       <div className="option">
         <label htmlFor="dithering">Dithering</label>
