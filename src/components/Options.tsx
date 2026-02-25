@@ -173,14 +173,14 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
       </div>
 
       <div className="option checkbox-option">
-        <label htmlFor="useWebgl">
+        <label htmlFor="useWasm">
           <input
             type="checkbox"
-            id="useWebgl"
-            checked={options.useWebgl}
-            onChange={(e) => onChange({ ...options, useWebgl: e.target.checked })}
+            id="useWasm"
+            checked={options.useWasm}
+            onChange={(e) => onChange({ ...options, useWasm: e.target.checked })}
           />
-          Use WebGL (Experimental Speed Boost)
+          Use WebAssembly (Faster Encoding)
         </label>
       </div>
 

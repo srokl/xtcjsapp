@@ -1,6 +1,7 @@
 // XTC format generation for XTEink X4 e-reader
 
 import type { BookMetadata, TocEntry } from './metadata/types';
+import { runWasmPack, isWasmLoaded } from './processing/wasm';
 
 interface ProcessedPage {
   name: string;
@@ -11,6 +12,7 @@ interface ProcessedPage {
 interface XtcBuildOptions {
   metadata?: BookMetadata;
   is2bit?: boolean;
+  useWasm?: boolean;
 }
 
 // XTC format constants (based on reference file analysis)
@@ -37,8 +39,14 @@ export async function buildXtc(
   options: XtcBuildOptions = {}
 ): Promise<ArrayBuffer> {
   const is2bit = options.is2bit || false;
+  const useWasm = options.useWasm && isWasmLoaded();
+  
   const xtgBlobs = pages.map(page => {
     const imageData = page.canvas.getContext('2d')!.getImageData(0, 0, page.canvas.width, page.canvas.height);
+    if (useWasm) {
+      const rawData = runWasmPack(imageData, is2bit);
+      return wrapWasmData(rawData, page.canvas.width, page.canvas.height, is2bit);
+    }
     return is2bit ? imageDataToXth(imageData) : imageDataToXtg(imageData);
   });
 
@@ -128,7 +136,7 @@ export async function buildXtc(
   }
 
   // Write page data
-  let writeOffset = dataOffset;
+  let writeOffset = dataOffset
   for (const blob of xtgBlobs) {
     uint8.set(new Uint8Array(blob), writeOffset);
     writeOffset += blob.byteLength;
@@ -333,6 +341,41 @@ export function imageDataToXth(imageData: ImageData): ArrayBuffer {
 
   uint8.set(p0, headerSize);
   uint8.set(p1, headerSize + planeSize);
+
+  return buffer;
+}
+
+/**
+ * Wrap raw Wasm packed data with XTC chunk header
+ */
+function wrapWasmData(pixelData: Uint8Array, w: number, h: number, is2bit: boolean): ArrayBuffer {
+  // Create MD5-like digest
+  const md5digest = new Uint8Array(8);
+  for (let i = 0; i < Math.min(8, pixelData.length); i++) {
+    md5digest[i] = pixelData[i];
+  }
+
+  const headerSize = 22;
+  const totalSize = headerSize + pixelData.length;
+  const buffer = new ArrayBuffer(totalSize);
+  const view = new DataView(buffer);
+  const uint8 = new Uint8Array(buffer);
+
+  // Header
+  if (is2bit) {
+    uint8[0] = 0x58; uint8[1] = 0x54; uint8[2] = 0x48; uint8[3] = 0x00; // XTH
+  } else {
+    uint8[0] = 0x58; uint8[1] = 0x54; uint8[2] = 0x47; uint8[3] = 0x00; // XTG
+  }
+  
+  view.setUint16(4, w, true);
+  view.setUint16(6, h, true);
+  view.setUint8(8, 0);
+  view.setUint8(9, 0);
+  view.setUint32(10, pixelData.length, true);
+  uint8.set(md5digest, 14);
+
+  uint8.set(pixelData, headerSize);
 
   return buffer;
 }
