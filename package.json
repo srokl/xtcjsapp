@@ -4,8 +4,8 @@
   "description": "Browser-based CBZ to XTC converter for XTEink X4",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "npm run asbuild && vite",
+    "build": "npm run asbuild && vite build",
     "preview": "vite preview",
     "asbuild": "asc assembly/index.ts --target release --outFile public/xtc.wasm"
   },
