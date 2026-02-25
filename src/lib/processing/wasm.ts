@@ -43,6 +43,29 @@ function ensureMemory(size: number) {
   }
 }
 
+export function runWasmFilters(imageData: ImageData, contrast: number, gamma: number, invert: boolean): void {
+  if (!wasmInstance) throw new Error('Wasm not initialized');
+  
+  const { width, height, data } = imageData;
+  const inputSize = width * height * 4; // RGBA
+  
+  const heapBase = (wasmInstance.exports.__heap_base as WebAssembly.Global)?.value ?? 65536;
+  const inputPtr = heapBase;
+  
+  ensureMemory(inputPtr + inputSize);
+  
+  // Copy input
+  const memArray = new Uint8Array(wasmMemory.buffer);
+  memArray.set(data, inputPtr);
+  
+  // Call applyFilters (f32, f32, bool)
+  // Note: AssemblyScript bool is i32 (0 or 1) in Wasm interface usually
+  (wasmInstance.exports.applyFilters as CallableFunction)(width, height, inputPtr, contrast, gamma, invert ? 1 : 0);
+  
+  // Copy back result
+  data.set(memArray.subarray(inputPtr, inputPtr + inputSize));
+}
+
 export function runWasmDither(imageData: ImageData, algorithm: string, is2bit: boolean): void {
   if (!wasmInstance) throw new Error('Wasm not initialized');
   
@@ -80,7 +103,6 @@ export function runWasmDither(imageData: ImageData, algorithm: string, is2bit: b
       exports.ditherSierraLite(width, height, inputPtr, scratchPtr, is2bit);
       break;
     case 'ordered':
-      // Ordered dithering doesn't need scratch buffer in Wasm implementation
       exports.ditherOrdered(width, height, inputPtr, is2bit);
       break;
     case 'stochastic':
@@ -93,8 +115,6 @@ export function runWasmDither(imageData: ImageData, algorithm: string, is2bit: b
   }
   
   // Copy back result
-  // The result is in inputPtr (modified in place)
-  // We need to copy it back to imageData.data
   data.set(memArray.subarray(inputPtr, inputPtr + inputSize));
 }
 

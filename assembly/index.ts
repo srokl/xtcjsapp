@@ -87,6 +87,96 @@ export function toGrayscale(width: i32, height: i32, srcPtr: usize): void {
   }
 }
 
+// Optimized Image Filters (Contrast -> Invert -> Gamma -> Grayscale)
+// Single pass for maximum performance
+export function applyFilters(width: i32, height: i32, srcPtr: usize, contrast: f32, gamma: f32, invert: bool): void {
+  let len = width * height;
+  
+  // Pre-calculate contrast factor
+  // Matches Python/JS logic: blackCutoff = 3*C, whiteCutoff = 3+9*C (approx)
+  // Or the WebGL logic: factor = (1.0 + contrast / 10.0)
+  // Let's match the WebGL logic for "experimental speed boost" feel, or standard JS?
+  // Standard JS use Look Up Table (LUT).
+  // Calculating pow() per pixel is slow. 
+  // However, simple contrast stretch is fast.
+  // Let's implement a direct mapping.
+  
+  // To avoid expensive pow() calls per pixel for Gamma, we should probably use a LUT (Look Up Table)
+  // Since input is 8-bit (0-255), a 256-byte LUT is tiny and much faster.
+  
+  // 1. Build LUT
+  // We need to map 0-255 input -> 0-255 output applying all transforms
+  // But wait, input is RGBA. We convert to Gray first?
+  // JS logic: Contrast (RGB) -> Gamma (RGB) -> Invert (RGB) -> Gray
+  // Actually converter.ts: Contrast -> Gamma -> Invert -> Gray.
+  
+  // If we assume we convert to Gray *last*, we apply filters to RGB.
+  // If we convert to Gray *first*, we save 3x work.
+  // Standard "manga" processing usually converts to gray first, but converter.ts does it last.
+  // Doing it last allows color filters to work (e.g. invert colors might differ?).
+  // For grayscale output, it doesn't matter much mathematically if we invert before/after gray 
+  // (Invert(Gray(RGB)) == Gray(Invert(RGB))).
+  
+  // So: Gray -> Contrast -> Gamma -> Invert is most efficient.
+  // Let's do that: Read RGBA -> Calc Gray -> Apply Filters (via LUT) -> Write Gray (to R,G,B).
+  
+  let lut = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) {
+    let val = <f32>i;
+    
+    // 1. Contrast
+    if (contrast > 0.0) {
+      let c = <f32>1.0 + (contrast / <f32>4.0);
+      let norm = val / <f32>255.0;
+      norm = <f32>0.5 + (norm - <f32>0.5) * c;
+      if (norm < 0.0) norm = 0.0;
+      if (norm > 1.0) norm = 1.0;
+      val = norm * <f32>255.0;
+    }
+    
+    // 2. Gamma
+    if (gamma != 1.0) {
+      // val = pow(val/255, gamma) * 255
+      let norm = val / 255.0;
+      // Math.pow is native f64 in JS, in AS we use f32 or f64.
+      // Need 'import "Math"'? No, generic Math.pow works.
+      val = <f32>Math.pow(<f64>norm, <f64>gamma) * 255.0;
+    }
+    
+    // 3. Invert
+    if (invert) {
+      val = 255.0 - val;
+    }
+    
+    // Clamp
+    if (val < 0.0) val = 0.0;
+    if (val > 255.0) val = 255.0;
+    
+    lut[i] = <u8>val;
+  }
+  
+  // Process Pixels using LUT
+  for (let i = 0; i < len; i++) {
+    let idx = i << 2;
+    let r = load<u8>(srcPtr + idx);
+    let g = load<u8>(srcPtr + idx + 1);
+    let b = load<u8>(srcPtr + idx + 2);
+    
+    // Luminosity Gray
+    // Gray = (r*77 + g*150 + b*29) >> 8
+    let grayIndex = <i32>((<u32>r * 77 + <u32>g * 150 + <u32>b * 29) >> 8);
+    
+    // Lookup
+    let finalGray = lut[grayIndex];
+    
+    // Write back (R=G=B=Gray, A=255)
+    store<u8>(srcPtr + idx, finalGray);
+    store<u8>(srcPtr + idx + 1, finalGray);
+    store<u8>(srcPtr + idx + 2, finalGray);
+    // store<u8>(srcPtr + idx + 3, 255); // Keep Alpha
+  }
+}
+
 // --- Dithering Algorithms ---
 
 // Helper: Thresholding
