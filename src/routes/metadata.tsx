@@ -56,6 +56,24 @@ function MetadataEditor() {
 
   const handleSave = async () => {
     if (!parsed || !file) return
+
+    // Validate chapters
+    for (let i = 0; i < metadata.toc.length; i++) {
+      const a = metadata.toc[i]
+      if (a.startPage > a.endPage) {
+        alert(`Chapter "${a.title}" has an invalid page range (start ${a.startPage} > end ${a.endPage}).`)
+        return
+      }
+      for (let j = i + 1; j < metadata.toc.length; j++) {
+        const b = metadata.toc[j]
+        // Overlap condition: StartA <= EndB and EndA >= StartB
+        if (a.startPage <= b.endPage && a.endPage >= b.startPage) {
+          alert(`Chapter overlap detected:\n"${a.title}" (Pages ${a.startPage}-${a.endPage})\noverlaps with\n"${b.title}" (Pages ${b.startPage}-${b.endPage}).\nPlease fix overlapping pages before saving.`)
+          return
+        }
+      }
+    }
+
     setIsProcessing(true)
     
     try {
