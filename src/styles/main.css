@@ -33,6 +33,16 @@
   --border-light: 1px solid var(--ink-faded);
 }
 
+[data-theme="dark"] {
+  --paper: #1a1817;
+  --paper-dark: #2a2725;
+  --ink: #fafafa;
+  --ink-light: #f0f0f0;
+  --ink-faded: #8a8785;
+  --accent: #ff5c4a;
+  --accent-hover: #ff7c6a;
+}
+
 *,
 *::before,
 *::after {

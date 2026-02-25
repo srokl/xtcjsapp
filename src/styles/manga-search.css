@@ -258,6 +258,33 @@
   height: 16px;
 }
 
+.theme-toggle {
+  position: absolute;
+  right: 40px;
+  top: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: var(--border-light);
+  color: var(--ink);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.theme-toggle:hover {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+
+.theme-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+
 /* Active Downloads */
 .manga-search-downloads {
   border-top: var(--border);
