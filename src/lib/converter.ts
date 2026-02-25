@@ -889,6 +889,32 @@ function processCanvasAsImage(
 }
 
 /**
+ * Process a single image
+ */
+async function processImage(
+  imgBlob: Blob,
+  pageNum: number,
+  options: ConversionOptions
+): Promise<ProcessedPage[]> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    const objectUrl = URL.createObjectURL(imgBlob)
+
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl)
+      const pages = processLoadedImage(img, pageNum, options)
+      resolve(pages)
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl)
+      console.error(`Failed to load image for page ${pageNum}`)
+      resolve([])
+    }
+    img.src = objectUrl
+  })
+}
+
+/**
  * Process a loaded image element
  */
 function processLoadedImage(
@@ -956,6 +982,7 @@ function processLoadedImage(
   }
 
   // Special scaling modes for single images (wallpapers)
+  // We use these if it's not a Manhwa and not splitting
   const isSingleImage = options.sourceType === 'image' && !options.manhwa && options.splitMode === 'nosplit'
 
   if (isSingleImage) {
