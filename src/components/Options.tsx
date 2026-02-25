@@ -108,43 +108,39 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
             </label>
           </div>
 
-          <div className="option checkbox-option">
-            <label htmlFor="manhwa">
-              <input
-                type="checkbox"
-                id="manhwa"
-                checked={options.manhwa}
-                onChange={(e) => onChange({ ...options, manhwa: e.target.checked })}
-              />
-              Manhwa Mode (Long strips)
-            </label>
+          <div className="option">
+            <label htmlFor="readingMode">Reading Mode</label>
+            <select
+              id="readingMode"
+              value={options.manhwa ? "manhwa" : "manga"}
+              onChange={(e) => onChange({ ...options, manhwa: e.target.value === 'manhwa' })}
+            >
+              <option value="manga">Manga/Comic</option>
+              <option value="manhwa">Manhwa</option>
+            </select>
           </div>
 
-          <div className="option checkbox-option">
-            <label htmlFor="sidewaysOverviews" className={options.manhwa || options.includeOverviews ? 'disabled' : ''}>
-              <input
-                type="checkbox"
-                id="sidewaysOverviews"
-                checked={options.sidewaysOverviews}
-                onChange={(e) => onChange({ ...options, sidewaysOverviews: e.target.checked })}
-                disabled={options.manhwa || options.includeOverviews}
-              />
-              Include Sideways Overviews
-            </label>
-          </div>
-
-          <div className="option checkbox-option">
-            <label htmlFor="includeOverviews" className={options.manhwa || options.sidewaysOverviews ? 'disabled' : ''}>
-              <input
-                type="checkbox"
-                id="includeOverviews"
-                checked={options.includeOverviews}
-                onChange={(e) => onChange({ ...options, includeOverviews: e.target.checked })}
-                disabled={options.manhwa || options.sidewaysOverviews}
-              />
-              Include Upright Overviews
-            </label>
-          </div>
+          {!options.manhwa && (
+            <div className="option">
+              <label htmlFor="overviews">Overviews</label>
+              <select
+                id="overviews"
+                value={options.sidewaysOverviews ? "sideways" : options.includeOverviews ? "upright" : "none"}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  onChange({
+                    ...options,
+                    sidewaysOverviews: val === 'sideways',
+                    includeOverviews: val === 'upright'
+                  });
+                }}
+              >
+                <option value="none">None</option>
+                <option value="sideways">Sideways Overviews</option>
+                <option value="upright">Upright Overviews</option>
+              </select>
+            </div>
+          )}
         </>
       )}
 

@@ -113,11 +113,52 @@
 
 .option.checkbox-option input:disabled {
   cursor: not-allowed;
+  opacity: 0.5;
 }
 
-.option.checkbox-option input {
-  width: auto;
+.option.checkbox-option input[type="checkbox"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 40px;
+  height: 20px;
+  background: var(--paper);
+  border: 2px solid var(--ink);
+  border-radius: 20px;
+  position: relative;
+  cursor: pointer;
+  outline: none;
+  transition: background 0.2s, border-color 0.2s;
+  flex-shrink: 0;
   margin: 0;
+}
+
+.option.checkbox-option input[type="checkbox"]::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  background: var(--ink);
+  border-radius: 50%;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.option.checkbox-option input[type="checkbox"]:checked {
+  background: var(--ink);
+}
+
+.option.checkbox-option input[type="checkbox"]:checked::after {
+  transform: translateX(20px);
+  background: var(--paper);
+}
+
+.option.checkbox-option input[type="checkbox"]:hover {
+  background: var(--paper-dark);
+}
+
+.option.checkbox-option input[type="checkbox"]:checked:hover {
+  background: var(--ink-faded);
 }
 
 .option:last-child {

@@ -73,7 +73,7 @@ export class ManhwaStitcher {
        const step = isSolid ? this.targetHeight : (this.targetHeight - overlapPixels)
        
        // Dither
-       applyDithering(sliceCtx, this.targetWidth, this.targetHeight, this.options.dithering, this.options.is2bit)
+       applyDithering(sliceCtx, this.targetWidth, this.targetHeight, this.options.dithering, this.options.is2bit, this.options.useWasm)
        
        this.pageCount++
        pages.push({
@@ -118,7 +118,7 @@ export class ManhwaStitcher {
         // Draw content at top
         ctx.drawImage(this.buffer, 0, 0)
         
-        applyDithering(ctx, this.targetWidth, this.targetHeight, this.options.dithering, this.options.is2bit)
+        applyDithering(ctx, this.targetWidth, this.targetHeight, this.options.dithering, this.options.is2bit, this.options.useWasm)
         
         this.pageCount++
         pages.push({

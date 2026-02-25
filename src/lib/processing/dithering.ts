@@ -1,6 +1,8 @@
 // Dithering algorithms optimized for manga on e-ink displays
 // Each algorithm has different characteristics for handling manga art
 
+import { runWasmDither, isWasmLoaded } from './wasm'
+
 /**
  * Applies the selected dithering algorithm to canvas
  */
@@ -9,10 +11,22 @@ export function applyDithering(
   width: number,
   height: number,
   algorithm: string,
-  is2bit: boolean = false
+  is2bit: boolean = false,
+  useWasm: boolean = false
 ): void {
   const imageData = ctx.getImageData(0, 0, width, height);
   const data = imageData.data;
+
+  // Attempt Wasm Dithering for supported algorithms
+  if (useWasm && isWasmLoaded() && (algorithm === 'stucki' || algorithm === 'atkinson')) {
+    try {
+      runWasmDither(imageData, algorithm, is2bit);
+      ctx.putImageData(imageData, 0, 0);
+      return;
+    } catch (e) {
+      console.warn("Wasm dither failed, fallback to CPU", e);
+    }
+  }
 
   switch (algorithm) {
     case 'none':

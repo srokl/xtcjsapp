@@ -59,7 +59,8 @@ DITHER_MAP = {
     'atkinson': 'atkinson', # Custom implementation
     'stucki': 'stucki', # Custom implementation
     'ostromoukhov': 'ostromoukhov', # Custom implementation
-    'zhoufang': 'zhoufang' # Custom implementation
+    'zhoufang': 'zhoufang', # Custom implementation
+    'stochastic': 'stochastic' # Custom implementation
 }
 
 # Downscaling options mapping
