@@ -31,6 +31,99 @@ const TOC_TITLE_SIZE = 80;
 const FLAG_HAS_METADATA_LOW = 0x01000100;
 const FLAG_HAS_METADATA_HIGH = 0x00000001;
 
+export async function buildXtcFromBuffers(
+  xtgBlobs: ArrayBuffer[],
+  options: XtcBuildOptions = {}
+): Promise<ArrayBuffer> {
+  const is2bit = options.is2bit || false;
+  const pageCount = xtgBlobs.length;
+  const hasMetadata = options.metadata && (
+    options.metadata.title ||
+    options.metadata.author ||
+    (options.metadata.toc && options.metadata.toc.length > 0)
+  );
+
+  let metadataSize = 0;
+  let tocEntriesOffset = 0;
+
+  if (hasMetadata) {
+    metadataSize = TITLE_SIZE + AUTHOR_SIZE + TOC_HEADER_SIZE;
+    if (options.metadata!.toc.length > 0) {
+      metadataSize += options.metadata!.toc.length * TOC_ENTRY_SIZE;
+    }
+    tocEntriesOffset = HEADER_WITH_METADATA_SIZE + TITLE_SIZE + AUTHOR_SIZE + TOC_HEADER_SIZE;
+  }
+
+  const headerSize = hasMetadata ? HEADER_WITH_METADATA_SIZE : HEADER_BASE_SIZE;
+  const metadataOffset = hasMetadata ? HEADER_WITH_METADATA_SIZE : 0;
+  const indexOffset = headerSize + metadataSize;
+  const dataOffset = indexOffset + (pageCount * INDEX_ENTRY_SIZE);
+
+  let totalSize = dataOffset;
+  for (const blob of xtgBlobs) {
+    totalSize += blob.byteLength;
+  }
+
+  const buffer = new ArrayBuffer(totalSize);
+  const view = new DataView(buffer);
+  const uint8 = new Uint8Array(buffer);
+
+  if (is2bit) {
+    uint8[0] = 0x58; uint8[1] = 0x54; uint8[2] = 0x43; uint8[3] = 0x48; // XTCH
+  } else {
+    uint8[0] = 0x58; uint8[1] = 0x54; uint8[2] = 0x43; uint8[3] = 0x00; // XTC\0
+  }
+  view.setUint16(4, 1, true);
+  view.setUint16(6, pageCount, true);
+
+  if (hasMetadata) {
+    view.setUint32(8, FLAG_HAS_METADATA_LOW, true);
+    view.setUint32(12, FLAG_HAS_METADATA_HIGH, true);
+  } else {
+    view.setUint32(8, 0, true);
+    view.setUint32(12, 0, true);
+  }
+
+  setBigUint64(view, 16, BigInt(metadataOffset));
+  setBigUint64(view, 24, BigInt(indexOffset));
+  setBigUint64(view, 32, BigInt(dataOffset));
+  setBigUint64(view, 40, 0n);
+
+  if (hasMetadata) {
+    setBigUint64(view, 48, BigInt(tocEntriesOffset));
+  }
+
+  if (hasMetadata && options.metadata) {
+    writeMetadata(uint8, view, HEADER_WITH_METADATA_SIZE, options.metadata);
+  }
+
+  let relOffset = dataOffset;
+  for (let i = 0; i < pageCount; i++) {
+    const blob = xtgBlobs[i];
+    const blobView = new DataView(blob);
+    // XTG/XTH header is 22 bytes. Width is at 4, Height is at 6.
+    const w = blobView.getUint16(4, true);
+    const h = blobView.getUint16(6, true);
+
+    const entryOffset = indexOffset + i * INDEX_ENTRY_SIZE;
+
+    setBigUint64(view, entryOffset, BigInt(relOffset));
+    view.setUint32(entryOffset + 8, blob.byteLength, true);
+    view.setUint16(entryOffset + 12, w, true);
+    view.setUint16(entryOffset + 14, h, true);
+
+    relOffset += blob.byteLength;
+  }
+
+  let writeOffset = dataOffset;
+  for (const blob of xtgBlobs) {
+    uint8.set(new Uint8Array(blob), writeOffset);
+    writeOffset += blob.byteLength;
+  }
+
+  return buffer;
+}
+
 /**
  * Build XTC file from processed pages
  */

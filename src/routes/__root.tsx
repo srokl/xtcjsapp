@@ -105,6 +105,9 @@ function RootLayout() {
           <Link to="/video" className={`nav-tab${location.pathname === '/video' ? ' active' : ''}`}>
             Video
           </Link>
+          <Link to="/metadata" className={`nav-tab${location.pathname === '/metadata' ? ' active' : ''}`}>
+            XTC/XTCH Metadata
+          </Link>
         </nav>
 
         <Outlet />
