@@ -30,57 +30,106 @@ export function isWasmLoaded(): boolean {
   return !!wasmInstance;
 }
 
+// Memory Layout:
+// [Input RGBA] [Scratch F32] [Output Packed]
+// HeapBase -> Input -> Scratch -> Output
+
+function ensureMemory(size: number) {
+  if (!wasmMemory) throw new Error('Wasm not initialized');
+  const neededPages = Math.ceil(size / 65536);
+  const currentPages = wasmMemory.buffer.byteLength / 65536;
+  if (currentPages < neededPages) {
+    wasmMemory.grow(neededPages - currentPages);
+  }
+}
+
+export function runWasmDither(imageData: ImageData, algorithm: string, is2bit: boolean): void {
+  if (!wasmInstance) throw new Error('Wasm not initialized');
+  
+  const { width, height, data } = imageData;
+  const inputSize = width * height * 4; // RGBA
+  const scratchSize = width * height * 4; // F32
+  
+  const heapBase = (wasmInstance.exports.__heap_base as WebAssembly.Global)?.value ?? 65536;
+  const inputPtr = heapBase;
+  const scratchPtr = inputPtr + inputSize;
+  
+  ensureMemory(scratchPtr + scratchSize);
+  
+  // Copy input
+  const memArray = new Uint8Array(wasmMemory.buffer);
+  memArray.set(data, inputPtr);
+  
+  // Call Dither
+  const exports = wasmInstance.exports as any;
+  
+  switch (algorithm) {
+    case 'floyd':
+      exports.ditherFloyd(width, height, inputPtr, scratchPtr, is2bit);
+      break;
+    case 'atkinson':
+      exports.ditherAtkinson(width, height, inputPtr, scratchPtr, is2bit);
+      break;
+    case 'ostromoukhov':
+      exports.ditherOstromoukhov(width, height, inputPtr, scratchPtr, is2bit);
+      break;
+    case 'zhoufang':
+      exports.ditherZhouFang(width, height, inputPtr, scratchPtr, is2bit);
+      break;
+    case 'sierra-lite':
+      exports.ditherSierraLite(width, height, inputPtr, scratchPtr, is2bit);
+      break;
+    case 'ordered':
+      // Ordered dithering doesn't need scratch buffer in Wasm implementation
+      exports.ditherOrdered(width, height, inputPtr, is2bit);
+      break;
+    case 'stochastic':
+      exports.ditherStochastic(width, height, inputPtr, scratchPtr, is2bit);
+      break;
+    case 'stucki':
+    default:
+      exports.ditherStucki(width, height, inputPtr, scratchPtr, is2bit);
+      break;
+  }
+  
+  // Copy back result
+  // The result is in inputPtr (modified in place)
+  // We need to copy it back to imageData.data
+  data.set(memArray.subarray(inputPtr, inputPtr + inputSize));
+}
+
 export function runWasmPack(imageData: ImageData, is2bit: boolean): Uint8Array {
-  if (!wasmInstance || !wasmMemory) throw new Error('Wasm not initialized');
+  if (!wasmInstance) throw new Error('Wasm not initialized');
 
   const { width, height, data } = imageData;
   const inputSize = width * height * 4; // RGBA
   
-  // Calculate output size
-  // 1-bit: 1 bit per pixel -> width/8 * height
-  // 2-bit: 2 planes * (width/8 * height) -> width/8 * height * 2
-  // We use ceil for row bytes (1-bit) or col bytes (2-bit)
-  
   let outputSize = 0;
-  let dstPtrOffset = 0;
-  
   if (is2bit) {
-    // packXth: colBytes = (height + 7) >>> 3; planeSize = colBytes * width; total = 2 * planeSize
     const colBytes = (height + 7) >>> 3;
     outputSize = colBytes * width * 2;
   } else {
-    // packXtc: rowBytes = (width + 7) >>> 3; total = rowBytes * height
     const rowBytes = (width + 7) >>> 3;
     outputSize = rowBytes * height;
   }
 
-  // Minimal memory management: Place input at heap base, output after input.
-  // We read __heap_base from exports if available, otherwise assume start of dynamic memory.
-  // For a simple module, we can just use offset 0 or a safe offset if we don't care about preserving state between calls.
-  // BUT: The module might have static data at 0.
-  // We'll try to read the exported global `__heap_base` if it exists, else assume 64KB safe offset.
-  
   const heapBase = (wasmInstance.exports.__heap_base as WebAssembly.Global)?.value ?? 65536;
   const inputPtr = heapBase;
   const outputPtr = inputPtr + inputSize;
-  const requiredPages = Math.ceil((outputPtr + outputSize) / 65536);
   
-  if (wasmMemory.buffer.byteLength < requiredPages * 65536) {
-    wasmMemory.grow(requiredPages - (wasmMemory.buffer.byteLength / 65536));
-  }
+  ensureMemory(outputPtr + outputSize);
 
   // Copy input
   const memArray = new Uint8Array(wasmMemory.buffer);
   memArray.set(data, inputPtr);
 
-  // Call Wasm
+  // Call Pack
   if (is2bit) {
     (wasmInstance.exports.packXth as CallableFunction)(width, height, inputPtr, outputPtr);
   } else {
     (wasmInstance.exports.packXtc as CallableFunction)(width, height, inputPtr, outputPtr);
   }
 
-  // Copy output
-  // We slice to return a copy
+  // Return copy of output
   return memArray.slice(outputPtr, outputPtr + outputSize);
 }
