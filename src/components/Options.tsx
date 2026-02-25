@@ -120,6 +120,21 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
             </select>
           </div>
 
+          {!isImageMode && !isVideoMode && options.manhwa && (
+            <div className="option">
+              <label htmlFor="manhwaOverlap">Manhwa Overlap</label>
+              <select
+                id="manhwaOverlap"
+                value={options.manhwaOverlap}
+                onChange={(e) => onChange({ ...options, manhwaOverlap: parseInt(e.target.value) })}
+              >
+                <option value="30">30% Overlap</option>
+                <option value="50">50% Overlap</option>
+                <option value="75">75% Overlap</option>
+              </select>
+            </div>
+          )}
+
           {!options.manhwa && (
             <div className="option">
               <label htmlFor="overviews">Overviews</label>
@@ -194,21 +209,6 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
               onChange={(e) => onChange({ ...options, gamma: parseFloat(e.target.value) || 1.0 })}
             />
           </div>
-        </div>
-      )}
-
-      {!isImageMode && !isVideoMode && options.manhwa && (
-        <div className="option">
-          <label htmlFor="manhwaOverlap">Manhwa Overlap</label>
-          <select
-            id="manhwaOverlap"
-            value={options.manhwaOverlap}
-            onChange={(e) => onChange({ ...options, manhwaOverlap: parseInt(e.target.value) })}
-          >
-            <option value="30">30% Overlap</option>
-            <option value="50">50% Overlap</option>
-            <option value="75">75% Overlap</option>
-          </select>
         </div>
       )}
 

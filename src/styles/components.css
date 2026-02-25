@@ -190,7 +190,12 @@
 
 .option select:hover,
 .option input:hover {
-  background: #fff;
+  background: var(--paper-dark);
+}
+
+.option select option {
+  background: var(--paper);
+  color: var(--ink);
 }
 
 .option select:focus,
