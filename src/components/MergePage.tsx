@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from 'react'
 import { useNavigate } from '@tanstack/react-router'
+import streamSaver from 'streamsaver'
 import { Viewer } from './Viewer'
 import { formatSize } from '../utils/format'
 import { setPendingFiles, arrayBufferToFile } from '../lib/file-transfer'
@@ -228,15 +229,26 @@ export function MergePage() {
 
   const handleDownload = useCallback((result: MergePageResult) => {
     if (!result.data) return
-    const blob = new Blob([result.data], { type: 'application/octet-stream' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = result.name
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+
+    try {
+      const fileStream = streamSaver.createWriteStream(result.name, {
+        size: result.size,
+      })
+      const writer = fileStream.getWriter()
+      writer.write(new Uint8Array(result.data))
+      writer.close()
+    } catch (e) {
+      console.warn('StreamSaver failed, falling back to Blob URL', e)
+      const blob = new Blob([result.data], { type: 'application/octet-stream' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = result.name
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    }
   }, [])
 
   const handlePreview = useCallback((result: MergePageResult) => {

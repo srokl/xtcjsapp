@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import streamSaver from 'streamsaver'
 import {
   isStorageAvailable,
   openDatabase,
@@ -154,15 +155,27 @@ export function useStoredResults(): UseStoredResultsReturn {
         throw new Error('File data not found')
       }
 
-      const blob = new Blob([data], { type: 'application/octet-stream' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = result.name
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      // Use StreamSaver if supported (to bypass Chrome 2GB blob/memory limits on large files)
+      try {
+        const fileStream = streamSaver.createWriteStream(result.name, {
+          size: data.byteLength,
+        })
+        const writer = fileStream.getWriter()
+        writer.write(new Uint8Array(data))
+        writer.close()
+      } catch (e) {
+        console.warn('StreamSaver failed, falling back to Blob URL', e)
+        // Fallback to Blob if streamSaver fails (e.g. in some isolated contexts)
+        const blob = new Blob([data], { type: 'application/octet-stream' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = result.name
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+      }
     } catch (err) {
       console.error('Failed to download:', err)
       throw err

@@ -1,5 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useState } from 'react'
+import streamSaver from 'streamsaver'
 import { Dropzone } from '../components/Dropzone'
 import { Viewer } from '../components/Viewer'
 import { parseXtcFile, type ParsedXtc, extractXtcPages } from '../lib/xtc-reader'
@@ -79,19 +80,29 @@ function MetadataEditor() {
     try {
       const is2bit = parsed.header.is2bit
       const newBuffer = await buildXtcFromBuffers(parsed.pageData, { metadata, is2bit })
-      
-      const blob = new Blob([newBuffer], { type: 'application/octet-stream' })
-      const url = URL.createObjectURL(blob)
-      
-      const a = document.createElement('a')
-      a.href = url
       const ext = is2bit ? '.xtch' : '.xtc'
       const baseName = file.name.replace(/\.[^/.]+$/, '')
-      a.download = `${baseName}_edited${ext}`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      const fileName = `${baseName}_edited${ext}`
+
+      try {
+        const fileStream = streamSaver.createWriteStream(fileName, {
+          size: newBuffer.byteLength,
+        })
+        const writer = fileStream.getWriter()
+        writer.write(new Uint8Array(newBuffer))
+        writer.close()
+      } catch (e) {
+        console.warn('StreamSaver failed, falling back to Blob URL', e)
+        const blob = new Blob([newBuffer], { type: 'application/octet-stream' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = fileName
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+      }
     } catch (e) {
       console.error(e)
       alert("Failed to repack XTC file.")
