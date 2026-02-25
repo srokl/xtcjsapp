@@ -113,7 +113,7 @@ function MetadataEditor() {
 
       {!file && (
         <div className="dropzone-wrapper" style={{ minHeight: '300px' }}>
-          <Dropzone onDrop={handleFileDrop} accept=".xtc,.xtch" multiple={false} />
+          <Dropzone onFiles={handleFileDrop} fileType="xtc" multiple={false} />
         </div>
       )}
 
