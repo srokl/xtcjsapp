@@ -74,7 +74,7 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
     horizontalMargin: 0,
     verticalMargin: 0,
     orientation: (fileType === 'image' || fileType === 'video') ? 'portrait' : 'landscape',
-    is2bit: (fileType === 'image' || fileType === 'video'),
+    is2bit: fileType === 'image',
     manhwa: false,
     manhwaOverlap: 50,
     sidewaysOverviews: false,

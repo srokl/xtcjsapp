@@ -113,8 +113,7 @@
 .manga-search-spinner {
   position: absolute;
   right: calc(var(--space-lg) + var(--space-md));
-  top: 50%;
-  transform: translateY(-50%);
+  top: calc(50% - 8px);
   width: 16px;
   height: 16px;
   border: 2px solid var(--ink-faded);
@@ -124,7 +123,8 @@
 }
 
 @keyframes spin {
-  to { transform: translateY(-50%) rotate(360deg); }
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .manga-search-results {
