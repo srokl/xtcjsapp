@@ -438,6 +438,7 @@
   padding: var(--space-sm) var(--space-md);
   background: var(--paper);
   border: var(--border);
+  color: var(--ink);
   font-family: var(--font-mono);
   font-size: 0.8rem;
   font-weight: 500;
