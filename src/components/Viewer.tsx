@@ -102,12 +102,12 @@ export function Viewer({ pages, onClose }: ViewerProps) {
         </div>
       </div>
       <div className="viewer-container">
-        <div
-          className="viewer-track"
-          style={{ transform: `translateX(-${currentIndex * 100}%)` }}
-        >
+        <div className="viewer-track">
           {pages.map((src, i) => (
-            <div key={i} className="viewer-page">
+            <div 
+              key={i} 
+              className={`viewer-page${i === currentIndex ? ' active' : ''}`}
+            >
               <img src={src} alt={`Page ${i + 1}`} />
             </div>
           ))}
