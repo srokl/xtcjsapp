@@ -127,7 +127,7 @@ export function MergePage() {
     e.preventDefault()
     const droppedFiles = Array.from(e.dataTransfer.files).filter(f => {
       const ext = f.name.toLowerCase().split('.').pop()
-      return ['cbz', 'pdf', 'xtc'].includes(ext || '')
+      return ['cbz', 'pdf', 'xtc', 'xtch'].includes(ext || '')
     })
     if (droppedFiles.length > 0) {
       handleFiles(droppedFiles)
@@ -331,14 +331,14 @@ export function MergePage() {
                 {mode === 'merge' ? 'Drop files to merge' : 'Drop a file to split'}
               </span>
               <span className="dropzone-secondary">
-                CBZ, PDF, or XTC {mode === 'merge' ? '(same type only)' : ''}
+                CBZ, PDF, or XTC/XTCH {mode === 'merge' ? '(same type only)' : ''}
               </span>
             </div>
           </div>
           <input
             id="merge-file-input"
             type="file"
-            accept=".cbz,.CBZ,.pdf,.PDF,.xtc,.XTC"
+            accept=".cbz,.CBZ,.pdf,.PDF,.xtc,.XTC,.xtch,.XTCH"
             multiple={mode === 'merge'}
             hidden
             onChange={handleFileInput}
@@ -416,7 +416,7 @@ export function MergePage() {
                 value={xtcOutputFormat}
                 onChange={(e) => setXtcOutputFormat(e.target.value as OutputFormat)}
               >
-                <option value="xtc">XTC (E-Reader)</option>
+                <option value="xtc">XTC/XTCH (E-Reader)</option>
                 <option value="cbz">CBZ (Archive)</option>
               </select>
             </div>
