@@ -210,6 +210,12 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
         </label>
       </div>
 
+      {options.useWasm && (
+        <div style={{ fontSize: '0.7rem', color: 'var(--ink-faded)', marginTop: '-0.5rem', marginBottom: 'var(--space-sm)', fontStyle: 'italic', paddingLeft: '2.5rem' }}>
+          Note: If encoding fails, you may need to enable "Experimental WebAssembly" in <code>chrome://flags</code>
+        </div>
+      )}
+
       {options.is2bit && (
         <div className="option">
           <label htmlFor="gamma">Gamma Correction</label>
