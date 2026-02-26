@@ -142,6 +142,9 @@ export function runWasmPack(imageData: ImageData, is2bit: boolean): Uint8Array {
   // Copy input
   const memArray = new Uint8Array(wasmMemory.buffer);
   memArray.set(data, inputPtr);
+  
+  // Zero out output buffer
+  memArray.fill(0, outputPtr, outputPtr + outputSize);
 
   // Call Pack
   if (is2bit) {

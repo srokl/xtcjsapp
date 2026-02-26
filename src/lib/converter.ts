@@ -254,10 +254,11 @@ export async function convertCbzToXtc(
   if (options.streamedDownload && !options.manhwa) {
     // Pass 1: Dimensions & Layout
     for (let i = 0; i < imageFiles.length; i++) {
-      onProgress(i / imageFiles.length * 0.1, null) // First 10% for analysis
+      onProgress(i / imageFiles.length * 0.05, null) // First 5% for analysis
       const imgBlob = await imageFiles[i].entry.async('blob')
       const imgDims = await getImageDimensions(imgBlob)
-      const count = calculateOutputPageCount(imgDims.width, imgDims.height, options)
+      const crop = getAxisCropRect(imgDims.width, imgDims.height, options)
+      const count = calculateOutputPageCount(crop.width, crop.height, options)
       
       for (let j = 0; j < count; j++) {
         pageInfos.push({ width: dims.width, height: dims.height })
@@ -271,7 +272,15 @@ export async function convertCbzToXtc(
     }
     const headerAndIndex = buildXtcHeaderAndIndex(pageInfos, { metadata, is2bit: options.is2bit })
     
-    const fileStream = streamSaver.createWriteStream(outputFileName)
+    // Calculate total size for better browser handling
+    let totalSize = headerAndIndex.byteLength
+    for (const info of pageInfos) {
+      totalSize += getXtcPageSize(info.width, info.height, options.is2bit)
+    }
+
+    const fileStream = streamSaver.createWriteStream(outputFileName, {
+      size: totalSize
+    })
     const writer = fileStream.getWriter()
     await writer.write(headerAndIndex)
 
@@ -286,7 +295,7 @@ export async function convertCbzToXtc(
       }
       
       if (pages.length > 0) {
-        onProgress(0.1 + (i + 1) / imageFiles.length * 0.9, pages[0].canvas.toDataURL('image/png'))
+        onProgress(0.05 + (i + 1) / imageFiles.length * 0.95, pages[0].canvas.toDataURL('image/png'))
       }
     }
     
@@ -498,10 +507,11 @@ export async function convertCbrToXtc(
   if (options.streamedDownload && !options.manhwa) {
     // Pass 1: Dimensions & Layout
     for (let i = 0; i < imageFiles.length; i++) {
-      onProgress(i / imageFiles.length * 0.1, null)
+      onProgress(i / imageFiles.length * 0.05, null)
       const imgBlob = new Blob([new Uint8Array(imageFiles[i].data)])
       const imgDims = await getImageDimensions(imgBlob)
-      const count = calculateOutputPageCount(imgDims.width, imgDims.height, options)
+      const crop = getAxisCropRect(imgDims.width, imgDims.height, options)
+      const count = calculateOutputPageCount(crop.width, crop.height, options)
       for (let j = 0; j < count; j++) {
         pageInfos.push({ width: dims.width, height: dims.height })
       }
@@ -514,7 +524,15 @@ export async function convertCbrToXtc(
     }
     const headerAndIndex = buildXtcHeaderAndIndex(pageInfos, { metadata, is2bit: options.is2bit })
     
-    const fileStream = streamSaver.createWriteStream(outputFileName)
+    // Calculate total size
+    let totalSize = headerAndIndex.byteLength
+    for (const info of pageInfos) {
+      totalSize += getXtcPageSize(info.width, info.height, options.is2bit)
+    }
+
+    const fileStream = streamSaver.createWriteStream(outputFileName, {
+      size: totalSize
+    })
     const writer = fileStream.getWriter()
     await writer.write(headerAndIndex)
 
@@ -527,7 +545,7 @@ export async function convertCbrToXtc(
         await writer.write(new Uint8Array(encoded))
       }
       if (pages.length > 0) {
-        onProgress(0.1 + (i + 1) / imageFiles.length * 0.9, pages[0].canvas.toDataURL('image/png'))
+        onProgress(0.05 + (i + 1) / imageFiles.length * 0.95, pages[0].canvas.toDataURL('image/png'))
       }
     }
     
@@ -676,7 +694,7 @@ async function convertPdfToXtc(
   if (options.streamedDownload && !options.manhwa) {
     // Pass 1: Dimensions & Layout
     for (let i = 1; i <= numPages; i++) {
-      onProgress(i / numPages * 0.1, null)
+      onProgress(i / numPages * 0.05, null)
       const page = await pdf.getPage(i)
       const viewport = page.getViewport({ scale: 1 })
       const count = calculateOutputPageCount(viewport.width, viewport.height, options)
@@ -692,7 +710,15 @@ async function convertPdfToXtc(
     }
     const headerAndIndex = buildXtcHeaderAndIndex(pageInfos, { metadata, is2bit: options.is2bit })
     
-    const fileStream = streamSaver.createWriteStream(outputFileName)
+    // Calculate total size for better browser handling
+    let totalSize = headerAndIndex.byteLength
+    for (const info of pageInfos) {
+      totalSize += getXtcPageSize(info.width, info.height, options.is2bit)
+    }
+
+    const fileStream = streamSaver.createWriteStream(outputFileName, {
+      size: totalSize
+    })
     const writer = fileStream.getWriter()
     await writer.write(headerAndIndex)
 
@@ -713,7 +739,7 @@ async function convertPdfToXtc(
       }
       
       if (xtcPages.length > 0) {
-        onProgress(0.1 + i / numPages * 0.9, xtcPages[0].canvas.toDataURL('image/png'))
+        onProgress(0.05 + i / numPages * 0.95, xtcPages[0].canvas.toDataURL('image/png'))
       }
     }
     
