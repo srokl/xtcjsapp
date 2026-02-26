@@ -3,7 +3,7 @@
 import JSZip from 'jszip'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-import { buildXtc } from './xtc-format'
+import { buildXtc, buildXtcFromBuffers } from './xtc-format'
 import { parseXtcFile } from './xtc-reader'
 import { buildCbz, splitPdf, type OutputFormat, detectFileType } from './merge'
 import { TARGET_WIDTH, TARGET_HEIGHT } from './processing/canvas'
@@ -383,8 +383,9 @@ async function splitXtcFile(
 ): Promise<SplitResult[]> {
   const buffer = await file.arrayBuffer()
   const parsed = await parseXtcFile(buffer)
+  const is2bit = parsed.header.is2bit
 
-  const baseName = file.name.replace(/\.xtc$/i, '')
+  const baseName = file.name.replace(/\.xtch?$/i, '')
   const results: SplitResult[] = []
 
   for (let rangeIdx = 0; rangeIdx < ranges.length; rangeIdx++) {
@@ -401,9 +402,36 @@ async function splitXtcFile(
     const rangePages = parsed.pageData.slice(range.start - 1, range.end)
 
     if (outputFormat === 'xtc') {
-      const data = buildXtcFromRawPages(rangePages, dimensions.width, dimensions.height)
+      // Split metadata
+      const partMetadata: any = {
+        title: `${parsed.metadata?.title || baseName} - Part ${rangeIdx + 1}`,
+        author: parsed.metadata?.author || '',
+        toc: []
+      }
+
+      if (parsed.metadata?.toc) {
+        for (const entry of parsed.metadata.toc) {
+          // Check if chapter overlaps with this range
+          const start = Math.max(entry.startPage, range.start)
+          const end = Math.min(entry.endPage, range.end)
+          
+          if (start <= end) {
+            partMetadata.toc.push({
+              title: entry.title,
+              startPage: start - range.start + 1,
+              endPage: end - range.start + 1
+            })
+          }
+        }
+      }
+
+      const data = await buildXtcFromBuffers(rangePages, { 
+        metadata: partMetadata, 
+        is2bit 
+      })
+
       results.push({
-        name: `${baseName}_part${rangeIdx + 1}.xtc`,
+        name: `${baseName}_part${rangeIdx + 1}.${is2bit ? 'xtch' : 'xtc'}`,
         data,
         size: data.byteLength,
         pageCount: rangePages.length,

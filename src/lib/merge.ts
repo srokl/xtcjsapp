@@ -4,7 +4,7 @@ import JSZip from 'jszip'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { PDFDocument } from 'pdf-lib'
-import { buildXtc } from './xtc-format'
+import { buildXtc, buildXtcFromBuffers } from './xtc-format'
 import { extractXtcPages, extractXtcRawPages, parseXtcFile } from './xtc-reader'
 import { TARGET_WIDTH, TARGET_HEIGHT } from './processing/canvas'
 
@@ -329,6 +329,12 @@ export async function mergeXtcFiles(
   if (outputFormat === 'xtc') {
     // Fast path: concatenate raw XTG data without decoding
     const allXtgData: ArrayBuffer[] = []
+    let mergedMetadata: any = { title: '', author: '', toc: [] }
+    let totalPageOffset = 0
+
+    // Detect if we should use XTCH (2-bit) based on first file
+    const firstBufHead = await files[0].slice(0, 4).arrayBuffer()
+    const is2bit = new Uint8Array(firstBufHead)[3] === 0x48 // 'H' for XTCH
 
     for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
       const file = files[fileIdx]
@@ -340,8 +346,26 @@ export async function mergeXtcFiles(
       })
 
       const buffer = await file.arrayBuffer()
-      const rawPages = await extractXtcRawPages(buffer)
-      allXtgData.push(...rawPages)
+      const parsed = await parseXtcFile(buffer)
+      allXtgData.push(...parsed.pageData)
+
+      // Merge metadata
+      if (fileIdx === 0) {
+        mergedMetadata.title = parsed.metadata?.title || ''
+        mergedMetadata.author = parsed.metadata?.author || ''
+      }
+      
+      if (parsed.metadata?.toc) {
+        for (const entry of parsed.metadata.toc) {
+          mergedMetadata.toc.push({
+            title: entry.title,
+            startPage: entry.startPage + totalPageOffset,
+            endPage: entry.endPage + totalPageOffset
+          })
+        }
+      }
+      
+      totalPageOffset += parsed.header.pageCount
 
       onProgress({
         file: file.name,
@@ -351,9 +375,13 @@ export async function mergeXtcFiles(
       })
     }
 
-    const data = buildXtcFromRawPages(allXtgData, dimensions.width, dimensions.height)
+    const data = await buildXtcFromBuffers(allXtgData, { 
+      metadata: mergedMetadata, 
+      is2bit 
+    })
+
     return {
-      name: 'merged.xtc',
+      name: 'merged.' + (is2bit ? 'xtch' : 'xtc'),
       data,
       size: data.byteLength,
       pageCount: allXtgData.length,
