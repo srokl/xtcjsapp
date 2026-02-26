@@ -108,6 +108,9 @@ function RootLayout() {
           <Link to="/metadata" className={`nav-tab${location.pathname === '/metadata' ? ' active' : ''}`}>
             XTC/XTCH Metadata
           </Link>
+          <Link to="/merge" className={`nav-tab${location.pathname === '/merge' ? ' active' : ''}`}>
+            Merge / Split
+          </Link>
         </nav>
 
         <Outlet />
