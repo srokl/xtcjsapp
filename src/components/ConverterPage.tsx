@@ -108,9 +108,22 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
     setProgressText('Processing...')
     setPreviewUrl(null)
 
+    let totalPageAccumulator = 0
+    let lastBaseName = ''
+
     for (let i = 0; i < selectedFiles.length; i++) {
       const file = selectedFiles[i]
-      console.log(`[Converter] Processing file ${i + 1}/${selectedFiles.length}:`, file.name)
+      
+      // Detect if this is a continuation part
+      const baseNameMatch = file.name.match(/^(.*?)[_\s]+part\s*\d+/i) || file.name.match(/^(.*?)\s+Part\s*\d+/i)
+      const currentBaseName = baseNameMatch ? baseNameMatch[1] : file.name
+      
+      if (currentBaseName !== lastBaseName) {
+        totalPageAccumulator = 0
+        lastBaseName = currentBaseName
+      }
+
+      console.log(`[Converter] Processing file ${i + 1}/${selectedFiles.length}:`, file.name, { tocPageOffset: totalPageAccumulator })
       setProgressText(file.name)
       setProgress(i / selectedFiles.length)
 
@@ -126,8 +139,13 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
           // console.log(`[Converter] Progress for ${file.name}: ${pageProgress}`) // Verbose
           setProgress((i + pageProgress) / selectedFiles.length)
           if (preview) setPreviewUrl(preview)
-        })
+        }, totalPageAccumulator)
         console.log(`[Converter] Result for ${file.name}:`, result)
+
+        // Update accumulator for next file in batch if they share base name
+        if (!result.error && result.pageCount) {
+          totalPageAccumulator += result.pageCount
+        }
 
         // Store result immediately - progressive display
         await addResult(result)

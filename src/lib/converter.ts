@@ -145,7 +145,8 @@ export async function convertToXtc(
   file: File,
   fileType: 'cbz' | 'cbr' | 'pdf' | 'image' | 'video',
   options: ConversionOptions,
-  onProgress: (progress: number, previewUrl: string | null) => void
+  onProgress: (progress: number, previewUrl: string | null) => void,
+  tocPageOffset: number = 0
 ): Promise<ConversionResult> {
   if (options.useWasm) {
     try {
@@ -156,10 +157,10 @@ export async function convertToXtc(
   }
 
   if (fileType === 'pdf') {
-    return convertPdfToXtc(file, options, onProgress)
+    return convertPdfToXtc(file, options, onProgress, tocPageOffset)
   }
   if (fileType === 'cbr') {
-    return convertCbrToXtc(file, options, onProgress)
+    return convertCbrToXtc(file, options, onProgress, tocPageOffset)
   }
   if (fileType === 'image') {
     return convertImageToXtc(file, options, onProgress)
@@ -167,7 +168,7 @@ export async function convertToXtc(
   if (fileType === 'video') {
     return convertVideoToXtc(file, options, onProgress)
   }
-  return convertCbzToXtc(file, options, onProgress)
+  return convertCbzToXtc(file, options, onProgress, tocPageOffset)
 }
 
 function calculateOutputPageCount(width: number, height: number, options: ConversionOptions): number {
@@ -196,7 +197,8 @@ function calculateOutputPageCount(width: number, height: number, options: Conver
 export async function convertCbzToXtc(
   file: File,
   options: ConversionOptions,
-  onProgress: (progress: number, previewUrl: string | null) => void
+  onProgress: (progress: number, previewUrl: string | null) => void,
+  tocPageOffset: number = 0
 ): Promise<ConversionResult> {
   const zip = await JSZip.loadAsync(file)
 
@@ -252,7 +254,7 @@ export async function convertCbzToXtc(
 
   metadata.toc = imageFiles.map((_, index) => {
     const pg = index + 1
-    let title = `Page ${pg}`
+    let title = `Page ${pg + tocPageOffset}`
     if (pageTitles.has(pg)) {
       title = `${title} - ${pageTitles.get(pg)}`
     }
@@ -420,7 +422,8 @@ async function loadUnrarWasm(): Promise<ArrayBuffer> {
 export async function convertCbrToXtc(
   file: File,
   options: ConversionOptions,
-  onProgress: (progress: number, previewUrl: string | null) => void
+  onProgress: (progress: number, previewUrl: string | null) => void,
+  tocPageOffset: number = 0
 ): Promise<ConversionResult> {
   const wasmBinary = await loadUnrarWasm()
   const arrayBuffer = await file.arrayBuffer()
@@ -471,7 +474,7 @@ export async function convertCbrToXtc(
 
   metadata.toc = imageFiles.map((_, index) => {
     const pg = index + 1
-    let title = `Page ${pg}`
+    let title = `Page ${pg + tocPageOffset}`
     if (pageTitles.has(pg)) title = `${title} - ${pageTitles.get(pg)}`
     return { title, startPage: pg, endPage: pg }
   })
@@ -573,7 +576,8 @@ export async function convertCbrToXtc(
 async function convertPdfToXtc(
   file: File,
   options: ConversionOptions,
-  onProgress: (progress: number, previewUrl: string | null) => void
+  onProgress: (progress: number, previewUrl: string | null) => void,
+  tocPageOffset: number = 0
 ): Promise<ConversionResult> {
   const arrayBuffer = await file.arrayBuffer()
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
@@ -585,7 +589,7 @@ async function convertPdfToXtc(
   const numPages = pdf.numPages
   metadata.toc = []
   for (let i = 1; i <= numPages; i++) {
-    let title = `Page ${i}`
+    let title = `Page ${i + tocPageOffset}`
     if (pageTitles.has(i)) title = `${title} - ${pageTitles.get(i)}`
     metadata.toc.push({ title, startPage: i, endPage: i })
   }
