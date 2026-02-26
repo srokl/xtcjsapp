@@ -18,6 +18,7 @@ export interface ConversionOptions {
   device: 'X4' | 'X3'
   sourceType: 'cbz' | 'pdf' | 'image' | 'video'
   useWasm: boolean
+  streamedDownload: boolean
 }
 
 export interface ConversionResult {
@@ -27,6 +28,7 @@ export interface ConversionResult {
   pageCount?: number
   pageImages?: string[]
   error?: string
+  isStreamed?: boolean
 }
 
 export interface ProcessedPage {

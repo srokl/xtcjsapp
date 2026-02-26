@@ -31,6 +31,100 @@ const TOC_TITLE_SIZE = 80;
 const FLAG_HAS_METADATA_LOW = 0x01000100;
 const FLAG_HAS_METADATA_HIGH = 0x00000001;
 
+export interface StreamPageInfo {
+  width: number;
+  height: number;
+}
+
+export function buildXtcHeaderAndIndex(
+  pages: StreamPageInfo[],
+  options: XtcBuildOptions = {}
+): Uint8Array {
+  const is2bit = options.is2bit || false;
+  const pageCount = pages.length;
+  const hasMetadata = options.metadata && (
+    options.metadata.title ||
+    options.metadata.author ||
+    (options.metadata.toc && options.metadata.toc.length > 0)
+  );
+
+  let metadataSize = 0;
+  let tocEntriesOffset = 0;
+
+  if (hasMetadata) {
+    metadataSize = TITLE_SIZE + AUTHOR_SIZE + TOC_HEADER_SIZE;
+    if (options.metadata!.toc.length > 0) {
+      metadataSize += options.metadata!.toc.length * TOC_ENTRY_SIZE;
+    }
+    tocEntriesOffset = HEADER_WITH_METADATA_SIZE + TITLE_SIZE + AUTHOR_SIZE + TOC_HEADER_SIZE;
+  }
+
+  const headerSize = hasMetadata ? HEADER_WITH_METADATA_SIZE : HEADER_BASE_SIZE;
+  const metadataOffset = hasMetadata ? HEADER_WITH_METADATA_SIZE : 0;
+  const indexOffset = headerSize + metadataSize;
+  const dataOffset = indexOffset + (pageCount * INDEX_ENTRY_SIZE);
+
+  const headerAndIndexBuffer = new ArrayBuffer(dataOffset);
+  const view = new DataView(headerAndIndexBuffer);
+  const uint8 = new Uint8Array(headerAndIndexBuffer);
+
+  if (is2bit) {
+    uint8[0] = 0x58; uint8[1] = 0x54; uint8[2] = 0x43; uint8[3] = 0x48; // XTCH
+  } else {
+    uint8[0] = 0x58; uint8[1] = 0x54; uint8[2] = 0x43; uint8[3] = 0x00; // XTC\0
+  }
+  view.setUint16(4, 1, true);
+  view.setUint16(6, pageCount, true);
+
+  if (hasMetadata) {
+    view.setUint32(8, FLAG_HAS_METADATA_LOW, true);
+    view.setUint32(12, FLAG_HAS_METADATA_HIGH, true);
+  } else {
+    view.setUint32(8, 0, true);
+    view.setUint32(12, 0, true);
+  }
+
+  setBigUint64(view, 16, BigInt(metadataOffset));
+  setBigUint64(view, 24, BigInt(indexOffset));
+  setBigUint64(view, 32, BigInt(dataOffset));
+  setBigUint64(view, 40, 0n);
+
+  if (hasMetadata) {
+    setBigUint64(view, 48, BigInt(tocEntriesOffset));
+  }
+
+  if (hasMetadata && options.metadata) {
+    writeMetadata(uint8, view, HEADER_WITH_METADATA_SIZE, options.metadata);
+  }
+
+  let relOffset = dataOffset;
+  for (let i = 0; i < pageCount; i++) {
+    const page = pages[i];
+    const entryOffset = indexOffset + i * INDEX_ENTRY_SIZE;
+    const pageSize = getXtcPageSize(page.width, page.height, is2bit);
+
+    setBigUint64(view, entryOffset, BigInt(relOffset));
+    view.setUint32(entryOffset + 8, pageSize, true);
+    view.setUint16(entryOffset + 12, page.width, true);
+    view.setUint16(entryOffset + 14, page.height, true);
+
+    relOffset += pageSize;
+  }
+
+  return uint8;
+}
+
+export function getXtcPageSize(width: number, height: number, is2bit: boolean): number {
+  if (is2bit) {
+    const colBytes = Math.ceil(height / 8);
+    const planeSize = colBytes * width;
+    return 22 + (planeSize * 2);
+  } else {
+    const rowBytes = Math.ceil(width / 8);
+    return 22 + (rowBytes * height);
+  }
+}
+
 export async function buildXtcFromBuffers(
   xtgBlobs: ArrayBuffer[],
   options: XtcBuildOptions = {}
@@ -441,7 +535,7 @@ export function imageDataToXth(imageData: ImageData): ArrayBuffer {
 /**
  * Wrap raw Wasm packed data with XTC chunk header
  */
-function wrapWasmData(pixelData: Uint8Array, w: number, h: number, is2bit: boolean): ArrayBuffer {
+export function wrapWasmData(pixelData: Uint8Array, w: number, h: number, is2bit: boolean): ArrayBuffer {
   // Create MD5-like digest
   const md5digest = new Uint8Array(8);
   for (let i = 0; i < Math.min(8, pixelData.length); i++) {

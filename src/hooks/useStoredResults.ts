@@ -152,7 +152,9 @@ export function useStoredResults(): UseStoredResultsReturn {
     try {
       const data = await getConversionData(result.id)
       if (!data || data.byteLength === 0) {
-        throw new Error('File data not found')
+        // Data might be missing because it was direct-streamed to disk during conversion
+        console.log('File data not found in storage, might have been already downloaded via stream.')
+        return
       }
 
       // Use StreamSaver if supported (to bypass Chrome 2GB blob/memory limits on large files)

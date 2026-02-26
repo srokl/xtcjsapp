@@ -1,0 +1,38 @@
+
+> xtc-converter-web@1.0.0 build
+> npm run asbuild && vite build
+
+
+> xtc-converter-web@1.0.0 asbuild
+> asc assembly/index.ts --target release --outFile public/xtc.wasm
+
+vite v7.3.1 building client environment for production...
+transforming...
+✓ 165 modules transformed.
+✗ Build failed in 1.79s
+error during build:
+[vite-plugin-pwa:build] [plugin vite-plugin-pwa:build] src/lib/converter.ts (786:0): There was an error during the build:
+  Transform failed with 1 error:
+/home/naethanj/Downloads/envmerge splits/xtcjsapp latest/src/lib/converter.ts:786:0: ERROR: Unexpected "}"
+Additionally, handling the error in the 'buildEnd' hook caused the following error:
+  Transform failed with 1 error:
+/home/naethanj/Downloads/envmerge splits/xtcjsapp latest/src/lib/converter.ts:786:0: ERROR: Unexpected "}"
+file: /home/naethanj/Downloads/envmerge splits/xtcjsapp latest/src/lib/converter.ts:786:0
+
+Unexpected "}"
+784 |    }
+785 |  }
+786 |  }
+    |  ^
+787 |  
+788 |  /**
+
+    at getRollupError (file:///home/naethanj/Downloads/envmerge%20splits/xtcjsapp%20latest/node_modules/rollup/dist/es/shared/parseAst.js:402:41)
+    at file:///home/naethanj/Downloads/envmerge%20splits/xtcjsapp%20latest/node_modules/rollup/dist/es/shared/node-entry.js:23467:39
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async catchUnfinishedHookActions (file:///home/naethanj/Downloads/envmerge%20splits/xtcjsapp%20latest/node_modules/rollup/dist/es/shared/node-entry.js:22925:16)
+    at async rollupInternal (file:///home/naethanj/Downloads/envmerge%20splits/xtcjsapp%20latest/node_modules/rollup/dist/es/shared/node-entry.js:23450:5)
+    at async buildEnvironment (file:///home/naethanj/Downloads/envmerge%20splits/xtcjsapp%20latest/node_modules/vite/dist/node/chunks/config.js:33541:12)
+    at async Object.build (file:///home/naethanj/Downloads/envmerge%20splits/xtcjsapp%20latest/node_modules/vite/dist/node/chunks/config.js:33900:19)
+    at async Object.buildApp (file:///home/naethanj/Downloads/envmerge%20splits/xtcjsapp%20latest/node_modules/vite/dist/node/chunks/config.js:33897:153)
+    at async CAC.<anonymous> (file:///home/naethanj/Downloads/envmerge%20splits/xtcjsapp%20latest/node_modules/vite/dist/node/cli.js:629:3)

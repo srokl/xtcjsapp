@@ -50,8 +50,9 @@ export function Results({ results, onDownload, onPreview, onClear }: ResultsProp
                 <button
                   className="btn-download"
                   onClick={() => onDownload(result)}
+                  disabled={result.isStreamed}
                 >
-                  Download
+                  {result.isStreamed ? 'Saved to Disk' : 'Download'}
                 </button>
               </div>
             )}

@@ -17,6 +17,7 @@ export interface StoredConversion {
   createdAt: number
   expiresAt: number
   status: 'complete' | 'error'
+  isStreamed?: boolean
 }
 
 export type StoredConversionRef = Omit<StoredConversion, 'data' | 'pageImages'>
@@ -94,6 +95,7 @@ export async function storeConversion(
     pageCount?: number
     pageImages?: string[]
     error?: string
+    isStreamed?: boolean
   }
 ): Promise<StoredConversionRef> {
   const db = await openDatabase()
@@ -111,6 +113,7 @@ export async function storeConversion(
     createdAt: now,
     expiresAt: now + EXPIRATION_MS,
     status: conversion.error ? 'error' : 'complete',
+    isStreamed: conversion.isStreamed,
   }
 
   return new Promise((resolve, reject) => {

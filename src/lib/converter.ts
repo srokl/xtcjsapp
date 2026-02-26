@@ -1,14 +1,15 @@
 // CBZ/CBR/PDF to XTC conversion logic
 
 import JSZip from 'jszip'
+import streamSaver from 'streamsaver'
 import { createExtractorFromData } from 'node-unrar-js'
 import unrarWasm from 'node-unrar-js/esm/js/unrar.wasm?url'
 import * as pdfjsLib from 'pdfjs-dist'
 import { applyDithering } from './processing/dithering'
 import { toGrayscale, applyContrast, calculateOverlapSegments, isSolidColor, applyGamma, applyInvert } from './processing/image'
 import { rotateCanvas, extractAndRotate, extractRegion, resizeWithPadding, resizeFill, resizeCover, resizeCrop, TARGET_WIDTH, TARGET_HEIGHT, DEVICE_DIMENSIONS } from './processing/canvas'
-import { buildXtc, imageDataToXth, imageDataToXtg } from './xtc-format'
-import { initWasm, runWasmFilters, isWasmLoaded } from './processing/wasm'
+import { buildXtc, buildXtcFromBuffers, imageDataToXth, imageDataToXtg, wrapWasmData, buildXtcHeaderAndIndex, type StreamPageInfo } from './xtc-format'
+import { initWasm, runWasmFilters, isWasmLoaded, runWasmPack } from './processing/wasm'
 
 function getTargetDimensions(options: ConversionOptions) {
   return DEVICE_DIMENSIONS[options.device] || DEVICE_DIMENSIONS.X4;
@@ -17,6 +18,28 @@ function getTargetDimensions(options: ConversionOptions) {
 function getOrientationAngle(orientation: string): number {
   return orientation === 'landscape' ? 90 : 0
 }
+
+/**
+ * Encode a processed page to its final binary format (XTG/XTH)
+ */
+function encodePage(page: ProcessedPage, is2bit: boolean, useWasm: boolean): ArrayBuffer {
+  const ctx = page.canvas.getContext('2d', { willReadFrequently: true })!
+  const imageData = ctx.getImageData(0, 0, page.canvas.width, page.canvas.height)
+  
+  if (useWasm && isWasmLoaded()) {
+    const packed = runWasmPack(imageData, is2bit)
+    return wrapWasmData(packed, page.canvas.width, page.canvas.height, is2bit)
+  }
+  
+  return is2bit ? imageDataToXth(imageData) : imageDataToXtg(imageData)
+}
+
+/**
+ * Wrap raw Wasm packed data with XTC chunk header (copied from xtc-format.ts for convenience or should be exported?)
+ * Actually, xtc-format.ts doesn't export wrapWasmData. I'll just use buildXtc's internal logic if possible.
+ * Wait, I should export wrapWasmData from xtc-format.ts.
+ */
+
 import { extractPdfMetadata } from './metadata/pdf-outline'
 import { parseComicInfo } from './metadata/comicinfo'
 import type { BookMetadata } from './metadata/types'
@@ -181,7 +204,8 @@ export async function convertCbzToXtc(
     return { title, startPage: pg, endPage: pg }
   })
 
-  const processedPages: ProcessedPage[] = []
+  const pageBlobs: Blob[] = []
+  const pageInfos: StreamPageInfo[] = []
   const mappingCtx = new PageMappingContext()
   
   // Manhwa Stitcher
@@ -212,7 +236,12 @@ export async function convertCbzToXtc(
       pages = await processImage(imgBlob, i + 1, options)
     }
     
-    processedPages.push(...pages)
+    // Encode and store as Blobs immediately
+    for (const page of pages) {
+      const encoded = encodePage(page, options.is2bit, options.useWasm)
+      pageBlobs.push(new Blob([encoded]))
+      pageInfos.push({ width: page.canvas.width, height: page.canvas.height })
+    }
 
     // Track page mapping for TOC adjustment (approximate for Manhwa)
     mappingCtx.addOriginalPage(i + 1, pages.length)
@@ -227,25 +256,61 @@ export async function convertCbzToXtc(
   
   if (stitcher) {
       const finalPages = stitcher.finish()
-      processedPages.push(...finalPages)
+      for (const page of finalPages) {
+        const encoded = encodePage(page, options.is2bit, options.useWasm)
+        pageBlobs.push(new Blob([encoded]))
+        pageInfos.push({ width: page.canvas.width, height: page.canvas.height })
+      }
   }
-
-  processedPages.sort((a, b) => a.name.localeCompare(b.name))
 
   // Adjust TOC page numbers based on mapping
   if (metadata.toc.length > 0) {
     metadata.toc = adjustTocForMapping(metadata.toc, mappingCtx)
   }
 
-  const pageImages = processedPages.map(page => page.canvas.toDataURL('image/png'))
-  const xtcData = await buildXtc(processedPages, { metadata, is2bit: options.is2bit, useWasm: options.useWasm })
+  const outputFileName = file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xtch' : '.xtc')
+  
+  if (options.streamedDownload) {
+    // Generate header and index
+    const headerAndIndex = buildXtcHeaderAndIndex(pageInfos, { metadata, is2bit: options.is2bit })
+    
+    const fileStream = streamSaver.createWriteStream(outputFileName)
+    const writer = fileStream.getWriter()
+    
+    // Write header
+    await writer.write(headerAndIndex)
+    
+    // Write pages
+    for (let i = 0; i < pageBlobs.length; i++) {
+      const blob = pageBlobs[i]
+      const arrayBuffer = await blob.arrayBuffer()
+      await writer.write(new Uint8Array(arrayBuffer))
+      // Progress? Already handled above.
+    }
+    
+    await writer.close()
+    
+    return {
+      name: outputFileName,
+      pageCount: pageInfos.length,
+      isStreamed: true
+      // No data returned - it's already on disk!
+    }
+  } else {
+    // Legacy path: build single big buffer
+    const allBuffers: ArrayBuffer[] = []
+    for (const blob of pageBlobs) {
+      allBuffers.push(await blob.arrayBuffer())
+    }
+    
+    const xtcData = await buildXtcFromBuffers(allBuffers, { metadata, is2bit: options.is2bit })
 
-  return {
-    name: file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xtch' : '.xtc'),
-    data: xtcData,
-    size: xtcData.byteLength,
-    pageCount: processedPages.length,
-    pageImages
+    return {
+      name: outputFileName,
+      data: xtcData,
+      size: xtcData.byteLength,
+      pageCount: pageInfos.length
+    }
   }
 }
 
@@ -339,7 +404,8 @@ export async function convertCbrToXtc(
     return { title, startPage: pg, endPage: pg }
   })
 
-  const processedPages: ProcessedPage[] = []
+  const pageBlobs: Blob[] = []
+  const pageInfos: StreamPageInfo[] = []
   const mappingCtx = new PageMappingContext()
   
   let stitcher: ManhwaStitcher | null = null
@@ -367,7 +433,12 @@ export async function convertCbrToXtc(
       pages = await processImage(imgBlob, i + 1, options)
     }
     
-    processedPages.push(...pages)
+    // Encode and store as Blobs immediately
+    for (const p of pages) {
+      const encoded = encodePage(p, options.is2bit, options.useWasm)
+      pageBlobs.push(new Blob([encoded]))
+      pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
+    }
 
     // Track page mapping for TOC adjustment
     mappingCtx.addOriginalPage(i + 1, pages.length)
@@ -381,25 +452,49 @@ export async function convertCbrToXtc(
   }
   
   if (stitcher) {
-      processedPages.push(...stitcher.finish())
+      const finalPages = stitcher.finish()
+      for (const p of finalPages) {
+        const encoded = encodePage(p, options.is2bit, options.useWasm)
+        pageBlobs.push(new Blob([encoded]))
+        pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
+      }
   }
-
-  processedPages.sort((a, b) => a.name.localeCompare(b.name))
 
   // Adjust TOC page numbers based on mapping
   if (metadata.toc.length > 0) {
     metadata.toc = adjustTocForMapping(metadata.toc, mappingCtx)
   }
 
-  const pageImages = processedPages.map(page => page.canvas.toDataURL('image/png'))
-  const xtcData = await buildXtc(processedPages, { metadata, is2bit: options.is2bit, useWasm: options.useWasm })
+  const outputFileName = file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xtch' : '.xtc')
 
-  return {
-    name: file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xtch' : '.xtc'),
-    data: xtcData,
-    size: xtcData.byteLength,
-    pageCount: processedPages.length,
-    pageImages
+  if (options.streamedDownload) {
+    const headerAndIndex = buildXtcHeaderAndIndex(pageInfos, { metadata, is2bit: options.is2bit })
+    const fileStream = streamSaver.createWriteStream(outputFileName)
+    const writer = fileStream.getWriter()
+    await writer.write(headerAndIndex)
+    for (const blob of pageBlobs) {
+      const arrayBuffer = await blob.arrayBuffer()
+      await writer.write(new Uint8Array(arrayBuffer))
+    }
+    await writer.close()
+    return {
+      name: outputFileName,
+      pageCount: pageInfos.length,
+      isStreamed: true
+    }
+  } else {
+    const allBuffers: ArrayBuffer[] = []
+    for (const blob of pageBlobs) {
+      allBuffers.push(await blob.arrayBuffer())
+    }
+    const xtcData = await buildXtcFromBuffers(allBuffers, { metadata, is2bit: options.is2bit })
+
+    return {
+      name: outputFileName,
+      data: xtcData,
+      size: xtcData.byteLength,
+      pageCount: pageInfos.length,
+    }
   }
 }
 
@@ -442,8 +537,9 @@ async function convertPdfToXtc(
     metadata.toc.push({ title, startPage: i, endPage: i })
   }
 
-  console.log('[PDF] Init processedPages')
-  const processedPages: ProcessedPage[] = []
+  console.log('[PDF] Init pageBlobs')
+  const pageBlobs: Blob[] = []
+  const pageInfos: StreamPageInfo[] = []
   console.log('[PDF] Init mappingCtx')
   const mappingCtx = new PageMappingContext()
   
@@ -484,7 +580,12 @@ async function convertPdfToXtc(
     }
     console.log(`[PDF] Page ${i} processed, generated ${pages.length} XTC pages`)
     
-    processedPages.push(...pages)
+    // Encode and store as Blobs immediately
+    for (const p of pages) {
+      const encoded = encodePage(p, options.is2bit, options.useWasm)
+      pageBlobs.push(new Blob([encoded]))
+      pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
+    }
 
     // Track page mapping for TOC adjustment
     mappingCtx.addOriginalPage(i, pages.length)
@@ -498,25 +599,49 @@ async function convertPdfToXtc(
   }
   
   if (stitcher) {
-      processedPages.push(...stitcher.finish())
+      const finalPages = stitcher.finish()
+      for (const p of finalPages) {
+        const encoded = encodePage(p, options.is2bit, options.useWasm)
+        pageBlobs.push(new Blob([encoded]))
+        pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
+      }
   }
-
-  processedPages.sort((a, b) => a.name.localeCompare(b.name))
 
   // Adjust TOC page numbers based on mapping
   if (metadata.toc.length > 0) {
     metadata.toc = adjustTocForMapping(metadata.toc, mappingCtx)
   }
 
-  const pageImages = processedPages.map(page => page.canvas.toDataURL('image/png'))
-  const xtcData = await buildXtc(processedPages, { metadata, is2bit: options.is2bit, useWasm: options.useWasm })
+  const outputFileName = file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xtch' : '.xtc')
 
-  return {
-    name: file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xtch' : '.xtc'),
-    data: xtcData,
-    size: xtcData.byteLength,
-    pageCount: processedPages.length,
-    pageImages
+  if (options.streamedDownload) {
+    const headerAndIndex = buildXtcHeaderAndIndex(pageInfos, { metadata, is2bit: options.is2bit })
+    const fileStream = streamSaver.createWriteStream(outputFileName)
+    const writer = fileStream.getWriter()
+    await writer.write(headerAndIndex)
+    for (const blob of pageBlobs) {
+      const arrayBuffer = await blob.arrayBuffer()
+      await writer.write(new Uint8Array(arrayBuffer))
+    }
+    await writer.close()
+    return {
+      name: outputFileName,
+      pageCount: pageInfos.length,
+      isStreamed: true
+    }
+  } else {
+    const allBuffers: ArrayBuffer[] = []
+    for (const blob of pageBlobs) {
+      allBuffers.push(await blob.arrayBuffer())
+    }
+    const xtcData = await buildXtcFromBuffers(allBuffers, { metadata, is2bit: options.is2bit })
+
+    return {
+      name: outputFileName,
+      data: xtcData,
+      size: xtcData.byteLength,
+      pageCount: pageInfos.length,
+    }
   }
 }
 
@@ -617,14 +742,45 @@ async function convertVideoToXtc(
     }
   }
 
-  const xtcData = await buildXtc(processedPages, { is2bit: options.is2bit, useWasm: options.useWasm })
+  const pageBlobs: Blob[] = []
+  const pageInfos: StreamPageInfo[] = []
+  for (const p of processedPages) {
+    const encoded = encodePage(p, options.is2bit, options.useWasm)
+    pageBlobs.push(new Blob([encoded]))
+    pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
+  }
 
-  return {
-    name: file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xtch' : '.xtc'),
-    data: xtcData,
-    size: xtcData.byteLength,
-    pageCount: processedPages.length,
-    pageImages: processedPages.slice(0, 10).map(p => p.canvas.toDataURL('image/png'))
+  const outputFileName = file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xtch' : '.xtc')
+
+  if (options.streamedDownload) {
+    const headerAndIndex = buildXtcHeaderAndIndex(pageInfos, { is2bit: options.is2bit })
+    const fileStream = streamSaver.createWriteStream(outputFileName)
+    const writer = fileStream.getWriter()
+    await writer.write(headerAndIndex)
+    for (const blob of pageBlobs) {
+      const arrayBuffer = await blob.arrayBuffer()
+      await writer.write(new Uint8Array(arrayBuffer))
+    }
+    await writer.close()
+    return {
+      name: outputFileName,
+      pageCount: pageInfos.length,
+      isStreamed: true
+    }
+  } else {
+    const allBuffers: ArrayBuffer[] = []
+    for (const blob of pageBlobs) {
+      allBuffers.push(await blob.arrayBuffer())
+    }
+    const xtcData = await buildXtcFromBuffers(allBuffers, { is2bit: options.is2bit })
+
+    return {
+      name: outputFileName,
+      data: xtcData,
+      size: xtcData.byteLength,
+      pageCount: processedPages.length,
+      pageImages: processedPages.slice(0, 10).map(p => p.canvas.toDataURL('image/png'))
+    }
   }
 }
 
