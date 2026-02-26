@@ -181,7 +181,7 @@ export function runWasmResize(
   const memArray = new Uint8Array(wasmMemory.buffer);
   memArray.set(source.data, inputPtr);
 
-  (wasmInstance.exports.resizeLanczos3 as CallableFunction)(sw, sh, inputPtr, dw, dh, outputPtr);
+  (wasmInstance.exports.resizeBox as CallableFunction)(sw, sh, inputPtr, dw, dh, outputPtr);
 
   const resultData = new Uint8ClampedArray(memArray.slice(outputPtr, outputPtr + outputSize));
   return new ImageData(resultData, dw, dh);

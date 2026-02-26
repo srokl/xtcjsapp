@@ -40,7 +40,7 @@ async function getImageDimensions(blob: Blob): Promise<{ width: number; height: 
 }
 
 /**
- * Resize a canvas with high-quality Lanczos3 if 1-bit and Wasm enabled
+ * Resize a canvas with high-quality Box Filter if 1-bit and Wasm enabled
  */
 function resizeHq(
   canvas: HTMLCanvasElement, 
