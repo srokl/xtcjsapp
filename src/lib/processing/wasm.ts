@@ -156,3 +156,33 @@ export function runWasmPack(imageData: ImageData, is2bit: boolean): Uint8Array {
   // Return copy of output
   return memArray.slice(outputPtr, outputPtr + outputSize);
 }
+
+export function runWasmResize(
+  source: ImageData,
+  targetWidth: number,
+  targetHeight: number
+): ImageData {
+  if (!wasmInstance) throw new Error('Wasm not initialized');
+
+  const sw = source.width;
+  const sh = source.height;
+  const dw = targetWidth;
+  const dh = targetHeight;
+
+  const inputSize = sw * sh * 4;
+  const outputSize = dw * dh * 4;
+
+  const heapBase = (wasmInstance.exports.__heap_base as WebAssembly.Global)?.value ?? 65536;
+  const inputPtr = heapBase;
+  const outputPtr = inputPtr + inputSize;
+
+  ensureMemory(outputPtr + outputSize);
+
+  const memArray = new Uint8Array(wasmMemory.buffer);
+  memArray.set(source.data, inputPtr);
+
+  (wasmInstance.exports.resizeLanczos3 as CallableFunction)(sw, sh, inputPtr, dw, dh, outputPtr);
+
+  const resultData = new Uint8ClampedArray(memArray.slice(outputPtr, outputPtr + outputSize));
+  return new ImageData(resultData, dw, dh);
+}

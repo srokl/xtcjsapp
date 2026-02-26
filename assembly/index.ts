@@ -173,7 +173,60 @@ export function applyFilters(width: i32, height: i32, srcPtr: usize, contrast: f
     store<u8>(srcPtr + idx, finalGray);
     store<u8>(srcPtr + idx + 1, finalGray);
     store<u8>(srcPtr + idx + 2, finalGray);
-    // store<u8>(srcPtr + idx + 3, 255); // Keep Alpha
+    store<u8>(srcPtr + idx + 3, 255); 
+  }
+}
+
+// --- High Quality Scaling (Lanczos3) ---
+
+function lanczos(x: f32): f32 {
+  if (x == 0.0) return 1.0;
+  if (x <= -3.0 || x >= 3.0) return 0.0;
+  let pix = x * <f32>Math.PI;
+  let pix3 = pix / 3.0;
+  return (<f32>Math.sin(<f64>pix) * <f32>Math.sin(<f64>pix3)) / (pix * pix3);
+}
+
+export function resizeLanczos3(
+  sw: i32, sh: i32, srcPtr: usize,
+  dw: i32, dh: i32, dstPtr: usize
+): void {
+  let xRatio = <f32>sw / <f32>dw;
+  let yRatio = <f32>sh / <f32>dh;
+  
+  for (let dy = 0; dy < dh; dy++) {
+    for (let dx = 0; dx < dw; dx++) {
+      let sx = <f32>dx * xRatio;
+      let sy = <f32>dy * yRatio;
+      
+      let r: f32 = 0, g: f32 = 0, b: f32 = 0, weightSum: f32 = 0;
+      
+      let xStart = <i32>Math.floor(sx) - 2;
+      let xEnd = <i32>Math.floor(sx) + 3;
+      let yStart = <i32>Math.floor(sy) - 2;
+      let yEnd = <i32>Math.floor(sy) + 3;
+      
+      for (let j = yStart; j <= yEnd; j++) {
+        if (j < 0 || j >= sh) continue;
+        let wy = lanczos(sy - <f32>j);
+        for (let i = xStart; i <= xEnd; i++) {
+          if (i < 0 || i >= sw) continue;
+          let w = wy * lanczos(sx - <f32>i);
+          
+          let idx = (j * sw + i) << 2;
+          r += <f32>load<u8>(srcPtr + idx) * w;
+          g += <f32>load<u8>(srcPtr + idx + 1) * w;
+          b += <f32>load<u8>(srcPtr + idx + 2) * w;
+          weightSum += w;
+        }
+      }
+      
+      let outIdx = (dy * dw + dx) << 2;
+      store<u8>(dstPtr + outIdx, <u8>(r / weightSum));
+      store<u8>(dstPtr + outIdx + 1, <u8>(g / weightSum));
+      store<u8>(dstPtr + outIdx + 2, <u8>(b / weightSum));
+      store<u8>(dstPtr + outIdx + 3, 255);
+    }
   }
 }
 

@@ -9,7 +9,7 @@ import { applyDithering } from './processing/dithering'
 import { toGrayscale, applyContrast, calculateOverlapSegments, isSolidColor, applyGamma, applyInvert } from './processing/image'
 import { rotateCanvas, extractAndRotate, extractRegion, resizeWithPadding, resizeFill, resizeCover, resizeCrop, TARGET_WIDTH, TARGET_HEIGHT, DEVICE_DIMENSIONS } from './processing/canvas'
 import { buildXtc, buildXtcFromBuffers, imageDataToXth, imageDataToXtg, wrapWasmData, buildXtcHeaderAndIndex, getXtcPageSize, type StreamPageInfo } from './xtc-format'
-import { initWasm, runWasmFilters, isWasmLoaded, runWasmPack } from './processing/wasm'
+import { initWasm, runWasmFilters, isWasmLoaded, runWasmPack, runWasmResize } from './processing/wasm'
 
 function getTargetDimensions(options: ConversionOptions) {
   return DEVICE_DIMENSIONS[options.device] || DEVICE_DIMENSIONS.X4;
@@ -37,6 +37,32 @@ async function getImageDimensions(blob: Blob): Promise<{ width: number; height: 
     }
     img.src = url
   })
+}
+
+/**
+ * Resize a canvas with high-quality Lanczos3 if 1-bit and Wasm enabled
+ */
+function resizeHq(
+  canvas: HTMLCanvasElement, 
+  targetWidth: number, 
+  targetHeight: number, 
+  options: ConversionOptions
+): HTMLCanvasElement {
+  if (options.useWasm && isWasmLoaded() && !options.is2bit && (canvas.width !== targetWidth || canvas.height !== targetHeight)) {
+    try {
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })!
+      const srcData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+      const resizedData = runWasmResize(srcData, targetWidth, targetHeight)
+      const outCanvas = document.createElement('canvas')
+      outCanvas.width = targetWidth
+      outCanvas.height = targetHeight
+      outCanvas.getContext('2d')!.putImageData(resizedData, 0, 0)
+      return outCanvas
+    } catch (e) {
+      console.warn("Wasm resize failed, fallback to Canvas", e)
+    }
+  }
+  return resizeFill(canvas, targetWidth, targetHeight)
 }
 
 /**
@@ -311,7 +337,7 @@ export async function convertCbzToXtc(
             const img = new Image()
             const url = URL.createObjectURL(imgBlob)
             img.onload = () => { URL.revokeObjectURL(url); resolve(img) }
-            img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Load failed')) }
+            img.onerror = () => { URL.revokeObjectURL(url); resolve(null as any) }
             img.src = url
         }).catch(() => null)
         
@@ -437,7 +463,9 @@ export async function convertCbrToXtc(
     const parts = file.path.split(/[\\/]/)
     if (parts.length > 1) {
       const folderName = parts[parts.length - 2]
-      if (!pageTitles.has(index + 1)) pageTitles.set(index + 1, folderName)
+      if (!pageTitles.has(index + 1)) {
+        pageTitles.set(index + 1, folderName)
+      }
     }
   })
 
@@ -701,7 +729,7 @@ async function convertVideoToXtc(
     } else {
       if (options.contrast > 0) applyContrast(ctx, dims.width, dims.height, options.contrast)
       if (options.gamma !== 1.0 && options.is2bit) applyGamma(ctx, dims.width, dims.height, options.gamma)
-      if (options.invert) applyInvert(ctx, dims.width, dims.height)
+      if (options.invert) applyInvert(ctx, width, height)
       toGrayscale(ctx, dims.width, dims.height)
     }
     applyDithering(ctx, dims.width, dims.height, options.dithering, options.is2bit, options.useWasm)
@@ -766,6 +794,10 @@ function processCanvasAsImage(
   const crop = getAxisCropRect(sourceCanvas.width, sourceCanvas.height, options)
   canvas.width = crop.width; canvas.height = crop.height
   ctx.drawImage(sourceCanvas, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height)
+  
+  // High quality resize if needed
+  let resizedCanvas = resizeHq(canvas, dims.width, dims.height, options);
+  
   let width = crop.width; let height = crop.height
   if (options.useWasm && isWasmLoaded()) {
     try {
@@ -800,7 +832,7 @@ function processCanvasAsImage(
     if (angle !== 0) processingCanvas = rotateCanvas(canvas, angle)
     let finalCanvas: HTMLCanvasElement
     switch (options.imageMode) {
-      case 'fill': finalCanvas = resizeFill(processingCanvas, dims.width, dims.height); break
+      case 'fill': finalCanvas = resizeHq(processingCanvas, dims.width, dims.height, options); break
       case 'cover': finalCanvas = resizeCover(processingCanvas, dims.width, dims.height); break
       case 'crop': finalCanvas = resizeCrop(processingCanvas, dims.width, dims.height); break
       case 'letterbox': default: finalCanvas = resizeWithPadding(processingCanvas, padColor, dims.width, dims.height); break
@@ -810,8 +842,7 @@ function processCanvasAsImage(
   }
   if (options.manhwa) {
     const scale = dims.width / width; const newHeight = Math.floor(height * scale)
-    const resizedCanvas = document.createElement('canvas'); resizedCanvas.width = dims.width; resizedCanvas.height = newHeight
-    resizedCanvas.getContext('2d', { willReadFrequently: true })!.drawImage(canvas, 0, 0, width, height, 0, 0, dims.width, newHeight)
+    const resizedCanvas = resizeHq(canvas, dims.width, newHeight, options)
     applyDithering(resizedCanvas.getContext('2d', { willReadFrequently: true })!, dims.width, newHeight, options.dithering, options.is2bit, options.useWasm)
     const sliceHeight = dims.height; const overlapPercent = options.manhwaOverlap || 50; const overlapPixels = Math.floor(dims.height * (overlapPercent / 100)); const sliceStep = dims.height - overlapPixels
     for (let y = 0; y < newHeight; ) {
@@ -902,7 +933,7 @@ function processLoadedImage(img: HTMLImageElement, pageNum: number, options: Con
     if (angle !== 0) processingCanvas = rotateCanvas(canvas, angle)
     let finalCanvas: HTMLCanvasElement
     switch (options.imageMode) {
-      case 'fill': finalCanvas = resizeFill(processingCanvas, dims.width, dims.height); break
+      case 'fill': finalCanvas = resizeHq(processingCanvas, dims.width, dims.height, options); break
       case 'cover': finalCanvas = resizeCover(processingCanvas, dims.width, dims.height); break
       case 'crop': finalCanvas = resizeCrop(processingCanvas, dims.width, dims.height); break
       case 'letterbox': default: finalCanvas = resizeWithPadding(processingCanvas, padColor, dims.width, dims.height); break
@@ -912,8 +943,7 @@ function processLoadedImage(img: HTMLImageElement, pageNum: number, options: Con
   }
   if (options.manhwa) {
     const scale = dims.width / width; const newHeight = Math.floor(height * scale)
-    const resizedCanvas = document.createElement('canvas'); resizedCanvas.width = dims.width; resizedCanvas.height = newHeight
-    resizedCanvas.getContext('2d', { willReadFrequently: true })!.drawImage(canvas, 0, 0, width, height, 0, 0, dims.width, newHeight)
+    const resizedCanvas = resizeHq(canvas, dims.width, newHeight, options)
     applyDithering(resizedCanvas.getContext('2d', { willReadFrequently: true })!, dims.width, newHeight, options.dithering, options.is2bit, options.useWasm)
     const sliceHeight = dims.height; const overlapPercent = options.manhwaOverlap || 50; const overlapPixels = Math.floor(dims.height * (overlapPercent / 100)); const sliceStep = dims.height - overlapPixels
     for (let y = 0; y < newHeight; ) {
