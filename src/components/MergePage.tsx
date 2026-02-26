@@ -3,7 +3,7 @@ import { useNavigate } from '@tanstack/react-router'
 import streamSaver from 'streamsaver'
 import { Viewer } from './Viewer'
 import { formatSize } from '../utils/format'
-import { setPendingFiles, arrayBufferToFile } from '../lib/file-transfer'
+import { startFileTransfer, arrayBufferToFile } from '../lib/file-transfer'
 import {
   mergeFiles,
   detectFileType,
@@ -275,9 +275,15 @@ export function MergePage() {
     const filesToTransfer = selectedResults.map(r =>
       arrayBufferToFile(r.data, r.name)
     )
-    setPendingFiles(filesToTransfer)
-    navigate({ to: '/' })
-  }, [selectedResults, navigate])
+    startFileTransfer(filesToTransfer)
+    
+    // Redirect based on type
+    if (actualOutputFormat === 'pdf') {
+      navigate({ to: '/pdf' })
+    } else {
+      navigate({ to: '/' })
+    }
+  }, [selectedResults, actualOutputFormat, navigate])
 
   const canProcess = mode === 'merge'
     ? files.length >= 2
@@ -624,7 +630,7 @@ export function MergePage() {
                 className="btn-move-converter"
                 onClick={handleMoveToConverter}
               >
-                Convert {selectedResults.length > 1 ? `${selectedResults.length} files` : ''} to XTC
+                Convert {selectedResults.length > 1 ? `${selectedResults.length} files` : ''} to XTC/XTCH
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M5 12h14M12 5l7 7-7 7"/>
                 </svg>

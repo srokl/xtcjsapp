@@ -25,6 +25,11 @@ export function consumePendingFiles(): File[] {
   return files
 }
 
+export function startFileTransfer(files: File[]) {
+  clearPendingFiles()
+  setPendingFiles(files)
+}
+
 export function subscribeToPendingFiles(fn: TransferListener): () => void {
   listeners.push(fn)
   return () => {
