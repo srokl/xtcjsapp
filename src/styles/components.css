@@ -165,6 +165,10 @@
   margin-bottom: 0;
 }
 
+.option.disabled label {
+  opacity: 0.5;
+}
+
 .option label {
   display: block;
   font-size: 0.75rem;
@@ -202,6 +206,18 @@
 .option input:focus {
   outline: 2px solid var(--ink);
   outline-offset: 1px;
+}
+
+.option select:disabled,
+.option input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: var(--paper-dark);
+}
+
+.option select:disabled:hover,
+.option input:disabled:hover {
+  background: var(--paper-dark);
 }
 
 .input-with-unit {

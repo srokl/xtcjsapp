@@ -251,7 +251,7 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
         </div>
       )}
 
-      <div className="option">
+      <div className={`option${options.manhwa ? ' disabled' : ''}`}>
         <label htmlFor="orientation">Orientation</label>
         <select
           id="orientation"
@@ -299,7 +299,7 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
       </div>
 
       {!isImageMode && !isVideoMode && (
-        <div className="option">
+        <div className={`option${options.manhwa ? ' disabled' : ''}`}>
           <label htmlFor="horizontalMargin">Horizontal margin crop</label>
           <div className="input-with-unit">
             <input
@@ -318,7 +318,7 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
       )}
 
       {!isImageMode && !isVideoMode && (
-        <div className="option">
+        <div className={`option${options.manhwa ? ' disabled' : ''}`}>
           <label htmlFor="verticalMargin">Vertical margin crop</label>
           <div className="input-with-unit">
             <input
