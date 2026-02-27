@@ -7,6 +7,7 @@
     "dev": "npm run asbuild && vite",
     "build": "npm run asbuild && vite build",
     "preview": "vite preview",
+    "serve": "bun run server/index.ts",
     "asbuild": "asc assembly/index.ts --target release --outFile public/xtc.wasm"
   },
   "dependencies": {

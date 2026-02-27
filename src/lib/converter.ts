@@ -84,8 +84,8 @@ import { extractPdfMetadata } from './metadata/pdf-outline'
 import { parseComicInfo } from './metadata/comicinfo'
 import type { BookMetadata } from './metadata/types'
 
-// Set up PDF.js worker from CDN to avoid build asset path issues
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@5.4.624/build/pdf.worker.min.mjs'
+// Set up PDF.js worker locally for offline support
+pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
 
 import { ManhwaStitcher } from './processing/manhwa-stitcher'
 import { getAxisCropRect } from './processing/geometry'
