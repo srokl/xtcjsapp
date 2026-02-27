@@ -22,7 +22,9 @@ const TOC_OFFSET_PTR_SIZE = 8;
 const HEADER_WITH_METADATA_SIZE = HEADER_BASE_SIZE + TOC_OFFSET_PTR_SIZE;  // 56 bytes
 const INDEX_ENTRY_SIZE = 16;
 const TITLE_SIZE = 128;
-const AUTHOR_SIZE = 112;  // 112 bytes, not 128 - TOC header comes right after
+const AUTHOR_SIZE = 64;
+const PUBLISHER_SIZE = 32;
+const LANGUAGE_SIZE = 16;
 const TOC_HEADER_SIZE = 16;
 const TOC_ENTRY_SIZE = 96;
 const TOC_TITLE_SIZE = 80;
@@ -45,6 +47,8 @@ export function buildXtcHeaderAndIndex(
   const hasMetadata = options.metadata && (
     options.metadata.title ||
     options.metadata.author ||
+    options.metadata.publisher ||
+    options.metadata.language ||
     (options.metadata.toc && options.metadata.toc.length > 0)
   );
 
@@ -52,11 +56,11 @@ export function buildXtcHeaderAndIndex(
   let tocEntriesOffset = 0;
 
   if (hasMetadata) {
-    metadataSize = TITLE_SIZE + AUTHOR_SIZE + TOC_HEADER_SIZE;
+    metadataSize = TITLE_SIZE + AUTHOR_SIZE + PUBLISHER_SIZE + LANGUAGE_SIZE + TOC_HEADER_SIZE;
     if (options.metadata!.toc.length > 0) {
       metadataSize += options.metadata!.toc.length * TOC_ENTRY_SIZE;
     }
-    tocEntriesOffset = HEADER_WITH_METADATA_SIZE + TITLE_SIZE + AUTHOR_SIZE + TOC_HEADER_SIZE;
+    tocEntriesOffset = HEADER_WITH_METADATA_SIZE + TITLE_SIZE + AUTHOR_SIZE + PUBLISHER_SIZE + LANGUAGE_SIZE + TOC_HEADER_SIZE;
   }
 
   const headerSize = hasMetadata ? HEADER_WITH_METADATA_SIZE : HEADER_BASE_SIZE;
@@ -134,6 +138,8 @@ export async function buildXtcFromBuffers(
   const hasMetadata = options.metadata && (
     options.metadata.title ||
     options.metadata.author ||
+    options.metadata.publisher ||
+    options.metadata.language ||
     (options.metadata.toc && options.metadata.toc.length > 0)
   );
 
@@ -141,11 +147,11 @@ export async function buildXtcFromBuffers(
   let tocEntriesOffset = 0;
 
   if (hasMetadata) {
-    metadataSize = TITLE_SIZE + AUTHOR_SIZE + TOC_HEADER_SIZE;
+    metadataSize = TITLE_SIZE + AUTHOR_SIZE + PUBLISHER_SIZE + LANGUAGE_SIZE + TOC_HEADER_SIZE;
     if (options.metadata!.toc.length > 0) {
       metadataSize += options.metadata!.toc.length * TOC_ENTRY_SIZE;
     }
-    tocEntriesOffset = HEADER_WITH_METADATA_SIZE + TITLE_SIZE + AUTHOR_SIZE + TOC_HEADER_SIZE;
+    tocEntriesOffset = HEADER_WITH_METADATA_SIZE + TITLE_SIZE + AUTHOR_SIZE + PUBLISHER_SIZE + LANGUAGE_SIZE + TOC_HEADER_SIZE;
   }
 
   const headerSize = hasMetadata ? HEADER_WITH_METADATA_SIZE : HEADER_BASE_SIZE;
@@ -241,6 +247,8 @@ export async function buildXtc(
   const hasMetadata = options.metadata && (
     options.metadata.title ||
     options.metadata.author ||
+    options.metadata.publisher ||
+    options.metadata.language ||
     options.metadata.toc.length > 0
   );
 
@@ -249,13 +257,13 @@ export async function buildXtc(
   let tocEntriesOffset = 0;
 
   if (hasMetadata) {
-    // Structure: Header(56) + Title(128) + Author(112) + TOC Header(16) + TOC Entries(N*96)
-    metadataSize = TITLE_SIZE + AUTHOR_SIZE + TOC_HEADER_SIZE;
+    // Structure: Header(56) + Title(128) + Author(64) + Publisher(32) + Language(16) + TOC Header(16) + TOC Entries(N*96)
+    metadataSize = TITLE_SIZE + AUTHOR_SIZE + PUBLISHER_SIZE + LANGUAGE_SIZE + TOC_HEADER_SIZE;
     if (options.metadata!.toc.length > 0) {
       metadataSize += options.metadata!.toc.length * TOC_ENTRY_SIZE;
     }
-    // TOC entries start after header + title + author + toc header
-    tocEntriesOffset = HEADER_WITH_METADATA_SIZE + TITLE_SIZE + AUTHOR_SIZE + TOC_HEADER_SIZE;
+    // TOC entries start after header + title + author + publisher + language + toc header
+    tocEntriesOffset = HEADER_WITH_METADATA_SIZE + TITLE_SIZE + AUTHOR_SIZE + PUBLISHER_SIZE + LANGUAGE_SIZE + TOC_HEADER_SIZE;
   }
 
   // Calculate offsets
@@ -352,7 +360,7 @@ function writeMetadata(
   }
   currentOffset += TITLE_SIZE;
 
-  // Write author (112 bytes, null-terminated)
+  // Write author (64 bytes, null-terminated)
   if (metadata.author) {
     const authorBytes = encoder.encode(metadata.author);
     const authorLen = Math.min(authorBytes.length, AUTHOR_SIZE - 1);
@@ -360,8 +368,24 @@ function writeMetadata(
   }
   currentOffset += AUTHOR_SIZE;
 
+  // Write publisher (32 bytes, null-terminated)
+  if (metadata.publisher) {
+    const pubBytes = encoder.encode(metadata.publisher);
+    const pubLen = Math.min(pubBytes.length, PUBLISHER_SIZE - 1);
+    uint8.set(pubBytes.subarray(0, pubLen), currentOffset);
+  }
+  currentOffset += PUBLISHER_SIZE;
+
+  // Write language (16 bytes, null-terminated)
+  if (metadata.language) {
+    const langBytes = encoder.encode(metadata.language);
+    const langLen = Math.min(langBytes.length, LANGUAGE_SIZE - 1);
+    uint8.set(langBytes.subarray(0, langLen), currentOffset);
+  }
+  currentOffset += LANGUAGE_SIZE;
+
   // Write TOC header (16 bytes)
-  writeTocHeader(view, currentOffset, metadata.toc.length);
+  writeTocHeader(view, currentOffset, metadata.toc.length, metadata.coverPage, metadata.createTime);
   currentOffset += TOC_HEADER_SIZE;
 
   // Write TOC entries
@@ -373,17 +397,16 @@ function writeMetadata(
 /**
  * Write TOC header (16 bytes)
  */
-function writeTocHeader(view: DataView, offset: number, chapterCount: number): void {
-  // Structure (based on reference file):
-  // - 4 bytes: timestamp
-  // - 2 bytes: reserved (0)
-  // - 2 bytes: chapter count
-  // - 8 bytes: padding
-  const timestamp = Math.floor(Date.now() / 1000);
+function writeTocHeader(view: DataView, offset: number, chapterCount: number, coverPage?: number, createTime?: number): void {
+  // Structure (based on user request):
+  // - 0x00 (4 bytes): createTime (Unix timestamp)
+  // - 0x04 (2 bytes): coverPage (0-based, 0xFFFF=none)
+  // - 0x06 (2 bytes): chapterCount
+  // - 0x08 (8 bytes): padding/reserved
+  const timestamp = createTime || Math.floor(Date.now() / 1000);
   view.setUint32(offset, timestamp, true);
-  view.setUint16(offset + 4, 0, true);  // reserved
+  view.setUint16(offset + 4, coverPage !== undefined ? coverPage : 0xFFFF, true);
   view.setUint16(offset + 6, chapterCount, true);
-  // Rest is padding (already zero)
 }
 
 /**

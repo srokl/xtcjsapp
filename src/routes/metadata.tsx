@@ -11,6 +11,20 @@ export const Route = createFileRoute('/metadata')({
   component: MetadataEditor,
 })
 
+const LANGUAGES = [
+  { code: 'en', name: 'English' },
+  { code: 'zh-CN', name: 'Chinese (Simplified)' },
+  { code: 'zh-TW', name: 'Chinese (Traditional)' },
+  { code: 'jp', name: 'Japanese' },
+  { code: 'ko', name: 'Korean' },
+  { code: 'es', name: 'Spanish' },
+  { code: 'fr', name: 'French' },
+  { code: 'de', name: 'German' },
+  { code: 'it', name: 'Italian' },
+  { code: 'ru', name: 'Russian' },
+  { code: 'pt', name: 'Portuguese' },
+]
+
 function MetadataEditor() {
   const [file, setFile] = useState<File | null>(null)
   const [parsed, setParsed] = useState<ParsedXtc | null>(null)
@@ -79,27 +93,30 @@ function MetadataEditor() {
     
     try {
       const is2bit = parsed.header.is2bit
-      const newBuffer = await buildXtcFromBuffers(parsed.pageData, { metadata, is2bit })
+      // Update createTime to now
+      const finalMetadata = {
+        ...metadata,
+        createTime: Math.floor(Date.now() / 1000)
+      }
+      const newBuffer = await buildXtcFromBuffers(parsed.pageData, { metadata: finalMetadata, is2bit })
       const ext = is2bit ? '.xtch' : '.xtc'
       const baseName = file.name.replace(/\.[^/.]+$/, '')
       const fileName = `${baseName}_edited${ext}`
 
-      // Use StreamSaver for large files (> 50MB)
-      if (newBuffer.byteLength > 50 * 1024 * 1024) {
-          try {
-            const fileStream = streamSaver.createWriteStream(fileName, {
-              size: newBuffer.byteLength,
-            })
-            const writer = fileStream.getWriter()
-            await writer.write(new Uint8Array(newBuffer))
-            await writer.close()
-            return
-          } catch (e) {
-            console.warn('StreamSaver failed, falling back to simple download', e)
-          }
+      // Use StreamSaver if supported
+      try {
+        const fileStream = streamSaver.createWriteStream(fileName, {
+          size: newBuffer.byteLength,
+        })
+        const writer = fileStream.getWriter()
+        await writer.write(new Uint8Array(newBuffer))
+        await writer.close()
+        return
+      } catch (e) {
+        console.warn('StreamSaver failed, falling back to simple download', e)
       }
 
-      // Simple anchor download fallback
+      // Simple anchor download fallback if StreamSaver fails
       const blob = new Blob([newBuffer], { type: 'application/octet-stream' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -189,7 +206,7 @@ function MetadataEditor() {
 
           <div style={{ background: 'var(--paper-dark)', padding: 'var(--space-lg)', border: 'var(--border)' }}>
             <h3 style={{ marginBottom: 'var(--space-sm)' }}>Book Metadata</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--space-md)' }}>
               <label>
                 <strong style={{ fontSize: '0.85rem' }}>Title:</strong><br/>
                 <input 
@@ -208,9 +225,46 @@ function MetadataEditor() {
                   value={metadata.author || ''} 
                   onChange={e => setMetadata(m => ({ ...m, author: e.target.value }))}
                   style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
-                  maxLength={111}
+                  maxLength={63}
                   placeholder="e.g. John Doe"
                 />
+              </label>
+              <label>
+                <strong style={{ fontSize: '0.85rem' }}>Publisher:</strong><br/>
+                <input 
+                  type="text" 
+                  value={metadata.publisher || ''} 
+                  onChange={e => setMetadata(m => ({ ...m, publisher: e.target.value }))}
+                  style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
+                  maxLength={31}
+                  placeholder="e.g. Weekly Shonen"
+                />
+              </label>
+              <label>
+                <strong style={{ fontSize: '0.85rem' }}>Language:</strong><br/>
+                <select 
+                  value={metadata.language || ''} 
+                  onChange={e => setMetadata(m => ({ ...m, language: e.target.value }))}
+                  style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
+                >
+                  <option value="">Unknown</option>
+                  {LANGUAGES.map(lang => (
+                    <option key={lang.code} value={lang.code}>{lang.name} ({lang.code})</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <strong style={{ fontSize: '0.85rem' }}>Cover Page:</strong><br/>
+                <select 
+                  value={metadata.coverPage === undefined || metadata.coverPage === 0xFFFF ? 'none' : metadata.coverPage} 
+                  onChange={e => setMetadata(m => ({ ...m, coverPage: e.target.value === 'none' ? 0xFFFF : parseInt(e.target.value) }))}
+                  style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
+                >
+                  <option value="none">None (0xFFFF)</option>
+                  {Array.from({ length: parsed.header.pageCount }, (_, i) => (
+                    <option key={i} value={i}>Page {i + 1}</option>
+                  ))}
+                </select>
               </label>
             </div>
           </div>

@@ -9,6 +9,10 @@ export interface TocEntry {
 export interface BookMetadata {
   title?: string
   author?: string
+  publisher?: string
+  language?: string
+  createTime?: number
+  coverPage?: number // 0-based index, 0xFFFF for none
   toc: TocEntry[]
 }
 

@@ -78,9 +78,13 @@ function parseMetadata(view: DataView, header: XtcHeader): BookMetadata {
 
   const metaOffset = Number(header.metadataOffset)
   metadata.title = readNullTerminatedString(view, metaOffset, 128)
-  metadata.author = readNullTerminatedString(view, metaOffset + 128, 112)
+  metadata.author = readNullTerminatedString(view, metaOffset + 128, 64)
+  metadata.publisher = readNullTerminatedString(view, metaOffset + 192, 32)
+  metadata.language = readNullTerminatedString(view, metaOffset + 224, 16)
 
-  const tocHeaderOffset = metaOffset + 128 + 112
+  const tocHeaderOffset = metaOffset + 240
+  metadata.createTime = view.getUint32(tocHeaderOffset, true)
+  metadata.coverPage = view.getUint16(tocHeaderOffset + 4, true)
   const chapterCount = view.getUint16(tocHeaderOffset + 6, true)
 
   const tocOffset = header.tocOffset !== 0n ? Number(header.tocOffset) : tocHeaderOffset + 16
