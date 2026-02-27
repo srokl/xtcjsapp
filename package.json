@@ -11,8 +11,8 @@
   },
   "dependencies": {
     "@tanstack/react-router": "^1.158.1",
+    "@zip.js/zip.js": "^2.8.21",
     "axios": "^1.13.4",
-    "jszip": "^3.10.1",
     "node-unrar-js": "^2.0.2",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^5.4.624",

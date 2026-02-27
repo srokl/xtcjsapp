@@ -1,6 +1,6 @@
 // Merge logic for CBZ, PDF, and XTC files
 
-import JSZip from 'jszip'
+import { ZipReader, BlobReader, BlobWriter, ZipWriter } from '@zip.js/zip.js'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { PDFDocument } from 'pdf-lib'
@@ -119,24 +119,26 @@ export async function mergeCbzFiles(
       pageProgress: 0,
     })
 
-    const zip = await JSZip.loadAsync(file)
+    const zipReader = new ZipReader(new BlobReader(file))
+    const entries = await zipReader.getEntries()
     const imageFiles: Array<{ path: string; entry: any }> = []
 
-    zip.forEach((relativePath: string, zipEntry: any) => {
-      if (zipEntry.dir) return
-      if (relativePath.toLowerCase().startsWith('__macos')) return
+    for (const entry of entries) {
+      if (entry.directory) continue
+      const path = entry.filename
+      if (path.toLowerCase().startsWith('__macos')) continue
 
-      const ext = relativePath.toLowerCase().substring(relativePath.lastIndexOf('.'))
+      const ext = path.toLowerCase().substring(path.lastIndexOf('.'))
       if (imageExtensions.includes(ext)) {
-        imageFiles.push({ path: relativePath, entry: zipEntry })
+        imageFiles.push({ path, entry })
       }
-    })
+    }
 
     imageFiles.sort((a, b) => a.path.localeCompare(b.path))
 
     for (let i = 0; i < imageFiles.length; i++) {
       const imgFile = imageFiles[i]
-      const blob = await imgFile.entry.async('blob')
+      const blob = await imgFile.entry.getData(new BlobWriter())
       const ext = imgFile.path.substring(imgFile.path.lastIndexOf('.'))
 
       allImages.push({
@@ -152,6 +154,8 @@ export async function mergeCbzFiles(
         pageProgress: (i + 1) / imageFiles.length,
       })
     }
+    
+    await zipReader.close()
   }
 
   if (outputFormat === 'cbz') {
@@ -430,13 +434,16 @@ export async function mergeXtcFiles(
  * Build a CBZ file from images
  */
 export async function buildCbz(images: { name: string; blob: Blob }[]): Promise<ArrayBuffer> {
-  const zip = new JSZip()
+  const blobWriter = new BlobWriter('application/zip')
+  const zipWriter = new ZipWriter(blobWriter)
 
   for (const img of images) {
-    zip.file(img.name, img.blob)
+    await zipWriter.add(img.name, new BlobReader(img.blob))
   }
 
-  return zip.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE' })
+  await zipWriter.close()
+  const finalBlob = await blobWriter.getData()
+  return finalBlob.arrayBuffer()
 }
 
 /**

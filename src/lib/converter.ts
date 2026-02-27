@@ -1,6 +1,6 @@
 // CBZ/CBR/PDF to XTC conversion logic
 
-import JSZip from 'jszip'
+import { ZipReader, BlobReader, BlobWriter, TextWriter } from '@zip.js/zip.js'
 import streamSaver from 'streamsaver'
 import { createExtractorFromData } from 'node-unrar-js'
 import unrarWasm from 'node-unrar-js/esm/js/unrar.wasm?url'
@@ -200,31 +200,32 @@ export async function convertCbzToXtc(
   onProgress: (progress: number, previewUrl: string | null) => void,
   tocPageOffset: number = 0
 ): Promise<ConversionResult> {
-  const zip = await JSZip.loadAsync(file)
+  const zipReader = new ZipReader(new BlobReader(file))
+  const entries = await zipReader.getEntries()
 
   const imageFiles: Array<{ path: string; entry: any }> = []
   const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
   let comicInfoEntry: any = null
 
-  zip.forEach((relativePath: string, zipEntry: any) => {
-    if (zipEntry.dir) return
-    if (relativePath.toLowerCase().startsWith('__macos')) return
+  for (const entry of entries) {
+    if (entry.directory) continue
+    const path = entry.filename
+    if (path.toLowerCase().startsWith('__macos')) continue
 
-    const ext = relativePath.toLowerCase().substring(relativePath.lastIndexOf('.'))
+    const ext = path.toLowerCase().substring(path.lastIndexOf('.'))
     if (imageExtensions.includes(ext)) {
-      imageFiles.push({ path: relativePath, entry: zipEntry })
+      imageFiles.push({ path, entry })
     }
 
-    // Look for ComicInfo.xml
-    if (relativePath.toLowerCase() === 'comicinfo.xml' ||
-        relativePath.toLowerCase().endsWith('/comicinfo.xml')) {
-      comicInfoEntry = zipEntry
+    if (path.toLowerCase() === 'comicinfo.xml' || path.toLowerCase().endsWith('/comicinfo.xml')) {
+      comicInfoEntry = entry
     }
-  })
+  }
 
   imageFiles.sort((a, b) => a.path.localeCompare(b.path))
 
   if (imageFiles.length === 0) {
+    await zipReader.close()
     throw new Error('No images found in CBZ')
   }
 
@@ -234,7 +235,7 @@ export async function convertCbzToXtc(
   
   if (comicInfoEntry) {
     try {
-      const xmlContent = await comicInfoEntry.async('string')
+      const xmlContent = await comicInfoEntry.getData(new TextWriter())
       const cmMeta = parseComicInfo(xmlContent)
       cmMeta.toc.forEach(entry => pageTitles.set(entry.startPage, entry.title))
       if (cmMeta.title) metadata.title = cmMeta.title
@@ -273,7 +274,7 @@ export async function convertCbzToXtc(
     // Pass 1: Dimensions & Layout
     for (let i = 0; i < imageFiles.length; i++) {
       onProgress(i / imageFiles.length * 0.05, null)
-      const imgBlob = await imageFiles[i].entry.async('blob')
+      const imgBlob = await imageFiles[i].entry.getData(new BlobWriter())
       const imgDims = await getImageDimensions(imgBlob)
       const crop = getAxisCropRect(imgDims.width, imgDims.height, options)
       const count = calculateOutputPageCount(crop.width, crop.height, options)
@@ -300,7 +301,7 @@ export async function convertCbzToXtc(
 
     // Pass 3: Process & Stream
     for (let i = 0; i < imageFiles.length; i++) {
-      const imgBlob = await imageFiles[i].entry.async('blob')
+      const imgBlob = await imageFiles[i].entry.getData(new BlobWriter())
       const pages = await processImage(imgBlob, i + 1, options)
       
       for (const page of pages) {
@@ -395,6 +396,7 @@ export async function convertCbzToXtc(
         await writer.write(new Uint8Array(arrayBuffer))
       }
       await writer.close()
+      URL.revokeObjectURL(url)
       return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages }
     } else {
       const allBuffers: ArrayBuffer[] = []
@@ -402,6 +404,7 @@ export async function convertCbzToXtc(
         allBuffers.push(await blob.arrayBuffer())
       }
       const xtcData = await buildXtcFromBuffers(allBuffers, { metadata, is2bit: options.is2bit })
+      URL.revokeObjectURL(url)
       return { name: outputFileName, data: xtcData, size: xtcData.byteLength, pageCount: pageInfos.length, pageImages }
     }
   }
@@ -579,8 +582,8 @@ async function convertPdfToXtc(
   onProgress: (progress: number, previewUrl: string | null) => void,
   tocPageOffset: number = 0
 ): Promise<ConversionResult> {
-  const arrayBuffer = await file.arrayBuffer()
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+  const url = URL.createObjectURL(file)
+  const pdf = await pdfjsLib.getDocument(url).promise
   let metadata: BookMetadata = { toc: [] }
   try { metadata = await extractPdfMetadata(pdf) } catch (e) { }
 
@@ -627,6 +630,7 @@ async function convertPdfToXtc(
       if (xtcPages.length > 0) onProgress(0.05 + i / numPages * 0.95, xtcPages[0].canvas.toDataURL('image/png'))
     }
     await writer.close()
+    URL.revokeObjectURL(url)
     return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages }
   } else {
     const pageBlobs: Blob[] = []; const pageInfos: StreamPageInfo[] = []

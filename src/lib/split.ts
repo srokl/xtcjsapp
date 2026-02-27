@@ -1,6 +1,6 @@
 // Split logic for CBZ, PDF, and XTC files
 
-import JSZip from 'jszip'
+import { ZipReader, BlobReader, BlobWriter } from '@zip.js/zip.js'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { buildXtc, buildXtcFromBuffers } from './xtc-format'
@@ -114,17 +114,20 @@ export async function getPageCount(file: File): Promise<number> {
 }
 
 async function getCbzPageCount(file: File): Promise<number> {
-  const zip = await JSZip.loadAsync(file)
+  const zipReader = new ZipReader(new BlobReader(file))
+  const entries = await zipReader.getEntries()
   const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
   let count = 0
 
-  zip.forEach((relativePath: string, zipEntry: any) => {
-    if (zipEntry.dir) return
-    if (relativePath.toLowerCase().startsWith('__macos')) return
-    const ext = relativePath.toLowerCase().substring(relativePath.lastIndexOf('.'))
+  for (const entry of entries) {
+    if (entry.directory) continue
+    const path = entry.filename
+    if (path.toLowerCase().startsWith('__macos')) continue
+    const ext = path.toLowerCase().substring(path.lastIndexOf('.'))
     if (imageExtensions.includes(ext)) count++
-  })
+  }
 
+  await zipReader.close()
   return count
 }
 
@@ -169,18 +172,20 @@ async function splitCbzFile(
   onProgress: (progress: SplitProgress) => void,
   dimensions = { width: TARGET_WIDTH, height: TARGET_HEIGHT }
 ): Promise<SplitResult[]> {
-  const zip = await JSZip.loadAsync(file)
+  const zipReader = new ZipReader(new BlobReader(file))
+  const entries = await zipReader.getEntries()
   const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
   const imageFiles: Array<{ path: string; entry: any }> = []
 
-  zip.forEach((relativePath: string, zipEntry: any) => {
-    if (zipEntry.dir) return
-    if (relativePath.toLowerCase().startsWith('__macos')) return
-    const ext = relativePath.toLowerCase().substring(relativePath.lastIndexOf('.'))
+  for (const entry of entries) {
+    if (entry.directory) continue
+    const path = entry.filename
+    if (path.toLowerCase().startsWith('__macos')) continue
+    const ext = path.toLowerCase().substring(path.lastIndexOf('.'))
     if (imageExtensions.includes(ext)) {
-      imageFiles.push({ path: relativePath, entry: zipEntry })
+      imageFiles.push({ path, entry })
     }
-  })
+  }
 
   imageFiles.sort((a, b) => a.path.localeCompare(b.path))
 
@@ -202,7 +207,7 @@ async function splitCbzFile(
     const rangeImages: { name: string; blob: Blob }[] = []
     for (let i = range.start - 1; i < range.end; i++) {
       const imgFile = imageFiles[i]
-      const blob = await imgFile.entry.async('blob')
+      const blob = await imgFile.entry.getData(new BlobWriter())
       const ext = imgFile.path.substring(imgFile.path.lastIndexOf('.'))
       rangeImages.push({
         name: `${String(rangeImages.length + 1).padStart(5, '0')}${ext}`,
@@ -245,6 +250,7 @@ async function splitCbzFile(
     }
   }
 
+  await zipReader.close()
   return results
 }
 
