@@ -20,34 +20,35 @@ function AboutPage() {
         <h2>Features</h2>
         <ul className="feature-list">
           <li><strong>Privacy-first:</strong> All processing happens locally in your browser. No uploads, no servers, no tracking.</li>
-          <li><strong>Multiple formats:</strong> Convert CBZ (manga/comics), PDF documents, single images, and video files to XTC.</li>
-          <li><strong>2-bit Support:</strong> Support for the enhanced 4-level grayscale XTCH format for superior image quality.</li>
+          <li><strong>Multiple formats:</strong> Convert CBZ/CBR (manga/comics), PDF documents, single images, and video files to XTC.</li>
+          <li><strong>WebAssembly Acceleration:</strong> Optional high-performance Wasm pipeline for ultra-fast filtering, dithering, and packing.</li>
+          <li><strong>2-bit Support:</strong> Full support for the enhanced 4-level grayscale XTCH format for superior image quality.</li>
           <li><strong>Advanced Dithering:</strong> Choose from <strong>Stucki</strong> (Default), Atkinson, Floyd-Steinberg, or experimental <strong>Zhou-Fang</strong>, <strong>Ostromoukhov</strong>, and <strong>Stochastic</strong> (Hilbert Curve) algorithms.</li>
-          <li><strong>Manhwa Mode:</strong> Continuous vertical stitching for webtoons with customizable overlap (30/50/75%).</li>
-          <li><strong>Smart Splitting:</strong> Automatically split landscape pages into portrait segments with custom horizontal split counts.</li>
-          <li><strong>Video to XTC:</strong> Extract and convert video frames at customizable FPS.</li>
-          <li><strong>Orientation Control:</strong> Explicitly set portrait, landscape, or flipped orientations.</li>
-          <li><strong>Image Wallpapers:</strong> Dedicated image mode with Cover, Letterbox, Fill, and Center-Crop scaling.</li>
+          <li><strong>High-Quality Scaling:</strong> Uses Box Filter/Area Averaging for sharp, detailed downscaling before 1-bit dithering.</li>
+          <li><strong>Manhwa Mode:</strong> Continuous vertical stitching for webtoons with customizable overlap.</li>
+          <li><strong>Memory Optimized:</strong> "Streamed Downloading" option writes massive files (like 2GB CBZs) directly to disk, bypassing browser memory limits.</li>
+          <li><strong>Metadata & TOC Editor:</strong> View, add, delete, and reorder chapters, and edit title/author information directly inside XTC/XTCH files.</li>
+          <li><strong>Merge & Split:</strong> Easily split huge archives into smaller volumes or merge multiple volumes together while preserving chapters.</li>
         </ul>
       </section>
 
       <section className="content-section">
         <h2>How It Works</h2>
         <ol className="steps-list">
-          <li><strong>Select files:</strong> Drag and drop your files (CBZ, PDF, Images, or Video).</li>
-          <li><strong>Adjust settings:</strong> Choose your dithering, contrast, scaling mode, and orientation.</li>
+          <li><strong>Select files:</strong> Drag and drop your files (CBZ, CBR, PDF, Images, Video, or existing XTC/XTCH).</li>
+          <li><strong>Adjust settings:</strong> Choose your reading mode, dithering, contrast, and scaling mode.</li>
           <li><strong>Convert:</strong> Watch the real-time preview as the app processes your content.</li>
-          <li><strong>Download:</strong> Save your .xtc or .xtch files and transfer them to your XTEink X4.</li>
+          <li><strong>Download:</strong> Save your optimized .xtc or .xtch files and transfer them to your e-reader.</li>
         </ol>
       </section>
 
       <section className="content-section">
         <h2>About the XTC/XTCH Format</h2>
         <p>
-          XTC is the native format for the XTEink X4 e-reader. 
+          XTC is the native format for the XTEink X4 and X3 e-readers. 
           <strong>XTC</strong> (1-bit) uses high-contrast black and white pixels, while <strong>XTCH</strong> (2-bit) 
           supports 4 levels of gray using a planar bit-mapping technique. 
-          Both formats are optimized for 480×800 e-ink displays to provide paper-like readability with minimal ghosting.
+          Both formats are optimized for e-ink displays to provide paper-like readability with minimal ghosting.
         </p>
       </section>
 
@@ -55,15 +56,19 @@ function AboutPage() {
         <h2>Frequently Asked Questions</h2>
         <details className="faq-item">
           <summary>Is my data safe?</summary>
-          <p>Yes. XTC.js processes everything in your browser using JavaScript and TypedArrays. Your files are never uploaded to any server. You can even use this tool offline once the page is loaded.</p>
+          <p>Yes. XTC.js processes everything in your browser using JavaScript and WebAssembly. Your files are never uploaded to any server. You can even use this tool offline once the page is loaded.</p>
+        </details>
+        <details className="faq-item">
+          <summary>My browser crashes on large files!</summary>
+          <p>If you are converting very large files (like a 1GB+ CBZ), check the <strong>Streamed Downloading</strong> option. This writes the converted data directly to your hard drive page-by-page, preventing the browser from running out of memory. Alternatively, use the <strong>Merge / Split</strong> tab to break the file into smaller volumes first.</p>
         </details>
         <details className="faq-item">
           <summary>What dithering algorithm should I use?</summary>
-          <p><strong>Stucki</strong> is now the default and provides the best balance of sharpness and detail. For a smoother "blue noise" look, try <strong>Zhou-Fang</strong> or <strong>Ostromoukhov</strong>. <strong>Stochastic</strong> uses a Hilbert Space-Filling Curve to provide organic, grain-free diffusion. For crisp text, use <strong>Atkinson</strong> or <strong>None</strong>.</p>
+          <p><strong>Stucki</strong> is the default and provides the best balance of sharpness and detail for manga. For a smoother look, try <strong>Zhou-Fang</strong> or <strong>Ostromoukhov</strong>. For crisp text with less noise, use <strong>Atkinson</strong>.</p>
         </details>
         <details className="faq-item">
-          <summary>Why are my pages split?</summary>
-          <p>The XTEink X4 has a portrait display (480×800). Landscape spreads are split into pieces to fill the screen. Use <strong>Horizontal Split Count</strong> to control the number of segments for wide panoramas.</p>
+          <summary>Why are my landscape pages split?</summary>
+          <p>The e-reader has a portrait display. By default, wide landscape spreads are split into overlapping pieces to fill the screen naturally. You can change this behavior in the <strong>Page Split</strong> option under settings.</p>
         </details>
       </section>
 
