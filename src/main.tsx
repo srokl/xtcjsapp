@@ -9,8 +9,8 @@ import './styles/components.css'
 import './styles/animations.css'
 
 // Configure StreamSaver to use local assets for offline support (Docker) and better performance
-// We use a relative path which usually works better with build tools and different environments
-streamSaver.mitm = '/streamsaver/mitm.html'
+// We use an absolute URL which is required for StreamSaver to correctly load the MITM iframe
+streamSaver.mitm = window.location.origin + '/streamsaver/mitm.html'
 
 const router = createRouter({ routeTree })
 

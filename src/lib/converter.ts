@@ -129,7 +129,7 @@ import { getAxisCropRect } from './processing/geometry'
 import type { ConversionOptions, ConversionResult, ProcessedPage, CropRect } from './types'
 export type { ConversionOptions, ConversionResult }
 
-// Inline PageMappingContext to avoid potential circular dependency/initialization issues
+// Inline PageMappingContext
 export class PageMappingContext {
   private mappings: Array<{ originalPage: number; xtcStartPage: number; xtcPageCount: number }> = []
   private currentXtcPage = 1
@@ -154,7 +154,7 @@ export class PageMappingContext {
 }
 
 /**
- * Convert a file to XTC format (supports CBZ, CBR and PDF)
+ * Convert a file to XTC format
  */
 export async function convertToXtc(
   file: File,
@@ -250,9 +250,7 @@ export async function convertCbzToXtc(
     const parts = file.path.split('/')
     if (parts.length > 1) {
       const folderName = parts[parts.length - 2]
-      if (!pageTitles.has(index + 1)) {
-        pageTitles.set(index + 1, folderName)
-      }
+      if (!pageTitles.has(index + 1)) pageTitles.set(index + 1, folderName)
     }
   })
 
@@ -312,12 +310,11 @@ export async function convertCbzToXtc(
     for (let i = 0; i < imageFiles.length; i++) {
       const imgBlob = await imageFiles[i].entry.getData(new BlobWriter())
       let currentEncoded: ArrayBuffer[] = []; let currentPreviews: string[] = []
+      
       if (stitcher) {
         const img = await new Promise<HTMLImageElement>((resolve) => {
           const img = new Image(); const url = URL.createObjectURL(imgBlob)
-          img.onload = () => { 
-            URL.revokeObjectURL(url); resolve(img) 
-          }
+          img.onload = () => { URL.revokeObjectURL(url); resolve(img) }
           img.onerror = () => { URL.revokeObjectURL(url); resolve(null as any) }
           img.src = url
         })
@@ -332,13 +329,15 @@ export async function convertCbzToXtc(
         const result = await processImageAsBinary(imgBlob, i + 1, options)
         currentEncoded = result.buffers; currentPreviews = result.previews
       }
+      
       for (let j = 0; j < currentEncoded.length; j++) {
         pageBlobs.push(new Blob([currentEncoded[j]])); pageInfos.push({ width: dims.width, height: dims.height })
-        if (pageImages.length < 10) pageImages.push(currentPreviews[j])
+        if (pageImages.length < 10 && currentPreviews[j]) pageImages.push(currentPreviews[j])
       }
       mappingCtx.addOriginalPage(i + 1, currentEncoded.length)
       if (currentPreviews.length > 0) onProgress((i + 1) / imageFiles.length, currentPreviews[0])
     }
+    
     if (stitcher) {
       for (const p of stitcher.finish()) {
         const encoded = await processAndEncode(p.canvas, options)
@@ -346,6 +345,7 @@ export async function convertCbzToXtc(
         if (pageImages.length < 10) pageImages.push(p.canvas.toDataURL('image/png'))
       }
     }
+    
     if (metadata.toc.length > 0) {
       const totalXtcPages = mappingCtx.getTotalXtcPages()
       metadata.toc = metadata.toc.map((entry, index) => {
@@ -354,7 +354,9 @@ export async function convertCbzToXtc(
         return { title: entry.title, startPage: adjustedStartPage, endPage: adjustedEndPage }
       })
     }
+    
     await zipReader.close()
+    
     if (options.streamedDownload) {
       const headerAndIndex = buildXtcHeaderAndIndex(pageInfos, { metadata, is2bit: options.is2bit })
       let totalSize = headerAndIndex.byteLength
@@ -476,7 +478,7 @@ export async function convertCbrToXtc(
       }
       for (let j = 0; j < currentEncoded.length; j++) {
         pageBlobs.push(new Blob([currentEncoded[j]])); pageInfos.push({ width: dims.width, height: dims.height })
-        if (pageImages.length < 10) pageImages.push(currentPreviews[j])
+        if (pageImages.length < 10 && currentPreviews[j]) pageImages.push(currentPreviews[j])
       }
       mappingCtx.addOriginalPage(i + 1, currentEncoded.length)
       if (currentPreviews.length > 0) onProgress((i + 1) / imageFiles.length, currentPreviews[0])
@@ -682,8 +684,14 @@ async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: nu
   const croppedCanvas = document.createElement('canvas'); croppedCanvas.width = crop.width; croppedCanvas.height = crop.height
   croppedCanvas.getContext('2d')!.drawImage(sourceCanvas, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height)
 
-  if (options.sidewaysOverviews && !options.manhwa) results.push(await processAndEncode(resizeWithPadding(rotateCanvas(croppedCanvas, 90), padColor, dims.width, dims.height), options))
-  if (options.includeOverviews && !options.manhwa) results.push(await processAndEncode(resizeWithPadding(croppedCanvas, padColor, dims.width, dims.height), options))
+  if (options.sidewaysOverviews && !options.manhwa) {
+    const canvas = resizeWithPadding(rotateCanvas(croppedCanvas, 90), padColor, dims.width, dims.height)
+    results.push(await processAndEncode(canvas, options))
+  }
+  if (options.includeOverviews && !options.manhwa) {
+    const canvas = resizeWithPadding(croppedCanvas, padColor, dims.width, dims.height)
+    results.push(await processAndEncode(canvas, options))
+  }
   
   const isSingleImage = options.sourceType === 'image' && !options.manhwa && options.splitMode === 'nosplit'
   if (isSingleImage) {
@@ -712,7 +720,11 @@ async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: nu
   
   if (crop.width < crop.height && options.splitMode !== 'nosplit') {
     if (options.splitMode === 'overlap') {
-      for (const seg of calculateOverlapSegments(crop.width, crop.height, dims.width, dims.height)) results.push(await processAndEncode(resizeWithPadding(extractAndRotate(croppedCanvas, seg.x, seg.y, seg.w, seg.h), padColor, dims.width, dims.height), options))
+      const segs = calculateOverlapSegments(crop.width, crop.height, dims.width, dims.height)
+      for (const seg of segs) {
+        const canvas = resizeWithPadding(extractAndRotate(croppedCanvas, seg.x, seg.y, seg.w, seg.h), padColor, dims.width, dims.height)
+        results.push(await processAndEncode(canvas, options))
+      }
     } else {
       const half = Math.floor(crop.height / 2)
       results.push(await processAndEncode(resizeWithPadding(extractAndRotate(croppedCanvas, 0, 0, crop.width, half), padColor, dims.width, dims.height), options))
@@ -728,10 +740,11 @@ async function processImageAsBinary(imgBlob: Blob, pageNum: number, options: Con
   return new Promise((resolve) => {
     const img = new Image(); const url = URL.createObjectURL(imgBlob)
     img.onload = async () => {
-      URL.revokeObjectURL(url)
       const canvas = document.createElement('canvas'); canvas.width = img.width; canvas.height = img.height
       canvas.getContext('2d')!.drawImage(img, 0, 0)
+      URL.revokeObjectURL(url)
       const buffers = await processCanvasAsImage(canvas, pageNum, options)
+      // For performance, we only send back the original page preview
       resolve({ buffers, previews: [canvas.toDataURL('image/png')] })
     }
     img.onerror = () => resolve({ buffers: [], previews: [] })

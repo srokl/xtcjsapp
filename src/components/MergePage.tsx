@@ -90,7 +90,7 @@ export function MergePage() {
 
       const type = detectFileType(file)
       if (type === 'unknown') {
-        setTypeError('Unsupported file type. Use CBZ, PDF, or XTC files.')
+        setTypeError('Unsupported file type. Use CBZ, PDF, or XTC/XTCH files.')
         return
       }
 
@@ -225,21 +225,27 @@ export function MergePage() {
       setIsProcessing(false)
       setPreviewUrl(null)
     }
-  }, [files, mode, actualOutputFormat, splitMethod, rangesInput, partsCount, totalPages])
+  }, [files, mode, actualOutputFormat, splitMethod, rangesInput, partsCount, totalPages, device])
 
   const handleDownload = useCallback(async (result: MergePageResult) => {
     if (!result.data) return
 
     try {
-      // Primary: Use StreamSaver for all files if it works
-      const fileStream = streamSaver.createWriteStream(result.name, {
-        size: result.size,
-      })
-      const writer = fileStream.getWriter()
-      await writer.write(new Uint8Array(result.data))
-      await writer.close()
+      // Primary: Use StreamSaver for large files (> 50MB)
+      if (result.size > 50 * 1024 * 1024) {
+          const fileStream = streamSaver.createWriteStream(result.name, {
+            size: result.size,
+          })
+          const writer = fileStream.getWriter()
+          await writer.write(new Uint8Array(result.data))
+          await writer.close()
+          return
+      }
+      
+      // Force fallback for smaller files or if StreamSaver fails
+      throw new Error('Small file, use fallback')
     } catch (e) {
-      console.warn('StreamSaver failed, falling back to simple download', e)
+      console.warn('StreamSaver skipped or failed, falling back to simple download', e)
       const blob = new Blob([result.data], { type: 'application/octet-stream' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')

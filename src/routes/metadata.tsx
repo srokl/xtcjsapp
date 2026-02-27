@@ -84,25 +84,34 @@ function MetadataEditor() {
       const baseName = file.name.replace(/\.[^/.]+$/, '')
       const fileName = `${baseName}_edited${ext}`
 
-      try {
-        const fileStream = streamSaver.createWriteStream(fileName, {
-          size: newBuffer.byteLength,
-        })
-        const writer = fileStream.getWriter()
-        await writer.write(new Uint8Array(newBuffer))
-        await writer.close()
-      } catch (e) {
-        console.warn('StreamSaver failed, falling back to Blob URL', e)
-        const blob = new Blob([newBuffer], { type: 'application/octet-stream' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = fileName
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        URL.revokeObjectURL(url)
+      // Use StreamSaver for large files (> 50MB)
+      if (newBuffer.byteLength > 50 * 1024 * 1024) {
+          try {
+            const fileStream = streamSaver.createWriteStream(fileName, {
+              size: newBuffer.byteLength,
+            })
+            const writer = fileStream.getWriter()
+            await writer.write(new Uint8Array(newBuffer))
+            await writer.close()
+            return
+          } catch (e) {
+            console.warn('StreamSaver failed, falling back to simple download', e)
+          }
       }
+
+      // Simple anchor download fallback
+      const blob = new Blob([newBuffer], { type: 'application/octet-stream' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      setTimeout(() => {
+          document.body.removeChild(a)
+          URL.revokeObjectURL(url)
+      }, 100)
+      
     } catch (e) {
       console.error(e)
       alert("Failed to repack XTC file.")

@@ -164,10 +164,8 @@ export function useStoredResults(): UseStoredResultsReturn {
         return
       }
 
-      const blob = new Blob([data], { type: 'application/octet-stream' })
-      
-      // Use StreamSaver for large files (> 100MB) or as primary if it works
-      if (data.byteLength > 100 * 1024 * 1024) {
+      // Use StreamSaver ONLY for large files (> 50MB)
+      if (data.byteLength > 50 * 1024 * 1024) {
           try {
             const fileStream = streamSaver.createWriteStream(result.name, {
               size: data.byteLength,
@@ -181,7 +179,8 @@ export function useStoredResults(): UseStoredResultsReturn {
           }
       }
 
-      // Simple anchor download fallback
+      // Simple anchor download fallback for small files or if StreamSaver fails
+      const blob = new Blob([data], { type: 'application/octet-stream' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
