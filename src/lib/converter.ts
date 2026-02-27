@@ -40,7 +40,7 @@ async function getImageDimensions(blob: Blob): Promise<{ width: number; height: 
 }
 
 /**
- * Resize a canvas with high-quality Box Filter if 1-bit and Wasm enabled
+ * Resize a canvas with high-quality Box Filter
  */
 function resizeHq(
   canvas: HTMLCanvasElement, 
@@ -103,17 +103,15 @@ async function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOp
 }
 
 /**
- * Encode a processed page to its final binary format (XTG/XTH)
+ * Legacy encodePage for compatibility
  */
 function encodePage(page: ProcessedPage, is2bit: boolean, useWasm: boolean): ArrayBuffer {
   const ctx = page.canvas.getContext('2d', { willReadFrequently: true })!
   const imageData = ctx.getImageData(0, 0, page.canvas.width, page.canvas.height)
-  
   if (useWasm && isWasmLoaded()) {
     const packed = runWasmPack(imageData, is2bit)
     return wrapWasmData(packed, page.canvas.width, page.canvas.height, is2bit)
   }
-  
   return is2bit ? imageDataToXth(imageData) : imageDataToXtg(imageData)
 }
 
@@ -135,11 +133,7 @@ export class PageMappingContext {
   private currentXtcPage = 1
 
   addOriginalPage(originalPage: number, xtcPageCount: number): void {
-    this.mappings.push({
-      originalPage,
-      xtcStartPage: this.currentXtcPage,
-      xtcPageCount
-    })
+    this.mappings.push({ originalPage, xtcStartPage: this.currentXtcPage, xtcPageCount })
     this.currentXtcPage += xtcPageCount
   }
 
@@ -163,45 +157,24 @@ export async function convertToXtc(
   onProgress: (progress: number, previewUrl: string | null) => void,
   tocPageOffset: number = 0
 ): Promise<ConversionResult> {
-  if (options.useWasm) {
-    try {
-      await initWasm()
-    } catch (e) {
-      console.error("Wasm init failed", e)
-    }
-  }
+  if (options.useWasm) try { await initWasm() } catch (e) { console.error("Wasm init failed", e) }
 
-  if (fileType === 'pdf') {
-    return convertPdfToXtc(file, options, onProgress, tocPageOffset)
-  }
-  if (fileType === 'cbr') {
-    return convertCbrToXtc(file, options, onProgress, tocPageOffset)
-  }
-  if (fileType === 'image') {
-    return convertImageToXtc(file, options, onProgress)
-  }
-  if (fileType === 'video') {
-    return convertVideoToXtc(file, options, onProgress)
-  }
+  if (fileType === 'pdf') return convertPdfToXtc(file, options, onProgress, tocPageOffset)
+  if (fileType === 'cbr') return convertCbrToXtc(file, options, onProgress, tocPageOffset)
+  if (fileType === 'image') return convertImageToXtc(file, options, onProgress)
+  if (fileType === 'video') return convertVideoToXtc(file, options, onProgress)
   return convertCbzToXtc(file, options, onProgress, tocPageOffset)
 }
 
 function calculateOutputPageCount(width: number, height: number, options: ConversionOptions): number {
-  if (options.manhwa) return 0 // Manhwa is dynamic
-  
+  if (options.manhwa) return 0
   let count = 0
-  if (options.sidewaysOverviews && !options.manhwa) count++
-  if (options.includeOverviews && !options.manhwa) count++
-  
-  if (options.orientation === 'portrait') {
-    count++
-  } else {
+  if (options.sidewaysOverviews) count++
+  if (options.includeOverviews) count++
+  if (options.orientation === 'portrait') count++
+  else {
     const shouldSplit = width < height && options.splitMode !== 'nosplit'
-    if (shouldSplit) {
-      count += (options.splitMode === 'overlap' ? 3 : 2)
-    } else {
-      count++
-    }
+    count += shouldSplit ? (options.splitMode === 'overlap' ? 3 : 2) : 1
   }
   return count
 }
@@ -216,162 +189,163 @@ export async function convertCbzToXtc(
   tocPageOffset: number = 0
 ): Promise<ConversionResult> {
   const zipReader = new ZipReader(new BlobReader(file))
-  const entries = await zipReader.getEntries()
+  try {
+    const entries = await zipReader.getEntries()
+    const imageFiles: Array<{ path: string; entry: any }> = []
+    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
+    let comicInfoEntry: any = null
 
-  const imageFiles: Array<{ path: string; entry: any }> = []
-  const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
-  let comicInfoEntry: any = null
-
-  for (const entry of entries) {
-    if (entry.directory) continue
-    const path = entry.filename
-    if (path.toLowerCase().startsWith('__macos')) continue
-    const ext = path.toLowerCase().substring(path.lastIndexOf('.'))
-    if (imageExtensions.includes(ext)) imageFiles.push({ path, entry })
-    if (path.toLowerCase().endsWith('comicinfo.xml')) comicInfoEntry = entry
-  }
-
-  imageFiles.sort((a, b) => a.path.localeCompare(b.path))
-  if (imageFiles.length === 0) { await zipReader.close(); throw new Error('No images found in CBZ') }
-
-  const pageTitles = new Map<number, string>()
-  let metadata: BookMetadata = { toc: [] }
-  if (comicInfoEntry) {
-    try {
-      const xmlContent = await comicInfoEntry.getData(new TextWriter())
-      const cmMeta = parseComicInfo(xmlContent)
-      cmMeta.toc.forEach(entry => pageTitles.set(entry.startPage, entry.title))
-      if (cmMeta.title) metadata.title = cmMeta.title
-      if (cmMeta.author) metadata.author = cmMeta.author
-    } catch { }
-  }
-
-  imageFiles.forEach((file, index) => {
-    const parts = file.path.split('/')
-    if (parts.length > 1) {
-      const folderName = parts[parts.length - 2]
-      if (!pageTitles.has(index + 1)) pageTitles.set(index + 1, folderName)
-    }
-  })
-
-  metadata.toc = imageFiles.map((_, index) => {
-    const pg = index + 1
-    let title = `Page ${pg + tocPageOffset}`
-    if (pageTitles.has(pg)) title = `${title} - ${pageTitles.get(pg)}`
-    return { title, startPage: pg, endPage: pg }
-  })
-
-  const mappingCtx = new PageMappingContext()
-  const dims = getTargetDimensions(options)
-  const outputFileName = file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xtch' : '.xtc')
-  const pageImages: string[] = []
-
-  if (options.streamedDownload && !options.manhwa) {
-    const pageInfos: StreamPageInfo[] = []
-    for (let i = 0; i < imageFiles.length; i++) {
-      onProgress(i / imageFiles.length * 0.05, null)
-      const imgBlob = await imageFiles[i].entry.getData(new BlobWriter())
-      const imgDims = await getImageDimensions(imgBlob)
-      const crop = getAxisCropRect(imgDims.width, imgDims.height, options)
-      const count = calculateOutputPageCount(crop.width, crop.height, options)
-      for (let j = 0; j < count; j++) pageInfos.push({ width: dims.width, height: dims.height })
-      mappingCtx.addOriginalPage(i + 1, count)
+    for (const entry of entries) {
+      if (entry.directory) continue
+      const path = entry.filename
+      if (path.toLowerCase().startsWith('__macos')) continue
+      const ext = path.toLowerCase().substring(path.lastIndexOf('.'))
+      if (imageExtensions.includes(ext)) imageFiles.push({ path, entry })
+      if (path.toLowerCase().endsWith('comicinfo.xml')) comicInfoEntry = entry
     }
 
-    if (metadata.toc.length > 0) {
-      const totalXtcPages = mappingCtx.getTotalXtcPages()
-      metadata.toc = metadata.toc.map((entry, index) => {
-        const adjustedStartPage = mappingCtx.getXtcPage(entry.startPage)
-        let adjustedEndPage = index < metadata.toc.length - 1 ? mappingCtx.getXtcPage(metadata.toc[index+1].startPage) - 1 : totalXtcPages
-        return { title: entry.title, startPage: adjustedStartPage, endPage: adjustedEndPage }
-      })
+    imageFiles.sort((a, b) => a.path.localeCompare(b.path))
+    if (imageFiles.length === 0) throw new Error('No images found in CBZ')
+
+    const pageTitles = new Map<number, string>()
+    let metadata: BookMetadata = { toc: [] }
+    if (comicInfoEntry) {
+      try {
+        const xmlContent = await comicInfoEntry.getData(new TextWriter())
+        const cmMeta = parseComicInfo(xmlContent)
+        cmMeta.toc.forEach(entry => pageTitles.set(entry.startPage, entry.title))
+        if (cmMeta.title) metadata.title = cmMeta.title
+        if (cmMeta.author) metadata.author = cmMeta.author
+      } catch { }
     }
-    const headerAndIndex = buildXtcHeaderAndIndex(pageInfos, { metadata, is2bit: options.is2bit })
-    let totalSize = headerAndIndex.byteLength
-    for (const info of pageInfos) totalSize += getXtcPageSize(info.width, info.height, options.is2bit)
 
-    const fileStream = streamSaver.createWriteStream(outputFileName, { size: totalSize })
-    const writer = fileStream.getWriter()
-    await writer.write(headerAndIndex)
+    imageFiles.forEach((file, index) => {
+      const parts = file.path.split('/')
+      if (parts.length > 1) {
+        const folderName = parts[parts.length - 2]
+        if (!pageTitles.has(index + 1)) pageTitles.set(index + 1, folderName)
+      }
+    })
 
-    for (let i = 0; i < imageFiles.length; i++) {
-      const imgBlob = await imageFiles[i].entry.getData(new BlobWriter())
-      const result = await processImageAsBinary(imgBlob, i + 1, options)
-      for (const encoded of result.buffers) await writer.write(new Uint8Array(encoded))
-      if (pageImages.length < 10) pageImages.push(...result.previews.slice(0, 10 - pageImages.length))
-      if (result.previews.length > 0) onProgress(0.05 + (i + 1) / imageFiles.length * 0.95, result.previews[0])
-    }
-    await writer.close(); await zipReader.close()
-    return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages, size: totalSize }
-  } else {
-    const pageBlobs: Blob[] = []; const pageInfos: StreamPageInfo[] = []
-    let stitcher: ManhwaStitcher | null = options.manhwa ? new ManhwaStitcher(options) : null
+    metadata.toc = imageFiles.map((_, index) => {
+      const pg = index + 1
+      let title = `Page ${pg + tocPageOffset}`
+      if (pageTitles.has(pg)) title = `${title} - ${pageTitles.get(pg)}`
+      return { title, startPage: pg, endPage: pg }
+    })
 
-    for (let i = 0; i < imageFiles.length; i++) {
-      const imgBlob = await imageFiles[i].entry.getData(new BlobWriter())
-      let currentEncoded: ArrayBuffer[] = []; let currentPreviews: string[] = []
-      
-      if (stitcher) {
-        const img = await new Promise<HTMLImageElement>((resolve) => {
-          const img = new Image(); const url = URL.createObjectURL(imgBlob)
-          img.onload = () => { URL.revokeObjectURL(url); resolve(img) }
-          img.onerror = () => { URL.revokeObjectURL(url); resolve(null as any) }
-          img.src = url
+    const mappingCtx = new PageMappingContext()
+    const dims = getTargetDimensions(options)
+    const outputFileName = file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xtch' : '.xtc')
+    const pageImages: string[] = []
+
+    if (options.streamedDownload && !options.manhwa) {
+      const pageInfos: StreamPageInfo[] = []
+      // Pass 1: Info
+      for (let i = 0; i < imageFiles.length; i++) {
+        onProgress(i / imageFiles.length * 0.05, null)
+        const imgBlob = await imageFiles[i].entry.getData(new BlobWriter())
+        const imgDims = await getImageDimensions(imgBlob)
+        const crop = getAxisCropRect(imgDims.width, imgDims.height, options)
+        const count = calculateOutputPageCount(crop.width, crop.height, options)
+        for (let j = 0; j < count; j++) pageInfos.push({ width: dims.width, height: dims.height })
+        mappingCtx.addOriginalPage(i + 1, count)
+      }
+
+      if (metadata.toc.length > 0) {
+        const totalXtcPages = mappingCtx.getTotalXtcPages()
+        metadata.toc = metadata.toc.map((entry, index) => {
+          const adjustedStartPage = mappingCtx.getXtcPage(entry.startPage)
+          let adjustedEndPage = index < metadata.toc.length - 1 ? mappingCtx.getXtcPage(metadata.toc[index+1].startPage) - 1 : totalXtcPages
+          return { title: entry.title, startPage: adjustedStartPage, endPage: adjustedEndPage }
         })
-        if (img) {
-          const slices = await stitcher.append(img)
-          for (const slice of slices) {
-            const encoded = await processAndEncode(slice.canvas, options)
-            currentEncoded.push(encoded); currentPreviews.push(slice.canvas.toDataURL('image/png'))
-          }
-        }
-      } else {
-        const result = await processImageAsBinary(imgBlob, i + 1, options)
-        currentEncoded = result.buffers; currentPreviews = result.previews
       }
-      
-      for (let j = 0; j < currentEncoded.length; j++) {
-        pageBlobs.push(new Blob([currentEncoded[j]])); pageInfos.push({ width: dims.width, height: dims.height })
-        if (pageImages.length < 10 && currentPreviews[j]) pageImages.push(currentPreviews[j])
-      }
-      mappingCtx.addOriginalPage(i + 1, currentEncoded.length)
-      if (currentPreviews.length > 0) onProgress((i + 1) / imageFiles.length, currentPreviews[0])
-    }
-    
-    if (stitcher) {
-      for (const p of stitcher.finish()) {
-        const encoded = await processAndEncode(p.canvas, options)
-        pageBlobs.push(new Blob([encoded])); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
-        if (pageImages.length < 10) pageImages.push(p.canvas.toDataURL('image/png'))
-      }
-    }
-    
-    if (metadata.toc.length > 0) {
-      const totalXtcPages = mappingCtx.getTotalXtcPages()
-      metadata.toc = metadata.toc.map((entry, index) => {
-        const adjustedStartPage = mappingCtx.getXtcPage(entry.startPage)
-        let adjustedEndPage = index < metadata.toc.length - 1 ? mappingCtx.getXtcPage(metadata.toc[index+1].startPage) - 1 : totalXtcPages
-        return { title: entry.title, startPage: adjustedStartPage, endPage: adjustedEndPage }
-      })
-    }
-    
-    await zipReader.close()
-    
-    if (options.streamedDownload) {
       const headerAndIndex = buildXtcHeaderAndIndex(pageInfos, { metadata, is2bit: options.is2bit })
       let totalSize = headerAndIndex.byteLength
       for (const info of pageInfos) totalSize += getXtcPageSize(info.width, info.height, options.is2bit)
-      const fileStream = streamSaver.createWriteStream(outputFileName, { size: totalSize }); const writer = fileStream.getWriter()
+
+      const fileStream = streamSaver.createWriteStream(outputFileName, { size: totalSize })
+      const writer = fileStream.getWriter()
       await writer.write(headerAndIndex)
-      for (const blob of pageBlobs) await writer.write(new Uint8Array(await blob.arrayBuffer()))
+
+      // Pass 2: Data
+      for (let i = 0; i < imageFiles.length; i++) {
+        const imgBlob = await imageFiles[i].entry.getData(new BlobWriter())
+        const result = await processImageAsBinary(imgBlob, i + 1, options)
+        for (const encoded of result.buffers) await writer.write(new Uint8Array(encoded))
+        if (pageImages.length < 10 && result.previews[0]) pageImages.push(result.previews[0])
+        if (result.previews.length > 0) onProgress(0.05 + (i + 1) / imageFiles.length * 0.95, result.previews[0])
+      }
       await writer.close()
+      await zipReader.close()
       return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages, size: totalSize }
     } else {
-      const allBuffers: ArrayBuffer[] = []
-      for (const blob of pageBlobs) allBuffers.push(await blob.arrayBuffer())
-      const xtcData = await buildXtcFromBuffers(allBuffers, { metadata, is2bit: options.is2bit })
-      return { name: outputFileName, data: xtcData, size: xtcData.byteLength, pageCount: pageInfos.length, pageImages }
+      // Standard path
+      const pageBlobs: Blob[] = []; const pageInfos: StreamPageInfo[] = []
+      let stitcher: ManhwaStitcher | null = options.manhwa ? new ManhwaStitcher(options) : null
+
+      for (let i = 0; i < imageFiles.length; i++) {
+        const imgBlob = await imageFiles[i].entry.getData(new BlobWriter())
+        let currentEncoded: ArrayBuffer[] = []; let currentPreviews: string[] = []
+        if (stitcher) {
+          const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const img = new Image(); const url = URL.createObjectURL(imgBlob)
+            img.onload = () => { URL.revokeObjectURL(url); resolve(img) }
+            img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Img load fail')) }
+            img.src = url
+          })
+          const slices = await stitcher.append(img)
+          for (const slice of slices) {
+            currentEncoded.push(await processAndEncode(slice.canvas, options))
+            currentPreviews.push(slice.canvas.toDataURL('image/png'))
+          }
+        } else {
+          const result = await processImageAsBinary(imgBlob, i + 1, options)
+          currentEncoded = result.buffers; currentPreviews = result.previews
+        }
+        for (let j = 0; j < currentEncoded.length; j++) {
+          pageBlobs.push(new Blob([currentEncoded[j]])); pageInfos.push({ width: dims.width, height: dims.height })
+          if (pageImages.length < 10 && currentPreviews[j]) pageImages.push(currentPreviews[j])
+        }
+        mappingCtx.addOriginalPage(i + 1, currentEncoded.length)
+        if (currentPreviews.length > 0) onProgress((i + 1) / imageFiles.length, currentPreviews[0])
+      }
+      if (stitcher) {
+        for (const p of stitcher.finish()) {
+          const encoded = await processAndEncode(p.canvas, options)
+          pageBlobs.push(new Blob([encoded])); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
+          if (pageImages.length < 10) pageImages.push(p.canvas.toDataURL('image/png'))
+        }
+      }
+      if (metadata.toc.length > 0) {
+        const totalXtcPages = mappingCtx.getTotalXtcPages()
+        metadata.toc = metadata.toc.map((entry, index) => {
+          const adjustedStartPage = mappingCtx.getXtcPage(entry.startPage)
+          let adjustedEndPage = index < metadata.toc.length - 1 ? mappingCtx.getXtcPage(metadata.toc[index+1].startPage) - 1 : totalXtcPages
+          return { title: entry.title, startPage: adjustedStartPage, endPage: adjustedEndPage }
+        })
+      }
+      await zipReader.close()
+      if (options.streamedDownload) {
+        const headerAndIndex = buildXtcHeaderAndIndex(pageInfos, { metadata, is2bit: options.is2bit })
+        let totalSize = headerAndIndex.byteLength
+        for (const info of pageInfos) totalSize += getXtcPageSize(info.width, info.height, options.is2bit)
+        const fileStream = streamSaver.createWriteStream(outputFileName, { size: totalSize })
+        const writer = fileStream.getWriter()
+        await writer.write(headerAndIndex)
+        for (const blob of pageBlobs) await writer.write(new Uint8Array(await blob.arrayBuffer()))
+        await writer.close()
+        return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages, size: totalSize }
+      } else {
+        const allBuffers: ArrayBuffer[] = []
+        for (const blob of pageBlobs) allBuffers.push(await blob.arrayBuffer())
+        const xtcData = await buildXtcFromBuffers(allBuffers, { metadata, is2bit: options.is2bit })
+        return { name: outputFileName, data: xtcData, size: xtcData.byteLength, pageCount: pageInfos.length, pageImages }
+      }
     }
+  } catch (e) {
+    await zipReader.close()
+    throw e
   }
 }
 
@@ -446,7 +420,7 @@ export async function convertCbrToXtc(
       const imgBlob = new Blob([new Uint8Array(imageFiles[i].data)])
       const result = await processImageAsBinary(imgBlob, i + 1, options)
       for (const encoded of result.buffers) await writer.write(new Uint8Array(encoded))
-      if (pageImages.length < 10) pageImages.push(...result.previews.slice(0, 10 - pageImages.length))
+      if (pageImages.length < 10 && result.previews[0]) pageImages.push(result.previews[0])
       if (result.previews.length > 0) onProgress(0.05 + (i + 1) / imageFiles.length * 0.95, result.previews[0])
     }
     await writer.close()
@@ -459,18 +433,16 @@ export async function convertCbrToXtc(
       const imgBlob = new Blob([new Uint8Array(imageFiles[i].data)])
       let currentEncoded: ArrayBuffer[] = []; let currentPreviews: string[] = []
       if (stitcher) {
-        const img = await new Promise<HTMLImageElement>((resolve) => {
+        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
           const img = new Image(); const url = URL.createObjectURL(imgBlob)
           img.onload = () => { URL.revokeObjectURL(url); resolve(img) }
-          img.onerror = () => { URL.revokeObjectURL(url); resolve(null as any) }
+          img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Img fail')) }
           img.src = url
         })
-        if (img) {
-          const slices = await stitcher.append(img)
-          for (const slice of slices) {
-            const encoded = await processAndEncode(slice.canvas, options)
-            currentEncoded.push(encoded); currentPreviews.push(slice.canvas.toDataURL('image/png'))
-          }
+        const slices = await stitcher.append(img)
+        for (const slice of slices) {
+          currentEncoded.push(await processAndEncode(slice.canvas, options))
+          currentPreviews.push(slice.canvas.toDataURL('image/png'))
         }
       } else {
         const result = await processImageAsBinary(imgBlob, i + 1, options)
@@ -486,7 +458,7 @@ export async function convertCbrToXtc(
     if (stitcher) {
       for (const p of stitcher.finish()) {
         const encoded = await processAndEncode(p.canvas, options)
-        pageBlobs.push(new Blob([encoded])); pageInfos.push({ width: dims.width, height: dims.height })
+        pageBlobs.push(new Blob([encoded])); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
         if (pageImages.length < 10) pageImages.push(p.canvas.toDataURL('image/png'))
       }
     }
@@ -596,7 +568,7 @@ async function convertPdfToXtc(
     if (stitcher) {
       for (const p of stitcher.finish()) {
         const encoded = await processAndEncode(p.canvas, options)
-        pageBlobs.push(new Blob([encoded])); pageInfos.push({ width: dims.width, height: dims.height })
+        pageBlobs.push(new Blob([encoded])); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
         if (pageImages.length < 10) pageImages.push(p.canvas.toDataURL('image/png'))
       }
     }
@@ -684,14 +656,8 @@ async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: nu
   const croppedCanvas = document.createElement('canvas'); croppedCanvas.width = crop.width; croppedCanvas.height = crop.height
   croppedCanvas.getContext('2d')!.drawImage(sourceCanvas, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height)
 
-  if (options.sidewaysOverviews && !options.manhwa) {
-    const canvas = resizeWithPadding(rotateCanvas(croppedCanvas, 90), padColor, dims.width, dims.height)
-    results.push(await processAndEncode(canvas, options))
-  }
-  if (options.includeOverviews && !options.manhwa) {
-    const canvas = resizeWithPadding(croppedCanvas, padColor, dims.width, dims.height)
-    results.push(await processAndEncode(canvas, options))
-  }
+  if (options.sidewaysOverviews) results.push(await processAndEncode(resizeWithPadding(rotateCanvas(croppedCanvas, 90), padColor, dims.width, dims.height), options))
+  if (options.includeOverviews) results.push(await processAndEncode(resizeWithPadding(croppedCanvas, padColor, dims.width, dims.height), options))
   
   const isSingleImage = options.sourceType === 'image' && !options.manhwa && options.splitMode === 'nosplit'
   if (isSingleImage) {
@@ -720,11 +686,7 @@ async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: nu
   
   if (crop.width < crop.height && options.splitMode !== 'nosplit') {
     if (options.splitMode === 'overlap') {
-      const segs = calculateOverlapSegments(crop.width, crop.height, dims.width, dims.height)
-      for (const seg of segs) {
-        const canvas = resizeWithPadding(extractAndRotate(croppedCanvas, seg.x, seg.y, seg.w, seg.h), padColor, dims.width, dims.height)
-        results.push(await processAndEncode(canvas, options))
-      }
+      for (const seg of calculateOverlapSegments(crop.width, crop.height, dims.width, dims.height)) results.push(await processAndEncode(resizeWithPadding(extractAndRotate(croppedCanvas, seg.x, seg.y, seg.w, seg.h), padColor, dims.width, dims.height), options))
     } else {
       const half = Math.floor(crop.height / 2)
       results.push(await processAndEncode(resizeWithPadding(extractAndRotate(croppedCanvas, 0, 0, crop.width, half), padColor, dims.width, dims.height), options))
@@ -737,17 +699,18 @@ async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: nu
 }
 
 async function processImageAsBinary(imgBlob: Blob, pageNum: number, options: ConversionOptions): Promise<{ buffers: ArrayBuffer[], previews: string[] }> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const img = new Image(); const url = URL.createObjectURL(imgBlob)
     img.onload = async () => {
-      const canvas = document.createElement('canvas'); canvas.width = img.width; canvas.height = img.height
-      canvas.getContext('2d')!.drawImage(img, 0, 0)
-      URL.revokeObjectURL(url)
-      const buffers = await processCanvasAsImage(canvas, pageNum, options)
-      // For performance, we only send back the original page preview
-      resolve({ buffers, previews: [canvas.toDataURL('image/png')] })
+      try {
+        const canvas = document.createElement('canvas'); canvas.width = img.width; canvas.height = img.height
+        canvas.getContext('2d')!.drawImage(img, 0, 0)
+        URL.revokeObjectURL(url)
+        const buffers = await processCanvasAsImage(canvas, pageNum, options)
+        resolve({ buffers, previews: [canvas.toDataURL('image/png')] })
+      } catch (e) { reject(e) }
     }
-    img.onerror = () => resolve({ buffers: [], previews: [] })
+    img.onerror = () => { URL.revokeObjectURL(url); resolve({ buffers: [], previews: [] }) }
     img.src = url
   })
 }

@@ -230,22 +230,7 @@ export function MergePage() {
   const handleDownload = useCallback(async (result: MergePageResult) => {
     if (!result.data) return
 
-    try {
-      // Primary: Use StreamSaver for large files (> 50MB)
-      if (result.size > 50 * 1024 * 1024) {
-          const fileStream = streamSaver.createWriteStream(result.name, {
-            size: result.size,
-          })
-          const writer = fileStream.getWriter()
-          await writer.write(new Uint8Array(result.data))
-          await writer.close()
-          return
-      }
-      
-      // Force fallback for smaller files or if StreamSaver fails
-      throw new Error('Small file, use fallback')
-    } catch (e) {
-      console.warn('StreamSaver skipped or failed, falling back to simple download', e)
+    const triggerSimpleDownload = () => {
       const blob = new Blob([result.data], { type: 'application/octet-stream' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -257,6 +242,23 @@ export function MergePage() {
         document.body.removeChild(a)
         URL.revokeObjectURL(url)
       }, 100)
+    }
+
+    try {
+      // Use StreamSaver for large files (> 50MB)
+      if (result.size > 50 * 1024 * 1024) {
+          const fileStream = streamSaver.createWriteStream(result.name, {
+            size: result.size,
+          })
+          const writer = fileStream.getWriter()
+          await writer.write(new Uint8Array(result.data))
+          await writer.close()
+      } else {
+          triggerSimpleDownload()
+      }
+    } catch (e) {
+      console.warn('StreamSaver failed, falling back to simple download', e)
+      triggerSimpleDownload()
     }
   }, [])
 

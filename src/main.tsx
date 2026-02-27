@@ -8,9 +8,9 @@ import './styles/main.css'
 import './styles/components.css'
 import './styles/animations.css'
 
-// Configure StreamSaver to use local assets for offline support (Docker) and better performance
-// We use an absolute URL which is required for StreamSaver to correctly load the MITM iframe
-streamSaver.mitm = window.location.origin + '/streamsaver/mitm.html'
+// Configure StreamSaver to use local assets for offline support (Docker) and better performance.
+// Relative path is generally most compatible for both Vercel and Docker environments.
+streamSaver.mitm = '/streamsaver/mitm.html'
 
 const router = createRouter({ routeTree })
 
