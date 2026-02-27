@@ -68,7 +68,7 @@ function resizeHq(
 /**
  * Process a canvas (filter, dither) and encode it to binary
  */
-async function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOptions): Promise<ArrayBuffer> {
+async function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOptions): Promise<{ buffer: ArrayBuffer, preview: string }> {
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!
   const width = canvas.width
   const height = canvas.height
@@ -93,13 +93,18 @@ async function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOp
 
   applyDithering(ctx, width, height, options.dithering, options.is2bit, options.useWasm)
   
+  const preview = canvas.toDataURL('image/png')
   const imageData = ctx.getImageData(0, 0, width, height)
+  
+  let buffer: ArrayBuffer
   if (options.useWasm && isWasmLoaded()) {
     const packed = runWasmPack(imageData, options.is2bit)
-    return wrapWasmData(packed, width, height, options.is2bit)
+    buffer = wrapWasmData(packed, width, height, options.is2bit)
+  } else {
+    buffer = options.is2bit ? imageDataToXth(imageData) : imageDataToXtg(imageData)
   }
   
-  return options.is2bit ? imageDataToXth(imageData) : imageDataToXtg(imageData)
+  return { buffer, preview }
 }
 
 import { extractPdfMetadata } from './metadata/pdf-outline'
@@ -252,8 +257,7 @@ export async function convertCbzToXtc(
       let totalSize = headerAndIndex.byteLength
       for (const info of pageInfos) totalSize += getXtcPageSize(info.width, info.height, options.is2bit)
 
-      console.log('[Stream] Creating stream, size:', totalSize)
-      onProgress(0.05, null) // Signal end of analysis
+      onProgress(0.05, null)
 
       let writer: WritableStreamDefaultWriter<any> | null = null
       try {
@@ -261,19 +265,18 @@ export async function convertCbzToXtc(
         writer = fileStream.getWriter()
         await writer.write(headerAndIndex)
       } catch (err) {
-        console.error('[Stream] Failed to initialize StreamSaver:', err)
-        throw new Error('Failed to initiate streamed download. Check if popups are blocked.')
+        throw new Error('Failed to initiate streamed download.')
       }
 
       // Pass 2: Data Processing
       for (let i = 0; i < imageFiles.length; i++) {
         const imgBlob = await imageFiles[i].entry.getData(new BlobWriter())
         const result = await processImageAsBinary(imgBlob, i + 1, options)
-        for (const encoded of result.buffers) {
-          await writer.write(new Uint8Array(encoded))
+        for (const res of result.results) {
+          await writer.write(new Uint8Array(res.buffer))
+          if (pageImages.length < 10) pageImages.push(res.preview)
         }
-        if (pageImages.length < 10 && result.previews[0]) pageImages.push(result.previews[0])
-        if (result.previews.length > 0) onProgress(0.05 + (i + 1) / imageFiles.length * 0.95, result.previews[0])
+        onProgress(0.05 + (i + 1) / imageFiles.length * 0.95, null)
       }
       
       await writer.close()
@@ -286,7 +289,7 @@ export async function convertCbzToXtc(
 
       for (let i = 0; i < imageFiles.length; i++) {
         const imgBlob = await imageFiles[i].entry.getData(new BlobWriter())
-        let currentEncoded: ArrayBuffer[] = []; let currentPreviews: string[] = []
+        let currentResults: { buffer: ArrayBuffer, preview: string }[] = []
         if (stitcher) {
           const img = await new Promise<HTMLImageElement>((resolve, reject) => {
             const img = new Image(); const url = URL.createObjectURL(imgBlob)
@@ -296,26 +299,25 @@ export async function convertCbzToXtc(
           })
           const slices = await stitcher.append(img)
           for (const slice of slices) {
-            currentEncoded.push(await processAndEncode(slice.canvas, options))
-            currentPreviews.push(slice.canvas.toDataURL('image/png'))
+            currentResults.push(await processAndEncode(slice.canvas, options))
           }
         } else {
           const result = await processImageAsBinary(imgBlob, i + 1, options)
-          currentEncoded = result.buffers; currentPreviews = result.previews
+          currentResults = result.results
         }
-        for (let j = 0; j < currentEncoded.length; j++) {
-          pageBlobs.push(new Blob([currentEncoded[j]])); pageInfos.push({ width: dims.width, height: dims.height })
-          if (pageImages.length < 10 && currentPreviews[j]) pageImages.push(currentPreviews[j])
+        for (const res of currentResults) {
+          pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
+          if (pageImages.length < 10) pageImages.push(res.preview)
         }
-        mappingCtx.addOriginalPage(i + 1, currentEncoded.length)
-        if (currentPreviews.length > 0) onProgress((i + 1) / imageFiles.length, currentPreviews[0])
+        mappingCtx.addOriginalPage(i + 1, currentResults.length)
+        onProgress((i + 1) / imageFiles.length, null)
       }
       
       if (stitcher) {
         for (const p of stitcher.finish()) {
-          const encoded = await processAndEncode(p.canvas, options)
-          pageBlobs.push(new Blob([encoded])); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
-          if (pageImages.length < 10) pageImages.push(p.canvas.toDataURL('image/png'))
+          const res = await processAndEncode(p.canvas, options)
+          pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
+          if (pageImages.length < 10) pageImages.push(res.preview)
         }
       }
       
@@ -390,7 +392,8 @@ export async function convertCbrToXtc(
   }
   metadata.toc = imageFiles.map((_, index) => ({ title: `Page ${index + 1 + tocPageOffset}`, startPage: index + 1, endPage: index + 1 }))
 
-  const mappingCtx = new PageMappingContext(); const dims = getTargetDimensions(options); const outputFileName = file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xtch' : '.xtc'); const pageImages: string[] = []
+  const mappingCtx = new PageMappingContext(); const dims = getTargetDimensions(options); const outputFileName = file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xtch' : '.xtc'); 
+  const pageImages: string[] = []
 
   if (options.streamedDownload && !options.manhwa) {
     const pageInfos: StreamPageInfo[] = []
@@ -423,9 +426,11 @@ export async function convertCbrToXtc(
     for (let i = 0; i < imageFiles.length; i++) {
       const imgBlob = new Blob([new Uint8Array(imageFiles[i].data)])
       const result = await processImageAsBinary(imgBlob, i + 1, options)
-      for (const encoded of result.buffers) await writer.write(new Uint8Array(encoded))
-      if (pageImages.length < 10 && result.previews[0]) pageImages.push(result.previews[0])
-      if (result.previews.length > 0) onProgress(0.05 + (i + 1) / imageFiles.length * 0.95, result.previews[0])
+      for (const res of result.results) {
+        await writer.write(new Uint8Array(res.buffer))
+        if (pageImages.length < 10) pageImages.push(res.preview)
+      }
+      onProgress(0.05 + (i + 1) / imageFiles.length * 0.95, null)
     }
     await writer.close()
     return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages, size: totalSize }
@@ -435,35 +440,34 @@ export async function convertCbrToXtc(
 
     for (let i = 0; i < imageFiles.length; i++) {
       const imgBlob = new Blob([new Uint8Array(imageFiles[i].data)])
-      let currentEncoded: ArrayBuffer[] = []; let currentPreviews: string[] = []
+      let currentResults: { buffer: ArrayBuffer, preview: string }[] = []
       if (stitcher) {
-        const img = await new Promise<HTMLImageElement>((resolve) => {
+        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
           const img = new Image(); const url = URL.createObjectURL(imgBlob)
           img.onload = () => { URL.revokeObjectURL(url); resolve(img) }
-          img.onerror = () => { URL.revokeObjectURL(url); resolve(null as any) }
+          img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Img fail')) }
           img.src = url
         })
         const slices = await stitcher.append(img)
         for (const slice of slices) {
-          currentEncoded.push(await processAndEncode(slice.canvas, options))
-          currentPreviews.push(slice.canvas.toDataURL('image/png'))
+          currentResults.push(await processAndEncode(slice.canvas, options))
         }
       } else {
         const result = await processImageAsBinary(imgBlob, i + 1, options)
-        currentEncoded = result.buffers; currentPreviews = result.previews
+        currentResults = result.results
       }
-      for (let j = 0; j < currentEncoded.length; j++) {
-        pageBlobs.push(new Blob([currentEncoded[j]])); pageInfos.push({ width: dims.width, height: dims.height })
-        if (pageImages.length < 10 && currentPreviews[j]) pageImages.push(currentPreviews[j])
+      for (const res of currentResults) {
+        pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
+        if (pageImages.length < 10) pageImages.push(res.preview)
       }
-      mappingCtx.addOriginalPage(i + 1, currentEncoded.length)
-      if (currentPreviews.length > 0) onProgress((i + 1) / imageFiles.length, currentPreviews[0])
+      mappingCtx.addOriginalPage(i + 1, currentResults.length)
+      onProgress((i + 1) / imageFiles.length, null)
     }
     if (stitcher) {
       for (const p of stitcher.finish()) {
-        const encoded = await processAndEncode(p.canvas, options)
-        pageBlobs.push(new Blob([encoded])); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
-        if (pageImages.length < 10) pageImages.push(p.canvas.toDataURL('image/png'))
+        const res = await processAndEncode(p.canvas, options)
+        pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
+        if (pageImages.length < 10) pageImages.push(res.preview)
       }
     }
     if (metadata.toc.length > 0) {
@@ -509,7 +513,8 @@ async function convertPdfToXtc(
     metadata.toc.push({ title, startPage: i, endPage: i })
   }
 
-  const mappingCtx = new PageMappingContext(); const dims = getTargetDimensions(options); const outputFileName = file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xtch' : '.xtc'); const pageImages: string[] = []
+  const mappingCtx = new PageMappingContext(); const dims = getTargetDimensions(options); const outputFileName = file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xtch' : '.xtc')
+  const pageImages: string[] = []
 
   if (options.streamedDownload && !options.manhwa) {
     const pageInfos: StreamPageInfo[] = []
@@ -532,19 +537,19 @@ async function convertPdfToXtc(
     let totalSize = headerAndIndex.byteLength
     for (const info of pageInfos) totalSize += getXtcPageSize(info.width, info.height, options.is2bit)
     
-    console.log('[PDF Stream] Creating stream, size:', totalSize)
     const fileStream = streamSaver.createWriteStream(outputFileName, { size: totalSize }); const writer = fileStream.getWriter()
     await writer.write(headerAndIndex)
     
     for (let i = 1; i <= numPages; i++) {
       const page = await pdf.getPage(i); const scale = 2.0; const viewport = page.getViewport({ scale })
       const canvas = document.createElement('canvas'); canvas.width = viewport.width; canvas.height = viewport.height
-      await page.render({ canvas, viewport, background: 'rgb(255,255,255)' }).promise
+      await page.render({ canvasContext: canvas.getContext('2d')!, viewport, background: 'rgb(255,255,255)' }).promise
       const xtcPages = await processCanvasAsImage(canvas, i, options)
-      for (const buf of xtcPages) {
-        await writer.write(new Uint8Array(buf)); if (pageImages.length < 10) pageImages.push(canvas.toDataURL('image/png'))
+      for (const res of xtcPages) {
+        await writer.write(new Uint8Array(res.buffer))
+        if (pageImages.length < 10) pageImages.push(res.preview)
       }
-      onProgress(0.05 + i / numPages * 0.95, canvas.toDataURL('image/png'))
+      onProgress(0.05 + i / numPages * 0.95, null)
     }
     await writer.close(); URL.revokeObjectURL(url)
     return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages, size: totalSize }
@@ -554,29 +559,28 @@ async function convertPdfToXtc(
     for (let i = 1; i <= numPages; i++) {
       const page = await pdf.getPage(i); const scale = 2.0; const viewport = page.getViewport({ scale })
       const canvas = document.createElement('canvas'); canvas.width = viewport.width; canvas.height = viewport.height
-      await page.render({ canvas, viewport, background: 'rgb(255,255,255)' }).promise
-      let currentEncoded: ArrayBuffer[] = []
+      await page.render({ canvasContext: canvas.getContext('2d')!, viewport, background: 'rgb(255,255,255)' }).promise
+      let currentResults: { buffer: ArrayBuffer, preview: string }[] = []
       if (stitcher) {
         const slices = await stitcher.append(canvas)
         for (const slice of slices) {
-          const buf = await processAndEncode(slice.canvas, options)
-          currentEncoded.push(buf); if (pageImages.length < 10) pageImages.push(slice.canvas.toDataURL('image/png'))
+          currentResults.push(await processAndEncode(slice.canvas, options))
         }
       } else {
-        const bufs = await processCanvasAsImage(canvas, i, options)
-        currentEncoded = bufs; if (pageImages.length < 10) pageImages.push(canvas.toDataURL('image/png'))
+        currentResults = await processCanvasAsImage(canvas, i, options)
       }
-      for (const buf of currentEncoded) {
-        pageBlobs.push(new Blob([buf])); pageInfos.push({ width: dims.width, height: dims.height })
+      for (const res of currentResults) {
+        pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
+        if (pageImages.length < 10) pageImages.push(res.preview)
       }
-      mappingCtx.addOriginalPage(i, currentEncoded.length)
-      onProgress(i / numPages, canvas.toDataURL('image/png'))
+      mappingCtx.addOriginalPage(i, currentResults.length)
+      onProgress(i / numPages, null)
     }
     if (stitcher) {
       for (const p of stitcher.finish()) {
-        const encoded = await processAndEncode(p.canvas, options)
-        pageBlobs.push(new Blob([encoded])); pageInfos.push({ width: dims.width, height: dims.height })
-        if (pageImages.length < 10) pageImages.push(p.canvas.toDataURL('image/png'))
+        const res = await processAndEncode(p.canvas, options)
+        pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
+        if (pageImages.length < 10) pageImages.push(res.preview)
       }
     }
     if (metadata.toc.length > 0) {
@@ -607,22 +611,23 @@ async function convertPdfToXtc(
 
 async function convertImageToXtc(file: File, options: ConversionOptions, onProgress: (p: number, pr: string | null) => void): Promise<ConversionResult> {
   const result = await processImageAsBinary(file, 1, options)
-  if (result.buffers.length === 0) throw new Error('Failed')
-  return { name: file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xth' : '.xtg'), data: result.buffers[0], size: result.buffers[0].byteLength, pageCount: 1, pageImages: result.previews }
+  if (result.results.length === 0) throw new Error('Failed')
+  return { name: file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xth' : '.xtg'), data: result.results[0].buffer, size: result.results[0].buffer.byteLength, pageCount: 1, pageImages: [result.results[0].preview] }
 }
 
 async function convertVideoToXtc(file: File, options: ConversionOptions, onProgress: (p: number, pr: string | null) => void): Promise<ConversionResult> {
   const frames = await extractFramesFromVideo(file, options.videoFps || 1.0)
   const pageBuffers: ArrayBuffer[] = []; const pageInfos: StreamPageInfo[] = []; const pageImages: string[] = []
   const dims = getTargetDimensions(options)
+  
   for (let i = 0; i < frames.length; i++) {
     let canvas = frames[i]; const angle = getOrientationAngle(options.orientation)
     if (angle !== 0 && (angle === 180 || canvas.width >= canvas.height)) canvas = rotateCanvas(canvas, angle)
     const finalCanvas = resizeWithPadding(canvas, 0, dims.width, dims.height)
-    const buf = await processAndEncode(finalCanvas, options)
-    pageBuffers.push(buf); pageInfos.push({ width: dims.width, height: dims.height })
-    if (pageImages.length < 10) pageImages.push(finalCanvas.toDataURL('image/png'))
-    if (i % 5 === 0) onProgress((i + 1) / frames.length, finalCanvas.toDataURL('image/png'))
+    const res = await processAndEncode(finalCanvas, options)
+    pageBuffers.push(res.buffer); pageInfos.push({ width: dims.width, height: dims.height })
+    if (pageImages.length < 10) pageImages.push(res.preview)
+    if (i % 5 === 0) onProgress((i + 1) / frames.length, null)
   }
   const outputFileName = file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xtch' : '.xtc')
   if (options.streamedDownload) {
@@ -657,8 +662,8 @@ async function extractFramesFromVideo(file: File, fps: number): Promise<HTMLCanv
   })
 }
 
-async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: number, options: ConversionOptions): Promise<ArrayBuffer[]> {
-  const dims = getTargetDimensions(options); const results: ArrayBuffer[] = []; const padColor = options.padBlack ? 0 : 255
+async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: number, options: ConversionOptions): Promise<{ buffer: ArrayBuffer, preview: string }[]> {
+  const dims = getTargetDimensions(options); const results: { buffer: ArrayBuffer, preview: string }[] = []; const padColor = options.padBlack ? 0 : 255
   const crop = getAxisCropRect(sourceCanvas.width, sourceCanvas.height, options)
   const croppedCanvas = document.createElement('canvas'); croppedCanvas.width = crop.width; croppedCanvas.height = crop.height
   croppedCanvas.getContext('2d')!.drawImage(sourceCanvas, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height)
@@ -709,7 +714,7 @@ async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: nu
   return results
 }
 
-async function processImageAsBinary(imgBlob: Blob, pageNum: number, options: ConversionOptions): Promise<{ buffers: ArrayBuffer[], previews: string[] }> {
+async function processImageAsBinary(imgBlob: Blob, pageNum: number, options: ConversionOptions): Promise<{ results: { buffer: ArrayBuffer, preview: string }[] }> {
   return new Promise((resolve, reject) => {
     const img = new Image(); const url = URL.createObjectURL(imgBlob)
     img.onload = async () => {
@@ -717,11 +722,11 @@ async function processImageAsBinary(imgBlob: Blob, pageNum: number, options: Con
         const canvas = document.createElement('canvas'); canvas.width = img.width; canvas.height = img.height
         canvas.getContext('2d')!.drawImage(img, 0, 0)
         URL.revokeObjectURL(url)
-        const buffers = await processCanvasAsImage(canvas, pageNum, options)
-        resolve({ buffers, previews: [canvas.toDataURL('image/png')] })
+        const results = await processCanvasAsImage(canvas, pageNum, options)
+        resolve({ results })
       } catch (e) { reject(e) }
     }
-    img.onerror = () => { URL.revokeObjectURL(url); resolve({ buffers: [], previews: [] }) }
+    img.onerror = () => { URL.revokeObjectURL(url); resolve({ results: [] }) }
     img.src = url
   })
 }

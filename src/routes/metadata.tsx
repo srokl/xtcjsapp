@@ -3,7 +3,7 @@ import { useState } from 'react'
 import streamSaver from 'streamsaver'
 import { Dropzone } from '../components/Dropzone'
 import { Viewer } from '../components/Viewer'
-import { parseXtcFile, type ParsedXtc, extractXtcPages } from '../lib/xtc-reader'
+import { parseXtcFile, type ParsedXtc, extractXtcPages, decodeXtcPageToCanvas } from '../lib/xtc-reader'
 import { buildXtcFromBuffers } from '../lib/xtc-format'
 import type { BookMetadata, TocEntry } from '../lib/metadata/types'
 
@@ -29,6 +29,7 @@ function MetadataEditor() {
   const [file, setFile] = useState<File | null>(null)
   const [parsed, setParsed] = useState<ParsedXtc | null>(null)
   const [metadata, setMetadata] = useState<BookMetadata>({ toc: [] })
+  const [isRawPage, setIsRawPage] = useState(false)
   
   const [previewPages, setPreviewPages] = useState<string[]>([])
   const [isPreviewOpen, setIsPreviewOpen] = useState(false)
@@ -40,13 +41,27 @@ function MetadataEditor() {
     setFile(selected)
     setIsProcessing(true)
     
+    const ext = selected.name.toLowerCase().split('.').pop()
+    const isRaw = ext === 'xtg' || ext === 'xth'
+    setIsRawPage(isRaw)
+
     try {
       const buffer = await selected.arrayBuffer()
-      const parsedData = await parseXtcFile(buffer)
-      setParsed(parsedData)
-      setMetadata(parsedData.metadata || { toc: [] })
+      if (isRaw) {
+        const canvas = decodeXtcPageToCanvas(buffer)
+        setPreviewPages([canvas.toDataURL('image/png')])
+        setParsed({
+          header: { pageCount: 1, is2bit: ext === 'xth' } as any,
+          pageData: [buffer],
+          entries: []
+        })
+      } else {
+        const parsedData = await parseXtcFile(buffer)
+        setParsed(parsedData)
+        setMetadata(parsedData.metadata || { toc: [] })
+      }
     } catch (e) {
-      alert("Failed to parse XTC/XTCH file. Ensure it's a valid format.")
+      alert("Failed to parse file. Ensure it's a valid XTC/XTCH/XTG/XTH format.")
       setFile(null)
     } finally {
       setIsProcessing(false)
@@ -55,9 +70,12 @@ function MetadataEditor() {
 
   const handlePreview = async () => {
     if (!parsed || !file) return
+    if (isRawPage) {
+      setIsPreviewOpen(true)
+      return
+    }
     setIsProcessing(true)
     try {
-      // Decode all pages for preview. This may take a few seconds for large files.
       const canvases = await extractXtcPages(await file.arrayBuffer())
       const urls = canvases.map(c => c.toDataURL('image/png'))
       setPreviewPages(urls)
@@ -70,7 +88,7 @@ function MetadataEditor() {
   }
 
   const handleSave = async () => {
-    if (!parsed || !file) return
+    if (!parsed || !file || isRawPage) return
 
     // Validate chapters
     for (let i = 0; i < metadata.toc.length; i++) {
@@ -81,7 +99,6 @@ function MetadataEditor() {
       }
       for (let j = i + 1; j < metadata.toc.length; j++) {
         const b = metadata.toc[j]
-        // Overlap condition: StartA <= EndB and EndA >= StartB
         if (a.startPage <= b.endPage && a.endPage >= b.startPage) {
           alert(`Chapter overlap detected:\n"${a.title}" (Pages ${a.startPage}-${a.endPage})\noverlaps with\n"${b.title}" (Pages ${b.startPage}-${b.endPage}).\nPlease fix overlapping pages before saving.`)
           return
@@ -93,7 +110,6 @@ function MetadataEditor() {
     
     try {
       const is2bit = parsed.header.is2bit
-      // Update createTime to now
       const finalMetadata = {
         ...metadata,
         createTime: Math.floor(Date.now() / 1000)
@@ -103,7 +119,6 @@ function MetadataEditor() {
       const baseName = file.name.replace(/\.[^/.]+$/, '')
       const fileName = `${baseName}_edited${ext}`
 
-      // Use StreamSaver if supported
       try {
         const fileStream = streamSaver.createWriteStream(fileName, {
           size: newBuffer.byteLength,
@@ -116,7 +131,6 @@ function MetadataEditor() {
         console.warn('StreamSaver failed, falling back to simple download', e)
       }
 
-      // Simple anchor download fallback if StreamSaver fails
       const blob = new Blob([newBuffer], { type: 'application/octet-stream' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -167,7 +181,6 @@ function MetadataEditor() {
     setMetadata(prev => {
       const newToc = [...prev.toc];
       const targetIndex = direction === 'up' ? index - 1 : index + 1;
-      // Swap elements
       const temp = newToc[index];
       newToc[index] = newToc[targetIndex];
       newToc[targetIndex] = temp;
@@ -194,160 +207,164 @@ function MetadataEditor() {
           <div style={{ background: 'var(--paper-dark)', padding: 'var(--space-lg)', border: 'var(--border)' }}>
             <h3 style={{ marginBottom: 'var(--space-sm)' }}>File Info</h3>
             <p><strong>Name:</strong> {file.name}</p>
-            <p><strong>Pages:</strong> {parsed.header.pageCount}</p>
-            <p><strong>Type:</strong> {parsed.header.is2bit ? 'XTCH (2-bit)' : 'XTC (1-bit)'}</p>
+            {!isRawPage && <p><strong>Pages:</strong> {parsed.header.pageCount}</p>}
+            <p><strong>Type:</strong> {isRawPage ? (file.name.toLowerCase().endsWith('.xth') ? 'XTH (2-bit Page)' : 'XTG (1-bit Page)') : (parsed.header.is2bit ? 'XTCH (2-bit)' : 'XTC (1-bit)')}</p>
             
             <div style={{ marginTop: 'var(--space-md)', display: 'flex', gap: 'var(--space-sm)' }}>
               <button className="btn-preview" onClick={handlePreview}>Preview</button>
-              <button className="btn-download" onClick={handleSave}>Save & Download</button>
-              <button className="btn-clear-results" onClick={() => { setFile(null); setParsed(null); }}>Close File</button>
+              {!isRawPage && <button className="btn-download" onClick={handleSave}>Save & Download</button>}
+              <button className="btn-clear-results" onClick={() => { setFile(null); setParsed(null); setPreviewPages([]); setIsRawPage(false); }}>Close File</button>
             </div>
           </div>
 
-          <div style={{ background: 'var(--paper-dark)', padding: 'var(--space-lg)', border: 'var(--border)' }}>
-            <h3 style={{ marginBottom: 'var(--space-sm)' }}>Book Metadata</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--space-md)' }}>
-              <label>
-                <strong style={{ fontSize: '0.85rem' }}>Title:</strong><br/>
-                <input 
-                  type="text" 
-                  value={metadata.title || ''} 
-                  onChange={e => setMetadata(m => ({ ...m, title: e.target.value }))}
-                  style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
-                  maxLength={127}
-                  placeholder="e.g. My Awesome Manga"
-                />
-              </label>
-              <label>
-                <strong style={{ fontSize: '0.85rem' }}>Author:</strong><br/>
-                <input 
-                  type="text" 
-                  value={metadata.author || ''} 
-                  onChange={e => setMetadata(m => ({ ...m, author: e.target.value }))}
-                  style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
-                  maxLength={63}
-                  placeholder="e.g. John Doe"
-                />
-              </label>
-              <label>
-                <strong style={{ fontSize: '0.85rem' }}>Publisher:</strong><br/>
-                <input 
-                  type="text" 
-                  value={metadata.publisher || ''} 
-                  onChange={e => setMetadata(m => ({ ...m, publisher: e.target.value }))}
-                  style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
-                  maxLength={31}
-                  placeholder="e.g. Weekly Shonen"
-                />
-              </label>
-              <label>
-                <strong style={{ fontSize: '0.85rem' }}>Language:</strong><br/>
-                <select 
-                  value={metadata.language || ''} 
-                  onChange={e => setMetadata(m => ({ ...m, language: e.target.value }))}
-                  style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
-                >
-                  <option value="">Unknown</option>
-                  {LANGUAGES.map(lang => (
-                    <option key={lang.code} value={lang.code}>{lang.name} ({lang.code})</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <strong style={{ fontSize: '0.85rem' }}>Cover Page:</strong><br/>
-                <select 
-                  value={metadata.coverPage === undefined || metadata.coverPage === 0xFFFF ? 'none' : metadata.coverPage} 
-                  onChange={e => setMetadata(m => ({ ...m, coverPage: e.target.value === 'none' ? 0xFFFF : parseInt(e.target.value) }))}
-                  style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
-                >
-                  <option value="none">None (0xFFFF)</option>
-                  {Array.from({ length: parsed.header.pageCount }, (_, i) => (
-                    <option key={i} value={i}>Page {i + 1}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          </div>
-
-          <div style={{ background: 'var(--paper-dark)', padding: 'var(--space-lg)', border: 'var(--border)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-md)' }}>
-              <h3>Chapters (TOC)</h3>
-              <button className="btn-preview" onClick={handleAddChapter} style={{ padding: 'var(--space-xs) var(--space-sm)' }}>+ Add Chapter</button>
-            </div>
-            
-            {metadata.toc.length === 0 ? (
-              <p style={{ color: 'var(--ink-faded)', fontStyle: 'italic' }}>No chapters defined.</p>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
-                {metadata.toc.map((entry, idx) => (
-                  <div key={idx} style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-sm)', alignItems: 'flex-start', background: 'var(--paper)', padding: 'var(--space-md)', border: 'var(--border-light)' }}>
-                    <div style={{ flex: '1 1 200px' }}>
-                      <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Chapter Title (max 79 chars)</label>
-                      <input 
-                        type="text" 
-                        value={entry.title} 
-                        onChange={e => handleChapterChange(idx, 'title', e.target.value)}
-                        style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border-light)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
-                        maxLength={79}
-                      />
-                    </div>
-                    <div style={{ width: '80px', flex: '0 0 auto' }}>
-                      <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Start Pg</label>
-                      <input 
-                        type="number" 
-                        min={1} 
-                        max={parsed.header.pageCount}
-                        value={entry.startPage} 
-                        onChange={e => handleChapterChange(idx, 'startPage', parseInt(e.target.value) || 1)}
-                        style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border-light)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
-                      />
-                    </div>
-                    <div style={{ width: '80px', flex: '0 0 auto' }}>
-                      <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>End Pg</label>
-                      <input 
-                        type="number" 
-                        min={1} 
-                        max={parsed.header.pageCount}
-                        value={entry.endPage} 
-                        onChange={e => handleChapterChange(idx, 'endPage', parseInt(e.target.value) || 1)}
-                        style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border-light)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
-                      />
-                    </div>
-                    <div style={{ display: 'flex', gap: 'var(--space-xs)', marginTop: '22px' }}>
-                      <button 
-                        onClick={() => handleMoveChapter(idx, 'up')}
-                        disabled={idx === 0}
-                        style={{ padding: 'var(--space-xs)', background: 'var(--paper-dark)', color: 'var(--ink)', border: 'var(--border-light)', cursor: idx === 0 ? 'not-allowed' : 'pointer', opacity: idx === 0 ? 0.5 : 1 }}
-                        aria-label="Move Up"
-                        title="Move Up"
-                      >
-                        ↑
-                      </button>
-                      <button 
-                        onClick={() => handleMoveChapter(idx, 'down')}
-                        disabled={idx === metadata.toc.length - 1}
-                        style={{ padding: 'var(--space-xs)', background: 'var(--paper-dark)', color: 'var(--ink)', border: 'var(--border-light)', cursor: idx === metadata.toc.length - 1 ? 'not-allowed' : 'pointer', opacity: idx === metadata.toc.length - 1 ? 0.5 : 1 }}
-                        aria-label="Move Down"
-                        title="Move Down"
-                      >
-                        ↓
-                      </button>
-                      <button 
-                        onClick={() => handleRemoveChapter(idx)}
-                        style={{ padding: 'var(--space-xs) var(--space-sm)', background: 'var(--accent)', color: 'white', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '0.8rem', fontWeight: 500 }}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                ))}
-                
-                <div style={{ marginTop: 'var(--space-md)', textAlign: 'center' }}>
-                  <button className="btn-preview" onClick={handleAddChapter} style={{ padding: 'var(--space-sm) var(--space-md)', width: '100%' }}>+ Add Chapter</button>
+          {!isRawPage && (
+            <>
+              <div style={{ background: 'var(--paper-dark)', padding: 'var(--space-lg)', border: 'var(--border)' }}>
+                <h3 style={{ marginBottom: 'var(--space-sm)' }}>Book Metadata</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--space-md)' }}>
+                  <label>
+                    <strong style={{ fontSize: '0.85rem' }}>Title:</strong><br/>
+                    <input 
+                      type="text" 
+                      value={metadata.title || ''} 
+                      onChange={e => setMetadata(m => ({ ...m, title: e.target.value }))}
+                      style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
+                      maxLength={127}
+                      placeholder="e.g. My Awesome Manga"
+                    />
+                  </label>
+                  <label>
+                    <strong style={{ fontSize: '0.85rem' }}>Author:</strong><br/>
+                    <input 
+                      type="text" 
+                      value={metadata.author || ''} 
+                      onChange={e => setMetadata(m => ({ ...m, author: e.target.value }))}
+                      style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
+                      maxLength={63}
+                      placeholder="e.g. John Doe"
+                    />
+                  </label>
+                  <label>
+                    <strong style={{ fontSize: '0.85rem' }}>Publisher:</strong><br/>
+                    <input 
+                      type="text" 
+                      value={metadata.publisher || ''} 
+                      onChange={e => setMetadata(m => ({ ...m, publisher: e.target.value }))}
+                      style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
+                      maxLength={31}
+                      placeholder="e.g. Weekly Shonen"
+                    />
+                  </label>
+                  <label>
+                    <strong style={{ fontSize: '0.85rem' }}>Language:</strong><br/>
+                    <select 
+                      value={metadata.language || ''} 
+                      onChange={e => setMetadata(m => ({ ...m, language: e.target.value }))}
+                      style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
+                    >
+                      <option value="">Unknown</option>
+                      {LANGUAGES.map(lang => (
+                        <option key={lang.code} value={lang.code}>{lang.name} ({lang.code})</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <strong style={{ fontSize: '0.85rem' }}>Cover Page:</strong><br/>
+                    <select 
+                      value={metadata.coverPage === undefined || metadata.coverPage === 0xFFFF ? 'none' : metadata.coverPage} 
+                      onChange={e => setMetadata(m => ({ ...m, coverPage: e.target.value === 'none' ? 0xFFFF : parseInt(e.target.value) }))}
+                      style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
+                    >
+                      <option value="none">None (0xFFFF)</option>
+                      {Array.from({ length: parsed.header.pageCount }, (_, i) => (
+                        <option key={i} value={i}>Page {i + 1}</option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
               </div>
-            )}
-          </div>
+
+              <div style={{ background: 'var(--paper-dark)', padding: 'var(--space-lg)', border: 'var(--border)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-md)' }}>
+                  <h3>Chapters (TOC)</h3>
+                  <button className="btn-preview" onClick={handleAddChapter} style={{ padding: 'var(--space-xs) var(--space-sm)' }}>+ Add Chapter</button>
+                </div>
+                
+                {metadata.toc.length === 0 ? (
+                  <p style={{ color: 'var(--ink-faded)', fontStyle: 'italic' }}>No chapters defined.</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+                    {metadata.toc.map((entry, idx) => (
+                      <div key={idx} style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-sm)', alignItems: 'flex-start', background: 'var(--paper)', padding: 'var(--space-md)', border: 'var(--border-light)' }}>
+                        <div style={{ flex: '1 1 200px' }}>
+                          <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Chapter Title (max 79 chars)</label>
+                          <input 
+                            type="text" 
+                            value={entry.title} 
+                            onChange={e => handleChapterChange(idx, 'title', e.target.value)}
+                            style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border-light)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
+                            maxLength={79}
+                          />
+                        </div>
+                        <div style={{ width: '80px', flex: '0 0 auto' }}>
+                          <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Start Pg</label>
+                          <input 
+                            type="number" 
+                            min={1} 
+                            max={parsed.header.pageCount}
+                            value={entry.startPage} 
+                            onChange={e => handleChapterChange(idx, 'startPage', parseInt(e.target.value) || 1)}
+                            style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border-light)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
+                          />
+                        </div>
+                        <div style={{ width: '80px', flex: '0 0 auto' }}>
+                          <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>End Pg</label>
+                          <input 
+                            type="number" 
+                            min={1} 
+                            max={parsed.header.pageCount}
+                            value={entry.endPage} 
+                            onChange={e => handleChapterChange(idx, 'endPage', parseInt(e.target.value) || 1)}
+                            style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border-light)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', gap: 'var(--space-xs)', marginTop: '22px' }}>
+                          <button 
+                            onClick={() => handleMoveChapter(idx, 'up')}
+                            disabled={idx === 0}
+                            style={{ padding: 'var(--space-xs)', background: 'var(--paper-dark)', color: 'var(--ink)', border: 'var(--border-light)', cursor: idx === 0 ? 'not-allowed' : 'pointer', opacity: idx === 0 ? 0.5 : 1 }}
+                            aria-label="Move Up"
+                            title="Move Up"
+                          >
+                            ↑
+                          </button>
+                          <button 
+                            onClick={() => handleMoveChapter(idx, 'down')}
+                            disabled={idx === metadata.toc.length - 1}
+                            style={{ padding: 'var(--space-xs)', background: 'var(--paper-dark)', color: 'var(--ink)', border: 'var(--border-light)', cursor: idx === metadata.toc.length - 1 ? 'not-allowed' : 'pointer', opacity: idx === metadata.toc.length - 1 ? 0.5 : 1 }}
+                            aria-label="Move Down"
+                            title="Move Down"
+                          >
+                            ↓
+                          </button>
+                          <button 
+                            onClick={() => handleRemoveChapter(idx)}
+                            style={{ padding: 'var(--space-xs) var(--space-sm)', background: 'var(--accent)', color: 'white', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '0.8rem', fontWeight: 500 }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    
+                    <div style={{ marginTop: 'var(--space-md)', textAlign: 'center' }}>
+                      <button className="btn-preview" onClick={handleAddChapter} style={{ padding: 'var(--space-sm) var(--space-md)', width: '100%' }}>+ Add Chapter</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
       )}
 
