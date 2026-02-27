@@ -227,18 +227,19 @@ export function MergePage() {
     }
   }, [files, mode, actualOutputFormat, splitMethod, rangesInput, partsCount, totalPages])
 
-  const handleDownload = useCallback((result: MergePageResult) => {
+  const handleDownload = useCallback(async (result: MergePageResult) => {
     if (!result.data) return
 
     try {
+      // Primary: Use StreamSaver for all files if it works
       const fileStream = streamSaver.createWriteStream(result.name, {
         size: result.size,
       })
       const writer = fileStream.getWriter()
-      writer.write(new Uint8Array(result.data))
-      writer.close()
+      await writer.write(new Uint8Array(result.data))
+      await writer.close()
     } catch (e) {
-      console.warn('StreamSaver failed, falling back to Blob URL', e)
+      console.warn('StreamSaver failed, falling back to simple download', e)
       const blob = new Blob([result.data], { type: 'application/octet-stream' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -246,8 +247,10 @@ export function MergePage() {
       a.download = result.name
       document.body.appendChild(a)
       a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      setTimeout(() => {
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+      }, 100)
     }
   }, [])
 

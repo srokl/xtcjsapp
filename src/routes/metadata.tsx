@@ -89,8 +89,8 @@ function MetadataEditor() {
           size: newBuffer.byteLength,
         })
         const writer = fileStream.getWriter()
-        writer.write(new Uint8Array(newBuffer))
-        writer.close()
+        await writer.write(new Uint8Array(newBuffer))
+        await writer.close()
       } catch (e) {
         console.warn('StreamSaver failed, falling back to Blob URL', e)
         const blob = new Blob([newBuffer], { type: 'application/octet-stream' })

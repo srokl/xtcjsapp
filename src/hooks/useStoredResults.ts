@@ -87,6 +87,7 @@ export function useStoredResults(): UseStoredResultsReturn {
         createdAt: Date.now(),
         expiresAt: Date.now() + 4.5 * 60 * 60 * 1000,
         status: result.error ? 'error' : 'complete',
+        isStreamed: result.isStreamed
       }
       setResults(prev => [...prev, fakeRef])
       return fakeRef
@@ -109,6 +110,7 @@ export function useStoredResults(): UseStoredResultsReturn {
         createdAt: Date.now(),
         expiresAt: Date.now() + 4.5 * 60 * 60 * 1000,
         status: result.error ? 'error' : 'complete',
+        isStreamed: result.isStreamed
       }
       setResults(prev => [...prev, fakeRef])
       return fakeRef
@@ -149,35 +151,48 @@ export function useStoredResults(): UseStoredResultsReturn {
   const downloadResult = useCallback(async (result: StoredResult): Promise<void> => {
     if (result.error) return
 
+    // If it was already streamed, we don't have the data anymore
+    if (result.isStreamed && result.size === 0) {
+        console.log('Streamed download already completed or data not stored.')
+        return
+    }
+
     try {
       const data = await getConversionData(result.id)
       if (!data || data.byteLength === 0) {
-        // Data might be missing because it was direct-streamed to disk during conversion
-        console.log('File data not found in storage, might have been already downloaded via stream.')
+        console.warn('No data found for conversion:', result.id)
         return
       }
 
-      // Use StreamSaver if supported (to bypass Chrome 2GB blob/memory limits on large files)
-      try {
-        const fileStream = streamSaver.createWriteStream(result.name, {
-          size: data.byteLength,
-        })
-        const writer = fileStream.getWriter()
-        writer.write(new Uint8Array(data))
-        writer.close()
-      } catch (e) {
-        console.warn('StreamSaver failed, falling back to Blob URL', e)
-        // Fallback to Blob if streamSaver fails (e.g. in some isolated contexts)
-        const blob = new Blob([data], { type: 'application/octet-stream' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = result.name
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        URL.revokeObjectURL(url)
+      const blob = new Blob([data], { type: 'application/octet-stream' })
+      
+      // Use StreamSaver for large files (> 100MB) or as primary if it works
+      if (data.byteLength > 100 * 1024 * 1024) {
+          try {
+            const fileStream = streamSaver.createWriteStream(result.name, {
+              size: data.byteLength,
+            })
+            const writer = fileStream.getWriter()
+            await writer.write(new Uint8Array(data))
+            await writer.close()
+            return
+          } catch (e) {
+            console.warn('StreamSaver failed, falling back to simple download', e)
+          }
       }
+
+      // Simple anchor download fallback
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = result.name
+      document.body.appendChild(a)
+      a.click()
+      setTimeout(() => {
+          document.body.removeChild(a)
+          URL.revokeObjectURL(url)
+      }, 100)
+      
     } catch (err) {
       console.error('Failed to download:', err)
       throw err
