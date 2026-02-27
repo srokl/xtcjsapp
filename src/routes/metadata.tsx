@@ -209,6 +209,7 @@ function MetadataEditor() {
             <p><strong>Name:</strong> {file.name}</p>
             {!isRawPage && <p><strong>Pages:</strong> {parsed.header.pageCount}</p>}
             <p><strong>Type:</strong> {isRawPage ? (file.name.toLowerCase().endsWith('.xth') ? 'XTH (2-bit Page)' : 'XTG (1-bit Page)') : (parsed.header.is2bit ? 'XTCH (2-bit)' : 'XTC (1-bit)')}</p>
+            {isRawPage && <p style={{ color: 'var(--accent)', fontWeight: 'bold', marginTop: 'var(--space-sm)' }}>XTG/XTH preview only</p>}
             
             <div style={{ marginTop: 'var(--space-md)', display: 'flex', gap: 'var(--space-sm)' }}>
               <button className="btn-preview" onClick={handlePreview}>Preview</button>
