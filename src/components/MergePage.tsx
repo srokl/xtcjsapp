@@ -377,7 +377,9 @@ export function MergePage() {
             <h2>Files</h2>
             <span className="badge">{files.length}</span>
             {detectedType && (
-              <span className="type-badge">{detectedType.toUpperCase()}</span>
+              <span className="type-badge">
+                {files[0]?.name.toLowerCase().endsWith('.xtch') ? 'XTCH' : detectedType.toUpperCase()}
+              </span>
             )}
           </div>
           <div className="files-grid">
