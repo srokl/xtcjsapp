@@ -331,7 +331,7 @@ export async function convertCbzToXtc(
 
     for (let i = 0; i < imageFiles.length; i++) {
       const imgFile = imageFiles[i]
-      const imgBlob = await imgFile.entry.async('blob')
+      const imgBlob = await imgFile.entry.getData(new BlobWriter())
 
       let pages: ProcessedPage[] = []
       
