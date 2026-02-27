@@ -42,6 +42,7 @@ export function detectFileType(file: File): FileType {
     case 'pdf':
       return 'pdf'
     case 'xtc':
+    case 'xtch':
       return 'xtc'
     default:
       return 'unknown'
