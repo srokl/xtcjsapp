@@ -9,8 +9,8 @@ import './styles/components.css'
 import './styles/animations.css'
 
 // Configure StreamSaver to use local assets for offline support (Docker) and better performance.
-// Relative path is generally most compatible for both Vercel and Docker environments.
-streamSaver.mitm = '/streamsaver/mitm.html'
+// Use absolute URL to ensure it works from any sub-path.
+streamSaver.mitm = window.location.origin + '/streamsaver/mitm.html'
 
 const router = createRouter({ routeTree })
 

@@ -102,19 +102,6 @@ async function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOp
   return options.is2bit ? imageDataToXth(imageData) : imageDataToXtg(imageData)
 }
 
-/**
- * Legacy encodePage for compatibility
- */
-function encodePage(page: ProcessedPage, is2bit: boolean, useWasm: boolean): ArrayBuffer {
-  const ctx = page.canvas.getContext('2d', { willReadFrequently: true })!
-  const imageData = ctx.getImageData(0, 0, page.canvas.width, page.canvas.height)
-  if (useWasm && isWasmLoaded()) {
-    const packed = runWasmPack(imageData, is2bit)
-    return wrapWasmData(packed, page.canvas.width, page.canvas.height, is2bit)
-  }
-  return is2bit ? imageDataToXth(imageData) : imageDataToXtg(imageData)
-}
-
 import { extractPdfMetadata } from './metadata/pdf-outline'
 import { parseComicInfo } from './metadata/comicinfo'
 import type { BookMetadata } from './metadata/types'
@@ -241,7 +228,7 @@ export async function convertCbzToXtc(
 
     if (options.streamedDownload && !options.manhwa) {
       const pageInfos: StreamPageInfo[] = []
-      // Pass 1: Info
+      // Pass 1: Analysis
       for (let i = 0; i < imageFiles.length; i++) {
         onProgress(i / imageFiles.length * 0.05, null)
         const imgBlob = await imageFiles[i].entry.getData(new BlobWriter())
@@ -260,27 +247,40 @@ export async function convertCbzToXtc(
           return { title: entry.title, startPage: adjustedStartPage, endPage: adjustedEndPage }
         })
       }
+      
       const headerAndIndex = buildXtcHeaderAndIndex(pageInfos, { metadata, is2bit: options.is2bit })
       let totalSize = headerAndIndex.byteLength
       for (const info of pageInfos) totalSize += getXtcPageSize(info.width, info.height, options.is2bit)
 
-      const fileStream = streamSaver.createWriteStream(outputFileName, { size: totalSize })
-      const writer = fileStream.getWriter()
-      await writer.write(headerAndIndex)
+      console.log('[Stream] Creating stream, size:', totalSize)
+      onProgress(0.05, null) // Signal end of analysis
 
-      // Pass 2: Data
+      let writer: WritableStreamDefaultWriter<any> | null = null
+      try {
+        const fileStream = streamSaver.createWriteStream(outputFileName, { size: totalSize })
+        writer = fileStream.getWriter()
+        await writer.write(headerAndIndex)
+      } catch (err) {
+        console.error('[Stream] Failed to initialize StreamSaver:', err)
+        throw new Error('Failed to initiate streamed download. Check if popups are blocked.')
+      }
+
+      // Pass 2: Data Processing
       for (let i = 0; i < imageFiles.length; i++) {
         const imgBlob = await imageFiles[i].entry.getData(new BlobWriter())
         const result = await processImageAsBinary(imgBlob, i + 1, options)
-        for (const encoded of result.buffers) await writer.write(new Uint8Array(encoded))
+        for (const encoded of result.buffers) {
+          await writer.write(new Uint8Array(encoded))
+        }
         if (pageImages.length < 10 && result.previews[0]) pageImages.push(result.previews[0])
         if (result.previews.length > 0) onProgress(0.05 + (i + 1) / imageFiles.length * 0.95, result.previews[0])
       }
+      
       await writer.close()
       await zipReader.close()
       return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages, size: totalSize }
     } else {
-      // Standard path
+      // Memory-Optimized Buffered Path
       const pageBlobs: Blob[] = []; const pageInfos: StreamPageInfo[] = []
       let stitcher: ManhwaStitcher | null = options.manhwa ? new ManhwaStitcher(options) : null
 
@@ -291,7 +291,7 @@ export async function convertCbzToXtc(
           const img = await new Promise<HTMLImageElement>((resolve, reject) => {
             const img = new Image(); const url = URL.createObjectURL(imgBlob)
             img.onload = () => { URL.revokeObjectURL(url); resolve(img) }
-            img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Img load fail')) }
+            img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Img fail')) }
             img.src = url
           })
           const slices = await stitcher.append(img)
@@ -310,6 +310,7 @@ export async function convertCbzToXtc(
         mappingCtx.addOriginalPage(i + 1, currentEncoded.length)
         if (currentPreviews.length > 0) onProgress((i + 1) / imageFiles.length, currentPreviews[0])
       }
+      
       if (stitcher) {
         for (const p of stitcher.finish()) {
           const encoded = await processAndEncode(p.canvas, options)
@@ -317,6 +318,7 @@ export async function convertCbzToXtc(
           if (pageImages.length < 10) pageImages.push(p.canvas.toDataURL('image/png'))
         }
       }
+      
       if (metadata.toc.length > 0) {
         const totalXtcPages = mappingCtx.getTotalXtcPages()
         metadata.toc = metadata.toc.map((entry, index) => {
@@ -325,7 +327,9 @@ export async function convertCbzToXtc(
           return { title: entry.title, startPage: adjustedStartPage, endPage: adjustedEndPage }
         })
       }
+      
       await zipReader.close()
+      
       if (options.streamedDownload) {
         const headerAndIndex = buildXtcHeaderAndIndex(pageInfos, { metadata, is2bit: options.is2bit })
         let totalSize = headerAndIndex.byteLength
@@ -433,10 +437,10 @@ export async function convertCbrToXtc(
       const imgBlob = new Blob([new Uint8Array(imageFiles[i].data)])
       let currentEncoded: ArrayBuffer[] = []; let currentPreviews: string[] = []
       if (stitcher) {
-        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = await new Promise<HTMLImageElement>((resolve) => {
           const img = new Image(); const url = URL.createObjectURL(imgBlob)
           img.onload = () => { URL.revokeObjectURL(url); resolve(img) }
-          img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Img fail')) }
+          img.onerror = () => { URL.revokeObjectURL(url); resolve(null as any) }
           img.src = url
         })
         const slices = await stitcher.append(img)
@@ -527,8 +531,11 @@ async function convertPdfToXtc(
     const headerAndIndex = buildXtcHeaderAndIndex(pageInfos, { metadata, is2bit: options.is2bit })
     let totalSize = headerAndIndex.byteLength
     for (const info of pageInfos) totalSize += getXtcPageSize(info.width, info.height, options.is2bit)
+    
+    console.log('[PDF Stream] Creating stream, size:', totalSize)
     const fileStream = streamSaver.createWriteStream(outputFileName, { size: totalSize }); const writer = fileStream.getWriter()
     await writer.write(headerAndIndex)
+    
     for (let i = 1; i <= numPages; i++) {
       const page = await pdf.getPage(i); const scale = 2.0; const viewport = page.getViewport({ scale })
       const canvas = document.createElement('canvas'); canvas.width = viewport.width; canvas.height = viewport.height
@@ -568,7 +575,7 @@ async function convertPdfToXtc(
     if (stitcher) {
       for (const p of stitcher.finish()) {
         const encoded = await processAndEncode(p.canvas, options)
-        pageBlobs.push(new Blob([encoded])); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
+        pageBlobs.push(new Blob([encoded])); pageInfos.push({ width: dims.width, height: dims.height })
         if (pageImages.length < 10) pageImages.push(p.canvas.toDataURL('image/png'))
       }
     }
@@ -686,7 +693,11 @@ async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: nu
   
   if (crop.width < crop.height && options.splitMode !== 'nosplit') {
     if (options.splitMode === 'overlap') {
-      for (const seg of calculateOverlapSegments(crop.width, crop.height, dims.width, dims.height)) results.push(await processAndEncode(resizeWithPadding(extractAndRotate(croppedCanvas, seg.x, seg.y, seg.w, seg.h), padColor, dims.width, dims.height), options))
+      const segs = calculateOverlapSegments(crop.width, crop.height, dims.width, dims.height)
+      for (const seg of segs) {
+        const canvas = resizeWithPadding(extractAndRotate(croppedCanvas, seg.x, seg.y, seg.w, seg.h), padColor, dims.width, dims.height)
+        results.push(await processAndEncode(canvas, options))
+      }
     } else {
       const half = Math.floor(crop.height / 2)
       results.push(await processAndEncode(resizeWithPadding(extractAndRotate(croppedCanvas, 0, 0, crop.width, half), padColor, dims.width, dims.height), options))
