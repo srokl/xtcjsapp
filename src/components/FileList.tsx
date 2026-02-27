@@ -33,7 +33,7 @@ export function FileList({ files, onRemove, onConvert, isConverting }: FileListP
           </div>
         ))}
       </div>
-      {files.reduce((sum, f) => sum + f.size, 0) > 250 * 1024 * 1024 && (
+      {files.reduce((sum, f) => sum + f.size, 0) > 4096 * 1024 * 1024 && (
         <div className="converter-notice" style={{ marginBottom: 'var(--space-md)', borderColor: 'var(--accent)', background: 'rgba(194, 60, 42, 0.05)' }}>
           <p style={{ color: 'var(--accent)', fontWeight: 'bold' }}>
             Warning: Your total file size is {formatSize(files.reduce((sum, f) => sum + f.size, 0))} and might fail converting. Splitting is recommended.
