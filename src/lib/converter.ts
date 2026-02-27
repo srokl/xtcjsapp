@@ -396,7 +396,6 @@ export async function convertCbzToXtc(
         await writer.write(new Uint8Array(arrayBuffer))
       }
       await writer.close()
-      URL.revokeObjectURL(url)
       return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages }
     } else {
       const allBuffers: ArrayBuffer[] = []
@@ -404,7 +403,6 @@ export async function convertCbzToXtc(
         allBuffers.push(await blob.arrayBuffer())
       }
       const xtcData = await buildXtcFromBuffers(allBuffers, { metadata, is2bit: options.is2bit })
-      URL.revokeObjectURL(url)
       return { name: outputFileName, data: xtcData, size: xtcData.byteLength, pageCount: pageInfos.length, pageImages }
     }
   }
