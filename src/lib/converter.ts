@@ -73,9 +73,9 @@ function resizeHq(
 
 /**
  * Process a canvas (filter, dither) and encode it to binary
- * Highly optimized unified pipeline to minimize GPU syncs.
+ * Highly optimized synchronous pipeline to maximize CPU throughput.
  */
-async function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOptions, generatePreview: boolean = true): Promise<{ buffer: ArrayBuffer, preview: string }> {
+function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOptions, generatePreview: boolean = true): { buffer: ArrayBuffer, preview: string } {
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!
   const width = canvas.width
   const height = canvas.height
@@ -94,7 +94,6 @@ async function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOp
     })
     buffer = wrapWasmData(packed, width, height, options.is2bit)
     
-    // Preview optimization: only put data back if we actually need a visual string
     if (generatePreview) {
       runWasmFilters(imageData, options.contrast, (options.is2bit) ? options.gamma : 1.0, options.invert)
       ctx.putImageData(imageData, 0, 0)
@@ -102,7 +101,7 @@ async function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOp
       preview = canvas.toDataURL('image/png')
     }
   } else {
-    // Unified JS Pipeline: One getImageData (done above), One loop, One putImageData (if preview)
+    // Unified JS Pipeline: One getImageData, One loop, One putImageData (if preview)
     applyUnifiedFilters(imageData.data, {
       contrast: options.contrast,
       gamma: (options.is2bit) ? options.gamma : 1.0,
@@ -316,36 +315,50 @@ export async function convertCbzToXtc(
       await zipReader.close()
       return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages, size: totalSize }
     } else {
-      // Memory-Optimized Buffered Path (Safe Pre-fetch)
+      // High-Performance Parallel Path
       const pageBlobs: Blob[] = []; const pageInfos: StreamPageInfo[] = []
       let stitcher: ManhwaStitcher | null = options.manhwa ? new ManhwaStitcher(options) : null
       
-      let nextBlob = imageFiles[0].entry.getData(new BlobWriter());
-
-      for (let i = 0; i < imageFiles.length; i++) {
-        const imgBlob = await nextBlob;
-        if (i + 1 < imageFiles.length) {
-          nextBlob = imageFiles[i + 1].entry.getData(new BlobWriter());
-        }
-
-        let currentResults: { buffer: ArrayBuffer, preview: string }[] = []
-        if (stitcher) {
+      if (stitcher) {
+        // Manhwa mode must be sequential due to stitching logic
+        for (let i = 0; i < imageFiles.length; i++) {
+          const imgBlob = await imageFiles[i].entry.getData(new BlobWriter())
           const bitmap = await createImageBitmap(imgBlob)
           const slices = await stitcher.append(bitmap)
           bitmap.close()
           for (const slice of slices) {
-            currentResults.push(await processAndEncode(slice.canvas, options, pageImages.length < 10))
+            const res = processAndEncode(slice.canvas, options, pageImages.length < 10)
+            pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
+            if (pageImages.length < 10) pageImages.push(res.preview)
           }
-        } else {
-          const result = await processImageAsBinary(imgBlob, i + 1, options, pageImages.length < 10)
-          currentResults = result.results
+          mappingCtx.addOriginalPage(i + 1, slices.length)
+          onProgress((i + 1) / imageFiles.length, null)
         }
-        for (const res of currentResults) {
-          pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
-          if (pageImages.length < 10) pageImages.push(res.preview)
+      } else {
+        // Standard Manga/Comic: Process in parallel batches
+        const CONCURRENCY = 4;
+        for (let i = 0; i < imageFiles.length; i += CONCURRENCY) {
+          const batch = imageFiles.slice(i, i + CONCURRENCY);
+          const tasks = batch.map(async (file, batchIdx) => {
+            const globalIdx = i + batchIdx;
+            const blob = await file.entry.getData(new BlobWriter());
+            const result = await processImageAsBinary(blob, globalIdx + 1, options, pageImages.length < 10);
+            return { globalIdx, result };
+          });
+
+          const batchResults = await Promise.all(tasks);
+          // Sort results to ensure page order is preserved
+          batchResults.sort((a, b) => a.globalIdx - b.globalIdx);
+
+          for (const item of batchResults) {
+            for (const res of item.result.results) {
+              pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
+              if (pageImages.length < 10) pageImages.push(res.preview)
+            }
+            mappingCtx.addOriginalPage(item.globalIdx + 1, item.result.results.length)
+          }
+          onProgress(Math.min(1, (i + CONCURRENCY) / imageFiles.length), null)
         }
-        mappingCtx.addOriginalPage(i + 1, currentResults.length)
-        onProgress((i + 1) / imageFiles.length, null)
       }
       
       if (stitcher) {
@@ -480,32 +493,49 @@ export async function convertCbrToXtc(
     }
     await writer.close()
     return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages, size: totalSize }
-  } else {
-    const pageBlobs: Blob[] = []; const pageInfos: StreamPageInfo[] = []
-    let stitcher = options.manhwa ? new ManhwaStitcher(options) : null
-
-    for (let i = 0; i < imageFiles.length; i++) {
-      const imgBlob = new Blob([new Uint8Array(imageFiles[i].data)])
-      let currentResults: { buffer: ArrayBuffer, preview: string }[] = []
-      if (stitcher) {
-        const bitmap = await createImageBitmap(imgBlob)
-        const slices = await stitcher.append(bitmap)
-        bitmap.close()
-        for (const slice of slices) {
-          currentResults.push(await processAndEncode(slice.canvas, options, pageImages.length < 10))
-        }
       } else {
-        const result = await processImageAsBinary(imgBlob, i + 1, options, pageImages.length < 10)
-        currentResults = result.results
-      }
-      for (const res of currentResults) {
-        pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
-        if (pageImages.length < 10) pageImages.push(res.preview)
-      }
-      mappingCtx.addOriginalPage(i + 1, currentResults.length)
-      onProgress((i + 1) / imageFiles.length, null)
-    }
-    if (stitcher) {
+        // High-Performance Parallel Path
+        const pageBlobs: Blob[] = []; const pageInfos: StreamPageInfo[] = []
+        let stitcher = options.manhwa ? new ManhwaStitcher(options) : null
+  
+        if (stitcher) {
+          for (let i = 0; i < imageFiles.length; i++) {
+            const imgBlob = new Blob([new Uint8Array(imageFiles[i].data)])
+            const bitmap = await createImageBitmap(imgBlob, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })
+            const slices = await stitcher.append(bitmap)
+            bitmap.close()
+            for (const slice of slices) {
+              const res = processAndEncode(slice.canvas, options, pageImages.length < 10)
+              pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
+              if (pageImages.length < 10) pageImages.push(res.preview)
+            }
+            mappingCtx.addOriginalPage(i + 1, slices.length)
+            onProgress((i + 1) / imageFiles.length, null)
+          }
+        } else {
+          const CONCURRENCY = 4;
+          for (let i = 0; i < imageFiles.length; i += CONCURRENCY) {
+            const batch = imageFiles.slice(i, i + CONCURRENCY);
+            const tasks = batch.map(async (file, batchIdx) => {
+              const globalIdx = i + batchIdx;
+              const blob = new Blob([new Uint8Array(file.data)])
+              const result = await processImageAsBinary(blob, globalIdx + 1, options, pageImages.length < 10);
+              return { globalIdx, result };
+            });
+  
+            const batchResults = await Promise.all(tasks);
+            batchResults.sort((a, b) => a.globalIdx - b.globalIdx);
+  
+            for (const item of batchResults) {
+              for (const res of item.result.results) {
+                pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
+                if (pageImages.length < 10) pageImages.push(res.preview)
+              }
+              mappingCtx.addOriginalPage(item.globalIdx + 1, item.result.results.length)
+            }
+            onProgress(Math.min(1, (i + CONCURRENCY) / imageFiles.length), null)
+          }
+        }    if (stitcher) {
       for (const p of stitcher.finish()) {
         const res = await processAndEncode(p.canvas, options, pageImages.length < 10)
         pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
@@ -717,7 +747,7 @@ async function extractFramesFromVideo(file: File, fps: number): Promise<HTMLCanv
   })
 }
 
-async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: number, options: ConversionOptions, generatePreview: boolean = true): Promise<{ buffer: ArrayBuffer, preview: string }[]> {
+function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: number, options: ConversionOptions, generatePreview: boolean = true): { buffer: ArrayBuffer, preview: string }[] {
   const dims = getTargetDimensions(options); const results: { buffer: ArrayBuffer, preview: string }[] = []; const padColor = options.padBlack ? 0 : 255
   const crop = getAxisCropRect(sourceCanvas.width, sourceCanvas.height, options)
   const croppedCanvas = sharedCanvasPool.acquire(crop.width, crop.height)
@@ -726,12 +756,12 @@ async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: nu
   if (options.sidewaysOverviews) {
     const rotated = rotateCanvas(croppedCanvas, 90)
     const resized = resizeWithPadding(rotated, padColor, dims.width, dims.height)
-    results.push(await processAndEncode(resized, options, generatePreview))
+    results.push(processAndEncode(resized, options, generatePreview))
     sharedCanvasPool.release(rotated); sharedCanvasPool.release(resized)
   }
   if (options.includeOverviews) {
     const resized = resizeWithPadding(croppedCanvas, padColor, dims.width, dims.height)
-    results.push(await processAndEncode(resized, options, generatePreview))
+    results.push(processAndEncode(resized, options, generatePreview))
     sharedCanvasPool.release(resized)
   }
   
@@ -751,7 +781,7 @@ async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: nu
     else if (options.imageMode === 'crop') final = resizeCrop(proc, dims.width, dims.height)
     else final = resizeWithPadding(proc, padColor, dims.width, dims.height)
     
-    results.push(await processAndEncode(final, options, generatePreview))
+    results.push(processAndEncode(final, options, generatePreview))
     if (rotated) sharedCanvasPool.release(rotated)
     sharedCanvasPool.release(final)
     sharedCanvasPool.release(croppedCanvas)
@@ -766,7 +796,7 @@ async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: nu
       let h = Math.min(dims.height, newHeight - y); if (h < dims.height && newHeight > dims.height) { y = newHeight - dims.height; h = dims.height }
       const region = extractRegion(resized, 0, y, dims.width, h)
       const padded = resizeWithPadding(region, padColor, dims.width, dims.height)
-      results.push(await processAndEncode(padded, options, generatePreview))
+      results.push(processAndEncode(padded, options, generatePreview))
       sharedCanvasPool.release(region); sharedCanvasPool.release(padded)
       if (y + h >= newHeight) break; y += sliceStep
     }
@@ -777,30 +807,34 @@ async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: nu
 
   if (options.orientation === 'portrait') { 
     const padded = resizeWithPadding(croppedCanvas, padColor, dims.width, dims.height)
-    results.push(await processAndEncode(padded, options, generatePreview))
+    results.push(processAndEncode(padded, options, generatePreview))
     sharedCanvasPool.release(padded)
     sharedCanvasPool.release(croppedCanvas)
     return results 
   }
   
+  const isLandscape = options.orientation === 'landscape'
+  const isWide = crop.width > crop.height
+  const isTall = crop.width < crop.height
+
   if (crop.width < crop.height && options.splitMode !== 'nosplit') {
     if (options.splitMode === 'overlap') {
       const segs = calculateOverlapSegments(crop.width, crop.height, dims.width, dims.height)
       for (const seg of segs) {
         const extracted = extractAndRotate(croppedCanvas, seg.x, seg.y, seg.w, seg.h)
         const padded = resizeWithPadding(extracted, padColor, dims.width, dims.height)
-        results.push(await processAndEncode(padded, options, generatePreview))
+        results.push(processAndEncode(padded, options, generatePreview))
         sharedCanvasPool.release(extracted); sharedCanvasPool.release(padded)
       }
     } else {
       const half = Math.floor(crop.height / 2)
       const ex1 = extractAndRotate(croppedCanvas, 0, 0, crop.width, half)
       const pad1 = resizeWithPadding(ex1, padColor, dims.width, dims.height)
-      results.push(await processAndEncode(pad1, options, generatePreview))
+      results.push(processAndEncode(pad1, options, generatePreview))
       
       const ex2 = extractAndRotate(croppedCanvas, 0, half, crop.width, crop.height - half)
       const pad2 = resizeWithPadding(ex2, padColor, dims.width, dims.height)
-      results.push(await processAndEncode(pad2, options, generatePreview))
+      results.push(processAndEncode(pad2, options, generatePreview))
       
       sharedCanvasPool.release(ex1); sharedCanvasPool.release(pad1)
       sharedCanvasPool.release(ex2); sharedCanvasPool.release(pad2)
@@ -808,7 +842,7 @@ async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: nu
   } else {
     const rotated = rotateCanvas(croppedCanvas, 90)
     const padded = resizeWithPadding(rotated, padColor, dims.width, dims.height)
-    results.push(await processAndEncode(padded, options, generatePreview))
+    results.push(processAndEncode(padded, options, generatePreview))
     sharedCanvasPool.release(rotated); sharedCanvasPool.release(padded)
   }
   
@@ -818,12 +852,15 @@ async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: nu
 
 async function processImageAsBinary(imgBlob: Blob, pageNum: number, options: ConversionOptions, generatePreview: boolean = true): Promise<{ results: { buffer: ArrayBuffer, preview: string }[] }> {
   try {
-    const bitmap = await createImageBitmap(imgBlob);
+    const bitmap = await createImageBitmap(imgBlob, {
+      premultiplyAlpha: 'none',
+      colorSpaceConversion: 'none'
+    });
     const canvas = sharedCanvasPool.acquire(bitmap.width, bitmap.height)
     canvas.getContext('2d', { willReadFrequently: true })!.drawImage(bitmap, 0, 0)
     bitmap.close()
     
-    const results = await processCanvasAsImage(canvas, pageNum, options, generatePreview)
+    const results = processCanvasAsImage(canvas, pageNum, options, generatePreview)
     sharedCanvasPool.release(canvas)
     return { results }
   } catch (e) {
