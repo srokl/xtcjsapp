@@ -53,10 +53,8 @@ function resizeHq(
       const ctx = canvas.getContext('2d', { willReadFrequently: true })!
       const srcData = ctx.getImageData(0, 0, canvas.width, canvas.height)
       const resizedData = runWasmResize(srcData, targetWidth, targetHeight)
-      const outCanvas = document.createElement('canvas')
-      outCanvas.width = targetWidth
-      outCanvas.height = targetHeight
-      outCanvas.getContext('2d')!.putImageData(resizedData, 0, 0)
+      const outCanvas = sharedCanvasPool.acquire(targetWidth, targetHeight)
+      outCanvas.getContext('2d', { willReadFrequently: true })!.putImageData(resizedData, 0, 0)
       return outCanvas
     } catch (e) {
       console.warn("Wasm resize failed, fallback to Canvas", e)
@@ -667,21 +665,42 @@ async function extractFramesFromVideo(file: File, fps: number): Promise<HTMLCanv
 async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: number, options: ConversionOptions, generatePreview: boolean = true): Promise<{ buffer: ArrayBuffer, preview: string }[]> {
   const dims = getTargetDimensions(options); const results: { buffer: ArrayBuffer, preview: string }[] = []; const padColor = options.padBlack ? 0 : 255
   const crop = getAxisCropRect(sourceCanvas.width, sourceCanvas.height, options)
-  const croppedCanvas = document.createElement('canvas'); croppedCanvas.width = crop.width; croppedCanvas.height = crop.height
+  const croppedCanvas = sharedCanvasPool.acquire(crop.width, crop.height)
   croppedCanvas.getContext('2d')!.drawImage(sourceCanvas, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height)
 
-  if (options.sidewaysOverviews) results.push(await processAndEncode(resizeWithPadding(rotateCanvas(croppedCanvas, 90), padColor, dims.width, dims.height), options, generatePreview))
-  if (options.includeOverviews) results.push(await processAndEncode(resizeWithPadding(croppedCanvas, padColor, dims.width, dims.height), options, generatePreview))
+  if (options.sidewaysOverviews) {
+    const rotated = rotateCanvas(croppedCanvas, 90)
+    const resized = resizeWithPadding(rotated, padColor, dims.width, dims.height)
+    results.push(await processAndEncode(resized, options, generatePreview))
+    sharedCanvasPool.release(rotated); sharedCanvasPool.release(resized)
+  }
+  if (options.includeOverviews) {
+    const resized = resizeWithPadding(croppedCanvas, padColor, dims.width, dims.height)
+    results.push(await processAndEncode(resized, options, generatePreview))
+    sharedCanvasPool.release(resized)
+  }
   
   const isSingleImage = options.sourceType === 'image' && !options.manhwa && options.splitMode === 'nosplit'
   if (isSingleImage) {
-    let proc = croppedCanvas; const angle = getOrientationAngle(options.orientation); if (angle !== 0) proc = rotateCanvas(croppedCanvas, angle)
+    let proc = croppedCanvas; 
+    let rotated: HTMLCanvasElement | null = null;
+    const angle = getOrientationAngle(options.orientation); 
+    if (angle !== 0) {
+      rotated = rotateCanvas(croppedCanvas, angle)
+      proc = rotated
+    }
+    
     let final: HTMLCanvasElement
     if (options.imageMode === 'fill') final = resizeHq(proc, dims.width, dims.height, options)
     else if (options.imageMode === 'cover') final = resizeCover(proc, dims.width, dims.height)
     else if (options.imageMode === 'crop') final = resizeCrop(proc, dims.width, dims.height)
     else final = resizeWithPadding(proc, padColor, dims.width, dims.height)
-    results.push(await processAndEncode(final, options, generatePreview)); return results
+    
+    results.push(await processAndEncode(final, options, generatePreview))
+    if (rotated) sharedCanvasPool.release(rotated)
+    sharedCanvasPool.release(final)
+    sharedCanvasPool.release(croppedCanvas)
+    return results
   }
 
   if (options.manhwa) {
@@ -690,29 +709,55 @@ async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: nu
     const sliceStep = dims.height - Math.floor(dims.height * (options.manhwaOverlap / 100))
     for (let y = 0; y < newHeight; ) {
       let h = Math.min(dims.height, newHeight - y); if (h < dims.height && newHeight > dims.height) { y = newHeight - dims.height; h = dims.height }
-      results.push(await processAndEncode(resizeWithPadding(extractRegion(resized, 0, y, dims.width, h), padColor, dims.width, dims.height), options, generatePreview))
+      const region = extractRegion(resized, 0, y, dims.width, h)
+      const padded = resizeWithPadding(region, padColor, dims.width, dims.height)
+      results.push(await processAndEncode(padded, options, generatePreview))
+      sharedCanvasPool.release(region); sharedCanvasPool.release(padded)
       if (y + h >= newHeight) break; y += sliceStep
     }
+    sharedCanvasPool.release(resized)
+    sharedCanvasPool.release(croppedCanvas)
     return results
   }
 
-  if (options.orientation === 'portrait') { results.push(await processAndEncode(resizeWithPadding(croppedCanvas, padColor, dims.width, dims.height), options, generatePreview)); return results }
+  if (options.orientation === 'portrait') { 
+    const padded = resizeWithPadding(croppedCanvas, padColor, dims.width, dims.height)
+    results.push(await processAndEncode(padded, options, generatePreview))
+    sharedCanvasPool.release(padded)
+    sharedCanvasPool.release(croppedCanvas)
+    return results 
+  }
   
   if (crop.width < crop.height && options.splitMode !== 'nosplit') {
     if (options.splitMode === 'overlap') {
       const segs = calculateOverlapSegments(crop.width, crop.height, dims.width, dims.height)
       for (const seg of segs) {
-        const canvas = resizeWithPadding(extractAndRotate(croppedCanvas, seg.x, seg.y, seg.w, seg.h), padColor, dims.width, dims.height)
-        results.push(await processAndEncode(canvas, options, generatePreview))
+        const extracted = extractAndRotate(croppedCanvas, seg.x, seg.y, seg.w, seg.h)
+        const padded = resizeWithPadding(extracted, padColor, dims.width, dims.height)
+        results.push(await processAndEncode(padded, options, generatePreview))
+        sharedCanvasPool.release(extracted); sharedCanvasPool.release(padded)
       }
     } else {
       const half = Math.floor(crop.height / 2)
-      results.push(await processAndEncode(resizeWithPadding(extractAndRotate(croppedCanvas, 0, 0, crop.width, half), padColor, dims.width, dims.height), options, generatePreview))
-      results.push(await processAndEncode(resizeWithPadding(extractAndRotate(croppedCanvas, 0, half, crop.width, crop.height - half), padColor, dims.width, dims.height), options, generatePreview))
+      const ex1 = extractAndRotate(croppedCanvas, 0, 0, crop.width, half)
+      const pad1 = resizeWithPadding(ex1, padColor, dims.width, dims.height)
+      results.push(await processAndEncode(pad1, options, generatePreview))
+      
+      const ex2 = extractAndRotate(croppedCanvas, 0, half, crop.width, crop.height - half)
+      const pad2 = resizeWithPadding(ex2, padColor, dims.width, dims.height)
+      results.push(await processAndEncode(pad2, options, generatePreview))
+      
+      sharedCanvasPool.release(ex1); sharedCanvasPool.release(pad1)
+      sharedCanvasPool.release(ex2); sharedCanvasPool.release(pad2)
     }
   } else {
-    results.push(await processAndEncode(resizeWithPadding(rotateCanvas(croppedCanvas, 90), padColor, dims.width, dims.height), options, generatePreview))
+    const rotated = rotateCanvas(croppedCanvas, 90)
+    const padded = resizeWithPadding(rotated, padColor, dims.width, dims.height)
+    results.push(await processAndEncode(padded, options, generatePreview))
+    sharedCanvasPool.release(rotated); sharedCanvasPool.release(padded)
   }
+  
+  sharedCanvasPool.release(croppedCanvas)
   return results
 }
 

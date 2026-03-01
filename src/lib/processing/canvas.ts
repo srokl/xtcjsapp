@@ -34,18 +34,16 @@ export const sharedCanvasPool = new CanvasPool();
  * Rotate canvas by specified degrees
  */
 export function rotateCanvas(canvas: HTMLCanvasElement, degrees: number): HTMLCanvasElement {
-  const rotated = document.createElement('canvas');
-
+  let rotatedWidth = canvas.width;
+  let rotatedHeight = canvas.height;
   if (degrees === -90 || degrees === 90) {
-    rotated.width = canvas.height;
-    rotated.height = canvas.width;
-  } else {
-    rotated.width = canvas.width;
-    rotated.height = canvas.height;
+    rotatedWidth = canvas.height;
+    rotatedHeight = canvas.width;
   }
+  const rotated = sharedCanvasPool.acquire(rotatedWidth, rotatedHeight);
 
   const ctx = rotated.getContext('2d', { willReadFrequently: true })!;
-  ctx.translate(rotated.width / 2, rotated.height / 2);
+  ctx.translate(rotatedWidth / 2, rotatedHeight / 2);
   ctx.rotate(degrees * Math.PI / 180);
   ctx.drawImage(canvas, -canvas.width / 2, -canvas.height / 2);
 
@@ -63,13 +61,13 @@ export function extractAndRotate(
   h: number,
   angle: number = 90
 ): HTMLCanvasElement {
-  const extractCanvas = document.createElement('canvas');
-  extractCanvas.width = w;
-  extractCanvas.height = h;
+  const extractCanvas = sharedCanvasPool.acquire(w, h);
   const ctx = extractCanvas.getContext('2d', { willReadFrequently: true })!;
   ctx.drawImage(srcCanvas, x, y, w, h, 0, 0, w, h);
 
-  return rotateCanvas(extractCanvas, angle);
+  const rotated = rotateCanvas(extractCanvas, angle);
+  sharedCanvasPool.release(extractCanvas);
+  return rotated;
 }
 
 /**
@@ -82,9 +80,7 @@ export function extractRegion(
   w: number,
   h: number
 ): HTMLCanvasElement {
-  const extractCanvas = document.createElement('canvas');
-  extractCanvas.width = w;
-  extractCanvas.height = h;
+  const extractCanvas = sharedCanvasPool.acquire(w, h);
   const ctx = extractCanvas.getContext('2d', { willReadFrequently: true })!;
   ctx.drawImage(srcCanvas, x, y, w, h, 0, 0, w, h);
 
@@ -100,9 +96,7 @@ export function resizeWithPadding(
   targetWidth = TARGET_WIDTH,
   targetHeight = TARGET_HEIGHT
 ): HTMLCanvasElement {
-  const result = document.createElement('canvas');
-  result.width = targetWidth;
-  result.height = targetHeight;
+  const result = sharedCanvasPool.acquire(targetWidth, targetHeight);
   const ctx = result.getContext('2d', { willReadFrequently: true })!;
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
@@ -133,9 +127,7 @@ export function resizeFill(
   targetWidth = TARGET_WIDTH,
   targetHeight = TARGET_HEIGHT
 ): HTMLCanvasElement {
-  const result = document.createElement('canvas');
-  result.width = targetWidth;
-  result.height = targetHeight;
+  const result = sharedCanvasPool.acquire(targetWidth, targetHeight);
   const ctx = result.getContext('2d', { willReadFrequently: true })!;
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
@@ -151,9 +143,7 @@ export function resizeCover(
   targetWidth = TARGET_WIDTH,
   targetHeight = TARGET_HEIGHT
 ): HTMLCanvasElement {
-  const result = document.createElement('canvas');
-  result.width = targetWidth;
-  result.height = targetHeight;
+  const result = sharedCanvasPool.acquire(targetWidth, targetHeight);
   const ctx = result.getContext('2d', { willReadFrequently: true })!;
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
@@ -177,9 +167,7 @@ export function resizeCrop(
   targetWidth = TARGET_WIDTH,
   targetHeight = TARGET_HEIGHT
 ): HTMLCanvasElement {
-  const result = document.createElement('canvas');
-  result.width = targetWidth;
-  result.height = targetHeight;
+  const result = sharedCanvasPool.acquire(targetWidth, targetHeight);
   const ctx = result.getContext('2d', { willReadFrequently: true })!;
 
   const x = Math.floor((targetWidth - canvas.width) / 2);
