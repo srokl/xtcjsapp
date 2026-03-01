@@ -5,8 +5,8 @@ import streamSaver from 'streamsaver'
 import { createExtractorFromData } from 'node-unrar-js'
 import unrarWasm from 'node-unrar-js/esm/js/unrar.wasm?url'
 import * as pdfjsLib from 'pdfjs-dist'
-import { applyDithering } from './processing/dithering'
-import { toGrayscale, applyContrast, calculateOverlapSegments, isSolidColor, applyGamma, applyInvert } from './processing/image'
+import { applyDithering, applyDitheringToData } from './processing/dithering'
+import { toGrayscale, applyContrast, calculateOverlapSegments, isSolidColor, applyGamma, applyInvert, applyUnifiedFilters } from './processing/image'
 import { rotateCanvas, extractAndRotate, extractRegion, resizeWithPadding, resizeFill, resizeCover, resizeCrop, TARGET_WIDTH, TARGET_HEIGHT, DEVICE_DIMENSIONS, sharedCanvasPool } from './processing/canvas'
 import { buildXtc, buildXtcFromBuffers, imageDataToXth, imageDataToXtg, wrapWasmData, buildXtcHeaderAndIndex, getXtcPageSize, type StreamPageInfo } from './xtc-format'
 import { initWasm, runWasmFilters, isWasmLoaded, runWasmPack, runWasmResize, runWasmPipeline } from './processing/wasm'
@@ -96,24 +96,27 @@ async function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOp
     
     // Preview optimization: only put data back if we actually need a visual string
     if (generatePreview) {
-      // Note: runWasmPipeline currently doesn't copy back to inputPtr for speed
-      // If we need a preview, we might need a separate call or a flag in pipeline
-      // For now, let's just do a manual filter/dither for the preview first 10 pages
       runWasmFilters(imageData, options.contrast, (options.is2bit) ? options.gamma : 1.0, options.invert)
       ctx.putImageData(imageData, 0, 0)
       applyDithering(ctx, width, height, options.dithering, options.is2bit, true)
       preview = canvas.toDataURL('image/png')
     }
   } else {
-    if (options.contrast > 0) applyContrast(ctx, width, height, options.contrast)
-    if (options.gamma !== 1.0 && options.is2bit) applyGamma(ctx, width, height, options.gamma)
-    if (options.invert) applyInvert(ctx, width, height)
-    toGrayscale(ctx, width, height)
-    applyDithering(ctx, width, height, options.dithering, options.is2bit, false)
-    if (generatePreview) preview = canvas.toDataURL('image/png')
+    // Unified JS Pipeline: One getImageData (done above), One loop, One putImageData (if preview)
+    applyUnifiedFilters(imageData.data, {
+      contrast: options.contrast,
+      gamma: (options.is2bit) ? options.gamma : 1.0,
+      invert: options.invert
+    })
     
-    const finalData = ctx.getImageData(0, 0, width, height)
-    buffer = options.is2bit ? imageDataToXth(finalData) : imageDataToXtg(finalData)
+    applyDitheringToData(imageData.data, width, height, options.dithering, options.is2bit, false)
+    
+    if (generatePreview) {
+      ctx.putImageData(imageData, 0, 0)
+      preview = canvas.toDataURL('image/png')
+    }
+    
+    buffer = options.is2bit ? imageDataToXth(imageData) : imageDataToXtg(imageData)
   }
   
   return { buffer, preview }

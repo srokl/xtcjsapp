@@ -15,13 +15,27 @@ export function applyDithering(
   useWasm: boolean = false
 ): void {
   const imageData = ctx.getImageData(0, 0, width, height);
-  const data = imageData.data;
+  applyDitheringToData(imageData.data, width, height, algorithm, is2bit, useWasm);
+  ctx.putImageData(imageData, 0, 0);
+}
 
+/**
+ * Applies the selected dithering algorithm to raw pixel data
+ */
+export function applyDitheringToData(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  algorithm: string,
+  is2bit: boolean = false,
+  useWasm: boolean = false
+): void {
   // Attempt Wasm Dithering for supported algorithms
   if (useWasm && isWasmLoaded() && (algorithm === 'stucki' || algorithm === 'atkinson')) {
     try {
-      runWasmDither(imageData, algorithm, is2bit);
-      ctx.putImageData(imageData, 0, 0);
+      // runWasmDither requires ImageData object for the Wasm wrapper
+      const tempImgData = new ImageData(data, width, height);
+      runWasmDither(tempImgData, algorithm, is2bit);
       return;
     } catch (e) {
       console.warn("Wasm dither failed, fallback to CPU", e);
@@ -56,8 +70,6 @@ export function applyDithering(
     default:
       applyFloydSteinberg(data, width, height, is2bit);
   }
-
-  ctx.putImageData(imageData, 0, 0);
 }
 
 /**

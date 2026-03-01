@@ -1,6 +1,86 @@
 // Image processing functions for manga optimization
 
 /**
+ * Optimized Unified Filter Pass
+ * Applies all filters in a single loop to avoid redundant GPU <-> CPU transfers.
+ */
+export function applyUnifiedFilters(
+  data: Uint8ClampedArray,
+  options: { contrast: number, gamma: number, invert: boolean }
+): void {
+  const { contrast, gamma, invert } = options;
+  const length = data.length;
+
+  // 1. Pre-calculate Contrast Points (Requires one pass for histogram)
+  let blackPoint = 0;
+  let whitePoint = 255;
+  let range = 255;
+
+  if (contrast > 0) {
+    const histogram = new Uint32Array(256);
+    for (let i = 0; i < length; i += 4) {
+      const gray = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+      histogram[gray]++;
+    }
+
+    const totalPixels = length / 4;
+    const blackThreshold = totalPixels * (3 * contrast) / 100;
+    const whiteThreshold = totalPixels * (3 + 9 * contrast) / 100;
+
+    let count = 0;
+    for (let i = 0; i < 256; i++) {
+      count += histogram[i];
+      if (count >= blackThreshold) { blackPoint = i; break; }
+    }
+    count = 0;
+    for (let i = 255; i >= 0; i--) {
+      count += histogram[i];
+      if (count >= whiteThreshold) { whitePoint = i; break; }
+    }
+    range = whitePoint - blackPoint;
+  }
+
+  // 2. Pre-calculate Gamma LUT
+  const gammaLut = new Uint8Array(256);
+  if (gamma !== 1.0) {
+    for (let i = 0; i < 256; i++) {
+      gammaLut[i] = Math.round(Math.pow(i / 255, gamma) * 255);
+    }
+  }
+
+  // 3. Single Pass for all active filters
+  for (let i = 0; i < length; i += 4) {
+    let r = data[i];
+    let g = data[i + 1];
+    let b = data[i + 2];
+
+    // Invert
+    if (invert) {
+      r = 255 - r;
+      g = 255 - g;
+      b = 255 - b;
+    }
+
+    // Contrast Stretch
+    if (contrast > 0 && range > 0) {
+      r = Math.max(0, Math.min(255, ((r - blackPoint) / range) * 255));
+      g = Math.max(0, Math.min(255, ((g - blackPoint) / range) * 255));
+      b = Math.max(0, Math.min(255, ((b - blackPoint) / range) * 255));
+    }
+
+    // Grayscale (Luminosity)
+    let gray = 0.299 * r + 0.587 * g + 0.114 * b;
+
+    // Gamma
+    if (gamma !== 1.0) {
+      gray = gammaLut[Math.round(gray)];
+    }
+
+    data[i] = data[i+1] = data[i+2] = gray;
+  }
+}
+
+/**
  * Convert image to grayscale using luminosity method
  */
 export function toGrayscale(
@@ -12,7 +92,6 @@ export function toGrayscale(
   const data = imageData.data;
 
   for (let i = 0; i < data.length; i += 4) {
-    // Luminosity method - preserves perceived brightness
     const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
     data[i] = data[i + 1] = data[i + 2] = gray;
   }
@@ -29,20 +108,18 @@ export function applyContrast(
   height: number,
   level: number
 ): void {
-  const blackCutoff = 3 * level;
-  const whiteCutoff = 3 + 9 * level;
-
   const imageData = ctx.getImageData(0, 0, width, height);
   const data = imageData.data;
 
-  // Build histogram
-  const histogram = new Array(256).fill(0);
+  const blackCutoff = 3 * level;
+  const whiteCutoff = 3 + 9 * level;
+
+  const histogram = new Uint32Array(256);
   for (let i = 0; i < data.length; i += 4) {
     const gray = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
     histogram[gray]++;
   }
 
-  // Find cutoff points
   const totalPixels = width * height;
   const blackThreshold = totalPixels * blackCutoff / 100;
   const whiteThreshold = totalPixels * whiteCutoff / 100;
@@ -53,22 +130,14 @@ export function applyContrast(
 
   for (let i = 0; i < 256; i++) {
     count += histogram[i];
-    if (count >= blackThreshold) {
-      blackPoint = i;
-      break;
-    }
+    if (count >= blackThreshold) { blackPoint = i; break; }
   }
-
   count = 0;
   for (let i = 255; i >= 0; i--) {
     count += histogram[i];
-    if (count >= whiteThreshold) {
-      whitePoint = i;
-      break;
-    }
+    if (count >= whiteThreshold) { whitePoint = i; break; }
   }
 
-  // Apply contrast stretch
   const range = whitePoint - blackPoint;
   if (range > 0) {
     for (let i = 0; i < data.length; i += 4) {
@@ -112,8 +181,6 @@ export function calculateOverlapSegments(
   targetWidth: number,
   targetHeight: number
 ): Array<{ x: number; y: number; w: number; h: number }> {
-  // In landscape mode, we fit 'width' to 'targetHeight' (800 or 792)
-  // and 'segmentHeight' to 'targetWidth' (480 or 528)
   const scale = targetHeight / width;
   const segmentHeight = Math.floor(targetWidth / scale);
 
@@ -124,7 +191,6 @@ export function calculateOverlapSegments(
     shift = Math.floor(segmentHeight - (segmentHeight * numSegments - height) / (numSegments - 1));
   }
 
-  // Check if we need more segments (minimum 5% overlap)
   while (shift / segmentHeight > 0.95 && numSegments < 10) {
     numSegments++;
     shift = Math.floor(segmentHeight - (segmentHeight * numSegments - height) / (numSegments - 1));
@@ -145,7 +211,6 @@ export function calculateOverlapSegments(
 
 /**
  * Check if an image region is effectively a solid color (low standard deviation).
- * Used for optimizing scroll speed on blank/filler pages.
  */
 export function isSolidColor(
   ctx: CanvasRenderingContext2D,
@@ -158,26 +223,20 @@ export function isSolidColor(
   const data = imageData.data;
   
   let sum = 0;
-  let count = 0;
+  const count = data.length / 4;
   
-  // Calculate mean (grayscale only needs one channel check usually, but let's check R)
   for (let i = 0; i < data.length; i += 4) {
     sum += data[i];
-    count++;
   }
   const mean = sum / count;
   
-  // Calculate variance
   let sumSqDiff = 0;
   for (let i = 0; i < data.length; i += 4) {
     const diff = data[i] - mean;
     sumSqDiff += diff * diff;
   }
   
-  const variance = sumSqDiff / count;
-  const stdDev = Math.sqrt(variance);
-  
-  // Python script uses < 5.0
+  const stdDev = Math.sqrt(sumSqDiff / count);
   return stdDev < 5.0;
 }
 
@@ -195,7 +254,6 @@ export function applyGamma(
   const imageData = ctx.getImageData(0, 0, width, height);
   const data = imageData.data;
 
-  // Pre-calculate LUT
   const lut = new Uint8Array(256);
   for (let i = 0; i < 256; i++) {
     lut[i] = Math.round(Math.pow(i / 255, gamma) * 255);
