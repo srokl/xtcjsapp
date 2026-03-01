@@ -488,6 +488,32 @@
   box-sizing: border-box;
 }
 
+[data-theme="dark"] .viewer-section {
+  background: #000;
+  border-top: 1px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+}
+
+[data-theme="dark"] .viewer-section .section-header h2 {
+  color: var(--ink-faded);
+}
+
+[data-theme="dark"] .viewer-section .badge {
+  background: var(--paper-dark);
+  color: var(--ink);
+  border: 1px solid var(--ink);
+}
+
+[data-theme="dark"] .viewer-btn {
+  color: var(--ink);
+  border-color: var(--ink-faded);
+}
+
+[data-theme="dark"] .viewer-btn:hover:not(:disabled) {
+  background: var(--paper-dark);
+  border-color: var(--ink);
+}
+
 @media (min-width: 768px) {
   .viewer-section {
     padding: var(--space-xl) var(--space-2xl);
