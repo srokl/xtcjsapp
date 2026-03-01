@@ -294,12 +294,19 @@ export async function convertCbzToXtc(
         throw new Error('Failed to initiate streamed download.')
       }
 
-      // Pass 2: Data Processing
+      // Pass 2: Data Processing (Safe Pre-fetch)
+      let nextBlob = imageFiles[0].entry.getData(new BlobWriter());
+
       for (let i = 0; i < imageFiles.length; i++) {
-        const imgBlob = await imageFiles[i].entry.getData(new BlobWriter())
+        const imgBlob = await nextBlob;
+        // Start decompressing NEXT while we process CURRENT
+        if (i + 1 < imageFiles.length) {
+          nextBlob = imageFiles[i + 1].entry.getData(new BlobWriter());
+        }
+
         const result = await processImageAsBinary(imgBlob, i + 1, options, pageImages.length < 10)
         for (const res of result.results) {
-          await writer.write(new Uint8Array(res.buffer))
+          await writer!.write(new Uint8Array(res.buffer))
           if (pageImages.length < 10) pageImages.push(res.preview)
         }
         onProgress(0.05 + (i + 1) / imageFiles.length * 0.95, null)
@@ -309,21 +316,23 @@ export async function convertCbzToXtc(
       await zipReader.close()
       return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages, size: totalSize }
     } else {
-      // Memory-Optimized Buffered Path
+      // Memory-Optimized Buffered Path (Safe Pre-fetch)
       const pageBlobs: Blob[] = []; const pageInfos: StreamPageInfo[] = []
       let stitcher: ManhwaStitcher | null = options.manhwa ? new ManhwaStitcher(options) : null
+      
+      let nextBlob = imageFiles[0].entry.getData(new BlobWriter());
 
       for (let i = 0; i < imageFiles.length; i++) {
-        const imgBlob = await imageFiles[i].entry.getData(new BlobWriter())
+        const imgBlob = await nextBlob;
+        if (i + 1 < imageFiles.length) {
+          nextBlob = imageFiles[i + 1].entry.getData(new BlobWriter());
+        }
+
         let currentResults: { buffer: ArrayBuffer, preview: string }[] = []
         if (stitcher) {
-          const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-            const img = new Image(); const url = URL.createObjectURL(imgBlob)
-            img.onload = () => { URL.revokeObjectURL(url); resolve(img) }
-            img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Img fail')) }
-            img.src = url
-          })
-          const slices = await stitcher.append(img)
+          const bitmap = await createImageBitmap(imgBlob)
+          const slices = await stitcher.append(bitmap)
+          bitmap.close()
           for (const slice of slices) {
             currentResults.push(await processAndEncode(slice.canvas, options, pageImages.length < 10))
           }
@@ -479,13 +488,9 @@ export async function convertCbrToXtc(
       const imgBlob = new Blob([new Uint8Array(imageFiles[i].data)])
       let currentResults: { buffer: ArrayBuffer, preview: string }[] = []
       if (stitcher) {
-        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-          const img = new Image(); const url = URL.createObjectURL(imgBlob)
-          img.onload = () => { URL.revokeObjectURL(url); resolve(img) }
-          img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Img fail')) }
-          img.src = url
-        })
-        const slices = await stitcher.append(img)
+        const bitmap = await createImageBitmap(imgBlob)
+        const slices = await stitcher.append(bitmap)
+        bitmap.close()
         for (const slice of slices) {
           currentResults.push(await processAndEncode(slice.canvas, options, pageImages.length < 10))
         }
@@ -812,19 +817,16 @@ async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: nu
 }
 
 async function processImageAsBinary(imgBlob: Blob, pageNum: number, options: ConversionOptions, generatePreview: boolean = true): Promise<{ results: { buffer: ArrayBuffer, preview: string }[] }> {
-  return new Promise((resolve, reject) => {
-    const img = new Image(); const url = URL.createObjectURL(imgBlob)
-    img.onload = async () => {
-      try {
-        const canvas = sharedCanvasPool.acquire(img.width, img.height)
-        canvas.getContext('2d')!.drawImage(img, 0, 0)
-        URL.revokeObjectURL(url)
-        const results = await processCanvasAsImage(canvas, pageNum, options, generatePreview)
-        sharedCanvasPool.release(canvas)
-        resolve({ results })
-      } catch (e) { reject(e) }
-    }
-    img.onerror = () => { URL.revokeObjectURL(url); resolve({ results: [] }) }
-    img.src = url
-  })
+  try {
+    const bitmap = await createImageBitmap(imgBlob);
+    const canvas = sharedCanvasPool.acquire(bitmap.width, bitmap.height)
+    canvas.getContext('2d', { willReadFrequently: true })!.drawImage(bitmap, 0, 0)
+    bitmap.close()
+    
+    const results = await processCanvasAsImage(canvas, pageNum, options, generatePreview)
+    sharedCanvasPool.release(canvas)
+    return { results }
+  } catch (e) {
+    return { results: [] }
+  }
 }

@@ -447,17 +447,15 @@ export function imageDataToXtg(imageData: ImageData): ArrayBuffer {
   const h = imageData.height;
   const data = imageData.data;
 
-  const rowBytes = Math.ceil(w / 8);
+  const rowBytes = (w + 7) >>> 3;
   const pixelData = new Uint8Array(rowBytes * h);
 
   for (let y = 0; y < h; y++) {
+    const rowOffset = y * rowBytes;
+    const dataOffset = y * w * 4;
     for (let x = 0; x < w; x++) {
-      const idx = (y * w + x) * 4;
-      const bit = data[idx] >= 128 ? 1 : 0;
-      const byteIndex = y * rowBytes + Math.floor(x / 8);
-      const bitIndex = 7 - (x % 8);
-      if (bit) {
-        pixelData[byteIndex] |= 1 << bitIndex;
+      if (data[dataOffset + (x << 2)] >= 128) {
+        pixelData[rowOffset + (x >>> 3)] |= 1 << (7 - (x & 7));
       }
     }
   }
@@ -506,29 +504,28 @@ export function imageDataToXth(imageData: ImageData): ArrayBuffer {
   const h = imageData.height;
   const data = imageData.data;
 
-  const colBytes = Math.ceil(h / 8);
+  const colBytes = (h + 7) >>> 3;
   const planeSize = colBytes * w;
   const p0 = new Uint8Array(planeSize);
   const p1 = new Uint8Array(planeSize);
 
-  for (let x = 0; x < w; x++) {
-    const targetCol = w - 1 - x; // Right to Left
-    const colOffset = targetCol * colBytes;
-    for (let y = 0; y < h; y++) {
-      const idx = (y * w + x) * 4;
-      const gray = data[idx]; // ImageData is already grayscale if pre-processed
+  for (let y = 0; y < h; y++) {
+    const byteInCol = y >>> 3;
+    const bitMask = 1 << (7 - (y & 7));
+    const dataOffset = y * w * 4;
+    
+    for (let x = 0; x < w; x++) {
+      const gray = data[dataOffset + (x << 2)];
       
       let val;
       if (gray >= 212) val = 0;      // White (00)
       else if (gray >= 127) val = 1; // Light Gray (01)
       else if (gray >= 42) val = 2;  // Dark Gray (10)
-      else val = 3;               // Black (11)
+      else val = 3;                  // Black (11)
 
-      const byteIdx = colOffset + (y >> 3);
-      const bitIdx = 7 - (y % 8);
-      
-      if (val & 1) p0[byteIdx] |= (1 << bitIdx);
-      if (val & 2) p1[byteIdx] |= (1 << bitIdx);
+      const colOffset = (w - 1 - x) * colBytes + byteInCol;
+      if (val & 1) p0[colOffset] |= bitMask;
+      if (val & 2) p1[colOffset] |= bitMask;
     }
   }
 

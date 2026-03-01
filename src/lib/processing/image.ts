@@ -63,17 +63,21 @@ export function applyUnifiedFilters(
 
     // Contrast Stretch
     if (contrast > 0 && range > 0) {
-      r = Math.max(0, Math.min(255, ((r - blackPoint) / range) * 255));
-      g = Math.max(0, Math.min(255, ((g - blackPoint) / range) * 255));
-      b = Math.max(0, Math.min(255, ((b - blackPoint) / range) * 255));
+      r = ((r - blackPoint) * 255 / range) | 0;
+      g = ((g - blackPoint) * 255 / range) | 0;
+      b = ((b - blackPoint) * 255 / range) | 0;
+      if (r < 0) r = 0; else if (r > 255) r = 255;
+      if (g < 0) g = 0; else if (g > 255) g = 255;
+      if (b < 0) b = 0; else if (b > 255) b = 255;
     }
 
-    // Grayscale (Luminosity)
-    let gray = 0.299 * r + 0.587 * g + 0.114 * b;
+    // Grayscale (Luminosity using fast integer math)
+    // 0.299R + 0.587G + 0.114B => (77R + 150G + 29B) / 256
+    let gray = (r * 77 + g * 150 + b * 29) >>> 8;
 
     // Gamma
     if (gamma !== 1.0) {
-      gray = gammaLut[Math.round(gray)];
+      gray = gammaLut[gray];
     }
 
     data[i] = data[i+1] = data[i+2] = gray;
