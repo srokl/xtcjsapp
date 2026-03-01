@@ -1,6 +1,6 @@
 // CBZ/CBR/PDF to XTC conversion logic
 
-import { ZipReader, BlobReader, BlobWriter, TextWriter } from '@zip.js/zip.js'
+import { ZipReader, BlobReader, BlobWriter, TextWriter, Uint8ArrayWriter } from '@zip.js/zip.js'
 import streamSaver from 'streamsaver'
 import { createExtractorFromData } from 'node-unrar-js'
 import unrarWasm from 'node-unrar-js/esm/js/unrar.wasm?url'
@@ -294,21 +294,20 @@ export async function convertCbzToXtc(
       }
 
       // Pass 2: Data Processing (Safe Pre-fetch)
-      let nextBlob = imageFiles[0].entry.getData(new BlobWriter());
+      let nextData = imageFiles[0].entry.getData(new Uint8ArrayWriter());
 
       for (let i = 0; i < imageFiles.length; i++) {
-        const imgBlob = await nextBlob;
-        // Start decompressing NEXT while we process CURRENT
+        const imgData = await nextData;
         if (i + 1 < imageFiles.length) {
-          nextBlob = imageFiles[i + 1].entry.getData(new BlobWriter());
+          nextData = imageFiles[i + 1].entry.getData(new Uint8ArrayWriter());
         }
 
-        const result = await processImageAsBinary(imgBlob, i + 1, options, pageImages.length < 10)
+        const result = await processImageAsBinary(imgData, i + 1, options, pageImages.length < 10)
         for (const res of result.results) {
           await writer!.write(new Uint8Array(res.buffer))
           if (pageImages.length < 10) pageImages.push(res.preview)
         }
-        onProgress(0.05 + (i + 1) / imageFiles.length * 0.95, null)
+        if (i % 5 === 0) onProgress(0.05 + (i + 1) / imageFiles.length * 0.95, null)
       }
       
       await writer.close()
@@ -321,9 +320,14 @@ export async function convertCbzToXtc(
       
       if (stitcher) {
         // Manhwa mode must be sequential due to stitching logic
+        let nextData = imageFiles[0].entry.getData(new Uint8ArrayWriter());
         for (let i = 0; i < imageFiles.length; i++) {
-          const imgBlob = await imageFiles[i].entry.getData(new BlobWriter())
-          const bitmap = await createImageBitmap(imgBlob)
+          const imgData = await nextData;
+          if (i + 1 < imageFiles.length) {
+            nextData = imageFiles[i + 1].entry.getData(new Uint8ArrayWriter());
+          }
+          const blob = new Blob([imgData]);
+          const bitmap = await createImageBitmap(blob, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })
           const slices = await stitcher.append(bitmap)
           bitmap.close()
           for (const slice of slices) {
@@ -332,22 +336,21 @@ export async function convertCbzToXtc(
             if (pageImages.length < 10) pageImages.push(res.preview)
           }
           mappingCtx.addOriginalPage(i + 1, slices.length)
-          onProgress((i + 1) / imageFiles.length, null)
+          if (i % 5 === 0) onProgress((i + 1) / imageFiles.length, null)
         }
       } else {
         // Standard Manga/Comic: Process in parallel batches
-        const CONCURRENCY = 4;
+        const CONCURRENCY = 6; // Increased for modern phones
         for (let i = 0; i < imageFiles.length; i += CONCURRENCY) {
           const batch = imageFiles.slice(i, i + CONCURRENCY);
           const tasks = batch.map(async (file, batchIdx) => {
             const globalIdx = i + batchIdx;
-            const blob = await file.entry.getData(new BlobWriter());
-            const result = await processImageAsBinary(blob, globalIdx + 1, options, pageImages.length < 10);
+            const data = await file.entry.getData(new Uint8ArrayWriter());
+            const result = await processImageAsBinary(data, globalIdx + 1, options, pageImages.length < 10);
             return { globalIdx, result };
           });
 
           const batchResults = await Promise.all(tasks);
-          // Sort results to ensure page order is preserved
           batchResults.sort((a, b) => a.globalIdx - b.globalIdx);
 
           for (const item of batchResults) {
@@ -482,60 +485,70 @@ export async function convertCbrToXtc(
     const writer = fileStream.getWriter()
     await writer.write(headerAndIndex)
 
-    for (let i = 0; i < imageFiles.length; i++) {
-      const imgBlob = new Blob([new Uint8Array(imageFiles[i].data)])
-      const result = await processImageAsBinary(imgBlob, i + 1, options, pageImages.length < 10)
-      for (const res of result.results) {
-        await writer.write(new Uint8Array(res.buffer))
-        if (pageImages.length < 10) pageImages.push(res.preview)
+    const CONCURRENCY = 6;
+    for (let i = 0; i < imageFiles.length; i += CONCURRENCY) {
+      const batch = imageFiles.slice(i, i + CONCURRENCY);
+      const tasks = batch.map(async (file, batchIdx) => {
+        const globalIdx = i + batchIdx;
+        const result = await processImageAsBinary(file.data, globalIdx + 1, options, pageImages.length < 10);
+        return { globalIdx, result };
+      });
+
+      const batchResults = await Promise.all(tasks);
+      batchResults.sort((a, b) => a.globalIdx - b.globalIdx);
+
+      for (const item of batchResults) {
+        for (const res of item.result.results) {
+          await writer.write(new Uint8Array(res.buffer))
+          if (pageImages.length < 10) pageImages.push(res.preview)
+        }
       }
-      onProgress(0.05 + (i + 1) / imageFiles.length * 0.95, null)
+      onProgress(0.05 + Math.min(1, (i + CONCURRENCY) / imageFiles.length) * 0.95, null)
     }
     await writer.close()
     return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages, size: totalSize }
+    } else {
+      // High-Performance Parallel Path
+      const pageBlobs: Blob[] = []; const pageInfos: StreamPageInfo[] = []
+      let stitcher = options.manhwa ? new ManhwaStitcher(options) : null
+
+      if (stitcher) {
+        for (let i = 0; i < imageFiles.length; i++) {
+          const imgBlob = new Blob([new Uint8Array(imageFiles[i].data)])
+          const bitmap = await createImageBitmap(imgBlob, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })
+          const slices = await stitcher.append(bitmap)
+          bitmap.close()
+          for (const slice of slices) {
+            const res = processAndEncode(slice.canvas, options, pageImages.length < 10)
+            pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
+            if (pageImages.length < 10) pageImages.push(res.preview)
+          }
+          mappingCtx.addOriginalPage(i + 1, slices.length)
+          if (i % 5 === 0) onProgress((i + 1) / imageFiles.length, null)
+        }
       } else {
-        // High-Performance Parallel Path
-        const pageBlobs: Blob[] = []; const pageInfos: StreamPageInfo[] = []
-        let stitcher = options.manhwa ? new ManhwaStitcher(options) : null
-  
-        if (stitcher) {
-          for (let i = 0; i < imageFiles.length; i++) {
-            const imgBlob = new Blob([new Uint8Array(imageFiles[i].data)])
-            const bitmap = await createImageBitmap(imgBlob, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })
-            const slices = await stitcher.append(bitmap)
-            bitmap.close()
-            for (const slice of slices) {
-              const res = processAndEncode(slice.canvas, options, pageImages.length < 10)
+        const CONCURRENCY = 6;
+        for (let i = 0; i < imageFiles.length; i += CONCURRENCY) {
+          const batch = imageFiles.slice(i, i + CONCURRENCY);
+          const tasks = batch.map(async (file, batchIdx) => {
+            const globalIdx = i + batchIdx;
+            const result = await processImageAsBinary(file.data, globalIdx + 1, options, pageImages.length < 10);
+            return { globalIdx, result };
+          });
+
+          const batchResults = await Promise.all(tasks);
+          batchResults.sort((a, b) => a.globalIdx - b.globalIdx);
+
+          for (const item of batchResults) {
+            for (const res of item.result.results) {
               pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
               if (pageImages.length < 10) pageImages.push(res.preview)
             }
-            mappingCtx.addOriginalPage(i + 1, slices.length)
-            onProgress((i + 1) / imageFiles.length, null)
+            mappingCtx.addOriginalPage(item.globalIdx + 1, item.result.results.length)
           }
-        } else {
-          const CONCURRENCY = 4;
-          for (let i = 0; i < imageFiles.length; i += CONCURRENCY) {
-            const batch = imageFiles.slice(i, i + CONCURRENCY);
-            const tasks = batch.map(async (file, batchIdx) => {
-              const globalIdx = i + batchIdx;
-              const blob = new Blob([new Uint8Array(file.data)])
-              const result = await processImageAsBinary(blob, globalIdx + 1, options, pageImages.length < 10);
-              return { globalIdx, result };
-            });
-  
-            const batchResults = await Promise.all(tasks);
-            batchResults.sort((a, b) => a.globalIdx - b.globalIdx);
-  
-            for (const item of batchResults) {
-              for (const res of item.result.results) {
-                pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
-                if (pageImages.length < 10) pageImages.push(res.preview)
-              }
-              mappingCtx.addOriginalPage(item.globalIdx + 1, item.result.results.length)
-            }
-            onProgress(Math.min(1, (i + CONCURRENCY) / imageFiles.length), null)
-          }
-        }    if (stitcher) {
+          onProgress(Math.min(1, (i + CONCURRENCY) / imageFiles.length), null)
+        }
+      }    if (stitcher) {
       for (const p of stitcher.finish()) {
         const res = await processAndEncode(p.canvas, options, pageImages.length < 10)
         pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
@@ -623,43 +636,85 @@ async function convertPdfToXtc(
     const fileStream = streamSaver.createWriteStream(outputFileName, { size: totalSize }); const writer = fileStream.getWriter()
     await writer.write(headerAndIndex)
     
-    for (let i = 1; i <= numPages; i++) {
-      const page = await pdf.getPage(i); const scale = 2.0; const viewport = page.getViewport({ scale })
-      const canvas = sharedCanvasPool.acquire(viewport.width, viewport.height)
-      await page.render({ canvasContext: canvas.getContext('2d')!, viewport, background: 'rgb(255,255,255)' }).promise
-      const xtcPages = await processCanvasAsImage(canvas, i, options, pageImages.length < 10)
-      sharedCanvasPool.release(canvas)
-      for (const res of xtcPages) {
-        await writer.write(new Uint8Array(res.buffer))
-        if (pageImages.length < 10) pageImages.push(res.preview)
+    const CONCURRENCY = 4;
+    for (let i = 1; i <= numPages; i += CONCURRENCY) {
+      const tasks = [];
+      for (let j = 0; j < CONCURRENCY && (i + j) <= numPages; j++) {
+        const pageNum = i + j;
+        tasks.push((async () => {
+          const page = await pdf.getPage(pageNum);
+          const scale = 2.0;
+          const viewport = page.getViewport({ scale });
+          const canvas = sharedCanvasPool.acquire(viewport.width, viewport.height);
+          await page.render({ canvasContext: canvas.getContext('2d')!, viewport, background: 'rgb(255,255,255)' }).promise;
+          const results = processCanvasAsImage(canvas, pageNum, options, pageImages.length < 10);
+          sharedCanvasPool.release(canvas);
+          return { pageNum, results };
+        })());
       }
-      onProgress(0.05 + i / numPages * 0.95, null)
+
+      const batchResults = await Promise.all(tasks);
+      batchResults.sort((a, b) => a.pageNum - b.pageNum);
+
+      for (const item of batchResults) {
+        for (const res of item.results) {
+          await writer.write(new Uint8Array(res.buffer))
+          if (pageImages.length < 10) pageImages.push(res.preview)
+        }
+      }
+      onProgress(0.05 + Math.min(1, (i + CONCURRENCY - 1) / numPages) * 0.95, null)
     }
     await writer.close(); URL.revokeObjectURL(url)
     return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages, size: totalSize }
   } else {
     const pageBlobs: Blob[] = []; const pageInfos: StreamPageInfo[] = []
     let stitcher = options.manhwa ? new ManhwaStitcher(options) : null
-    for (let i = 1; i <= numPages; i++) {
-      const page = await pdf.getPage(i); const scale = 2.0; const viewport = page.getViewport({ scale })
-      const canvas = sharedCanvasPool.acquire(viewport.width, viewport.height)
-      await page.render({ canvasContext: canvas.getContext('2d')!, viewport, background: 'rgb(255,255,255)' }).promise
-      let currentResults: { buffer: ArrayBuffer, preview: string }[] = []
-      if (stitcher) {
+    
+    if (stitcher) {
+      for (let i = 1; i <= numPages; i++) {
+        const page = await pdf.getPage(i); const scale = 2.0; const viewport = page.getViewport({ scale })
+        const canvas = sharedCanvasPool.acquire(viewport.width, viewport.height)
+        await page.render({ canvasContext: canvas.getContext('2d')!, viewport, background: 'rgb(255,255,255)' }).promise
         const slices = await stitcher.append(canvas)
+        sharedCanvasPool.release(canvas)
         for (const slice of slices) {
-          currentResults.push(await processAndEncode(slice.canvas, options, pageImages.length < 10))
+          const res = processAndEncode(slice.canvas, options, pageImages.length < 10)
+          pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
+          if (pageImages.length < 10) pageImages.push(res.preview)
         }
-      } else {
-        currentResults = await processCanvasAsImage(canvas, i, options, pageImages.length < 10)
+        mappingCtx.addOriginalPage(i, slices.length)
+        onProgress(i / numPages, null)
       }
-      sharedCanvasPool.release(canvas)
-      for (const res of currentResults) {
-        pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
-        if (pageImages.length < 10) pageImages.push(res.preview)
+    } else {
+      const CONCURRENCY = 4; // PDF rendering is memory heavy, keep concurrency lower than images
+      for (let i = 1; i <= numPages; i += CONCURRENCY) {
+        const tasks = [];
+        for (let j = 0; j < CONCURRENCY && (i + j) <= numPages; j++) {
+          const pageNum = i + j;
+          tasks.push((async () => {
+            const page = await pdf.getPage(pageNum);
+            const scale = 2.0;
+            const viewport = page.getViewport({ scale });
+            const canvas = sharedCanvasPool.acquire(viewport.width, viewport.height);
+            await page.render({ canvasContext: canvas.getContext('2d')!, viewport, background: 'rgb(255,255,255)' }).promise;
+            const results = processCanvasAsImage(canvas, pageNum, options, pageImages.length < 10);
+            sharedCanvasPool.release(canvas);
+            return { pageNum, results };
+          })());
+        }
+
+        const batchResults = await Promise.all(tasks);
+        batchResults.sort((a, b) => a.pageNum - b.pageNum);
+
+        for (const item of batchResults) {
+          for (const res of item.results) {
+            pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
+            if (pageImages.length < 10) pageImages.push(res.preview)
+          }
+          mappingCtx.addOriginalPage(item.pageNum, item.results.length)
+        }
+        onProgress(Math.min(1, (i + CONCURRENCY - 1) / numPages), null)
       }
-      mappingCtx.addOriginalPage(i, currentResults.length)
-      onProgress(i / numPages, null)
     }
     if (stitcher) {
       for (const p of stitcher.finish()) {
@@ -705,14 +760,26 @@ async function convertVideoToXtc(file: File, options: ConversionOptions, onProgr
   const pageBuffers: ArrayBuffer[] = []; const pageInfos: StreamPageInfo[] = []; const pageImages: string[] = []
   const dims = getTargetDimensions(options)
   
-  for (let i = 0; i < frames.length; i++) {
-    let canvas = frames[i]; const angle = getOrientationAngle(options.orientation)
-    if (angle !== 0 && (angle === 180 || canvas.width >= canvas.height)) canvas = rotateCanvas(canvas, angle)
-    const finalCanvas = resizeWithPadding(canvas, 0, dims.width, dims.height)
-    const res = await processAndEncode(finalCanvas, options, pageImages.length < 10)
-    pageBuffers.push(res.buffer); pageInfos.push({ width: dims.width, height: dims.height })
-    if (pageImages.length < 10) pageImages.push(res.preview)
-    if (i % 5 === 0) onProgress((i + 1) / frames.length, null)
+  const CONCURRENCY = 6;
+  for (let i = 0; i < frames.length; i += CONCURRENCY) {
+    const batch = frames.slice(i, i + CONCURRENCY);
+    const results = batch.map((frameCanvas, batchIdx) => {
+      let canvas = frameCanvas; const angle = getOrientationAngle(options.orientation)
+      if (angle !== 0 && (angle === 180 || canvas.width >= canvas.height)) canvas = rotateCanvas(canvas, angle)
+      const finalCanvas = resizeWithPadding(canvas, 0, dims.width, dims.height)
+      const res = processAndEncode(finalCanvas, options, pageImages.length < 10)
+      
+      // Cleanup intermediate frames if they are copies
+      if (canvas !== frameCanvas) sharedCanvasPool.release(canvas)
+      sharedCanvasPool.release(finalCanvas)
+      return res;
+    });
+
+    for (const res of results) {
+      pageBuffers.push(res.buffer); pageInfos.push({ width: dims.width, height: dims.height })
+      if (pageImages.length < 10) pageImages.push(res.preview)
+    }
+    onProgress(Math.min(1, (i + CONCURRENCY) / frames.length), null)
   }
   const outputFileName = file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xtch' : '.xtc')
   if (options.streamedDownload) {
@@ -850,9 +917,10 @@ function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: number, 
   return results
 }
 
-async function processImageAsBinary(imgBlob: Blob, pageNum: number, options: ConversionOptions, generatePreview: boolean = true): Promise<{ results: { buffer: ArrayBuffer, preview: string }[] }> {
+async function processImageAsBinary(imgData: Uint8Array, pageNum: number, options: ConversionOptions, generatePreview: boolean = true): Promise<{ results: { buffer: ArrayBuffer, preview: string }[] }> {
   try {
-    const bitmap = await createImageBitmap(imgBlob, {
+    const blob = new Blob([imgData]);
+    const bitmap = await createImageBitmap(blob, {
       premultiplyAlpha: 'none',
       colorSpaceConversion: 'none'
     });
