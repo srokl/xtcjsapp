@@ -149,3 +149,22 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Chapter item animations */
+@keyframes moveUpAnim {
+  0% { transform: translateY(100%); z-index: 10; position: relative; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+  100% { transform: translateY(0); z-index: 10; position: relative; box-shadow: 0 0 0 rgba(0,0,0,0); }
+}
+
+@keyframes moveDownAnim {
+  0% { transform: translateY(-100%); z-index: 10; position: relative; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+  100% { transform: translateY(0); z-index: 10; position: relative; box-shadow: 0 0 0 rgba(0,0,0,0); }
+}
+
+.animate-move-up {
+  animation: moveUpAnim 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+.animate-move-down {
+  animation: moveDownAnim 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}

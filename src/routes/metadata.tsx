@@ -35,6 +35,15 @@ function MetadataEditor() {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
 
+  // Pagination and animation state
+  const [currentPage, setCurrentPage] = useState(1)
+  const [animatingIndex, setAnimatingIndex] = useState<{ idx: number, dir: 'up' | 'down' } | null>(null)
+  const itemsPerPage = 10
+  
+  // Safe calculated pagination
+  const totalPages = Math.max(1, Math.ceil(metadata.toc.length / itemsPerPage))
+  const safeCurrentPage = Math.min(currentPage, totalPages)
+
   const handleFileDrop = async (files: File[]) => {
     if (files.length === 0) return
     const selected = files[0]
@@ -156,6 +165,9 @@ function MetadataEditor() {
       ...prev,
       toc: [...prev.toc, { title: 'New Chapter', startPage: 1, endPage: parsed?.header.pageCount || 1 }]
     }))
+    // Jump to last page when adding
+    const newTotalPages = Math.max(1, Math.ceil((metadata.toc.length + 1) / itemsPerPage))
+    setCurrentPage(newTotalPages)
   }
 
   const handleRemoveChapter = (index: number) => {
@@ -178,14 +190,24 @@ function MetadataEditor() {
     if (direction === 'up' && index === 0) return;
     if (direction === 'down' && index === metadata.toc.length - 1) return;
 
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+
     setMetadata(prev => {
       const newToc = [...prev.toc];
-      const targetIndex = direction === 'up' ? index - 1 : index + 1;
       const temp = newToc[index];
       newToc[index] = newToc[targetIndex];
       newToc[targetIndex] = temp;
       return { ...prev, toc: newToc };
     });
+
+    setAnimatingIndex({ idx: targetIndex, dir: direction });
+
+    const newPage = Math.floor(targetIndex / itemsPerPage) + 1;
+    if (newPage !== safeCurrentPage) {
+      setCurrentPage(newPage);
+    }
+
+    setTimeout(() => setAnimatingIndex(null), 350);
   }
 
   return (
@@ -288,78 +310,139 @@ function MetadataEditor() {
               <div style={{ background: 'var(--paper-dark)', padding: 'var(--space-lg)', border: 'var(--border)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-md)' }}>
                   <h3>Chapters (TOC)</h3>
-                  <button className="btn-preview" onClick={handleAddChapter} style={{ padding: 'var(--space-xs) var(--space-sm)' }}>+ Add Chapter</button>
+                  <div style={{ display: 'flex', gap: 'var(--space-sm)', alignItems: 'center' }}>
+                    {totalPages > 1 && (
+                      <div style={{ display: 'flex', gap: 'var(--space-xs)', alignItems: 'center', marginRight: 'var(--space-md)' }}>
+                        <button 
+                          onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                          disabled={safeCurrentPage === 1}
+                          style={{ padding: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border-light)', cursor: safeCurrentPage === 1 ? 'not-allowed' : 'pointer', opacity: safeCurrentPage === 1 ? 0.5 : 1 }}
+                        >
+                          &lt;
+                        </button>
+                        <span style={{ fontSize: '0.8rem', fontFamily: 'var(--font-mono)' }}>{safeCurrentPage} / {totalPages}</span>
+                        <button 
+                          onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                          disabled={safeCurrentPage === totalPages}
+                          style={{ padding: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border-light)', cursor: safeCurrentPage === totalPages ? 'not-allowed' : 'pointer', opacity: safeCurrentPage === totalPages ? 0.5 : 1 }}
+                        >
+                          &gt;
+                        </button>
+                      </div>
+                    )}
+                    <button className="btn-preview" onClick={handleAddChapter} style={{ padding: 'var(--space-xs) var(--space-sm)' }}>+ Add Chapter</button>
+                  </div>
                 </div>
                 
                 {metadata.toc.length === 0 ? (
                   <p style={{ color: 'var(--ink-faded)', fontStyle: 'italic' }}>No chapters defined.</p>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
-                    {metadata.toc.map((entry, idx) => (
-                      <div key={idx} style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-sm)', alignItems: 'flex-start', background: 'var(--paper)', padding: 'var(--space-md)', border: 'var(--border-light)' }}>
-                        <div style={{ flex: '1 1 200px' }}>
-                          <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Chapter Title (max 79 chars)</label>
-                          <input 
-                            type="text" 
-                            value={entry.title} 
-                            onChange={e => handleChapterChange(idx, 'title', e.target.value)}
-                            style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border-light)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
-                            maxLength={79}
-                          />
+                    {metadata.toc.slice((safeCurrentPage - 1) * itemsPerPage, safeCurrentPage * itemsPerPage).map((entry, sliceIdx) => {
+                      const idx = (safeCurrentPage - 1) * itemsPerPage + sliceIdx;
+                      const isAnimating = animatingIndex?.idx === idx;
+                      const animClass = isAnimating ? (animatingIndex.dir === 'up' ? 'animate-move-up' : 'animate-move-down') : '';
+                      return (
+                        <div key={idx} className={animClass} style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-sm)', alignItems: 'flex-start', background: 'var(--paper)', padding: 'var(--space-md)', border: 'var(--border-light)' }}>
+                          <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '30px', marginTop: '22px', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', fontWeight: 600, color: 'var(--ink-faded)' }}>
+                            #{idx + 1}
+                          </div>
+                          <div style={{ flex: '1 1 160px' }}>
+                            <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Chapter Title (max 79 chars)</label>
+                            <input 
+                              type="text" 
+                              value={entry.title} 
+                              onChange={e => handleChapterChange(idx, 'title', e.target.value)}
+                              style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border-light)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
+                              maxLength={79}
+                            />
+                          </div>
+                          <div style={{ width: '80px', flex: '0 0 auto' }}>
+                            <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Start Pg</label>
+                            <input 
+                              type="number" 
+                              min={1} 
+                              max={parsed.header.pageCount}
+                              value={entry.startPage} 
+                              onChange={e => handleChapterChange(idx, 'startPage', parseInt(e.target.value) || 1)}
+                              style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border-light)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
+                            />
+                          </div>
+                          <div style={{ width: '80px', flex: '0 0 auto' }}>
+                            <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>End Pg</label>
+                            <input 
+                              type="number" 
+                              min={1} 
+                              max={parsed.header.pageCount}
+                              value={entry.endPage} 
+                              onChange={e => handleChapterChange(idx, 'endPage', parseInt(e.target.value) || 1)}
+                              style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border-light)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
+                            />
+                          </div>
+                          <div style={{ display: 'flex', gap: 'var(--space-xs)', marginTop: '22px' }}>
+                            <button 
+                              onClick={() => handleMoveChapter(idx, 'up')}
+                              disabled={idx === 0}
+                              style={{ padding: 'var(--space-xs)', background: 'var(--paper-dark)', color: 'var(--ink)', border: 'var(--border-light)', cursor: idx === 0 ? 'not-allowed' : 'pointer', opacity: idx === 0 ? 0.5 : 1 }}
+                              aria-label="Move Up"
+                              title="Move Up"
+                            >
+                              ↑
+                            </button>
+                            <button 
+                              onClick={() => handleMoveChapter(idx, 'down')}
+                              disabled={idx === metadata.toc.length - 1}
+                              style={{ padding: 'var(--space-xs)', background: 'var(--paper-dark)', color: 'var(--ink)', border: 'var(--border-light)', cursor: idx === metadata.toc.length - 1 ? 'not-allowed' : 'pointer', opacity: idx === metadata.toc.length - 1 ? 0.5 : 1 }}
+                              aria-label="Move Down"
+                              title="Move Down"
+                            >
+                              ↓
+                            </button>
+                            <button 
+                              onClick={() => handleRemoveChapter(idx)}
+                              style={{ padding: 'var(--space-xs) var(--space-sm)', background: 'var(--accent)', color: 'white', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '0.8rem', fontWeight: 500 }}
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </div>
-                        <div style={{ width: '80px', flex: '0 0 auto' }}>
-                          <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Start Pg</label>
-                          <input 
-                            type="number" 
-                            min={1} 
-                            max={parsed.header.pageCount}
-                            value={entry.startPage} 
-                            onChange={e => handleChapterChange(idx, 'startPage', parseInt(e.target.value) || 1)}
-                            style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border-light)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
-                          />
-                        </div>
-                        <div style={{ width: '80px', flex: '0 0 auto' }}>
-                          <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>End Pg</label>
-                          <input 
-                            type="number" 
-                            min={1} 
-                            max={parsed.header.pageCount}
-                            value={entry.endPage} 
-                            onChange={e => handleChapterChange(idx, 'endPage', parseInt(e.target.value) || 1)}
-                            style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border-light)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
-                          />
-                        </div>
-                        <div style={{ display: 'flex', gap: 'var(--space-xs)', marginTop: '22px' }}>
-                          <button 
-                            onClick={() => handleMoveChapter(idx, 'up')}
-                            disabled={idx === 0}
-                            style={{ padding: 'var(--space-xs)', background: 'var(--paper-dark)', color: 'var(--ink)', border: 'var(--border-light)', cursor: idx === 0 ? 'not-allowed' : 'pointer', opacity: idx === 0 ? 0.5 : 1 }}
-                            aria-label="Move Up"
-                            title="Move Up"
-                          >
-                            ↑
-                          </button>
-                          <button 
-                            onClick={() => handleMoveChapter(idx, 'down')}
-                            disabled={idx === metadata.toc.length - 1}
-                            style={{ padding: 'var(--space-xs)', background: 'var(--paper-dark)', color: 'var(--ink)', border: 'var(--border-light)', cursor: idx === metadata.toc.length - 1 ? 'not-allowed' : 'pointer', opacity: idx === metadata.toc.length - 1 ? 0.5 : 1 }}
-                            aria-label="Move Down"
-                            title="Move Down"
-                          >
-                            ↓
-                          </button>
-                          <button 
-                            onClick={() => handleRemoveChapter(idx)}
-                            style={{ padding: 'var(--space-xs) var(--space-sm)', background: 'var(--accent)', color: 'white', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '0.8rem', fontWeight: 500 }}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                     
-                    <div style={{ marginTop: 'var(--space-md)', textAlign: 'center' }}>
-                      <button className="btn-preview" onClick={handleAddChapter} style={{ padding: 'var(--space-sm) var(--space-md)', width: '100%' }}>+ Add Chapter</button>
+                    <div style={{ marginTop: 'var(--space-md)', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 'var(--space-md)' }}>
+                      {totalPages > 1 && (
+                        <div style={{ display: 'flex', gap: 'var(--space-xs)' }}>
+                          <button 
+                            onClick={() => setCurrentPage(1)}
+                            disabled={safeCurrentPage === 1}
+                            style={{ padding: 'var(--space-xs) var(--space-sm)', background: 'var(--paper)', border: 'var(--border-light)', cursor: safeCurrentPage === 1 ? 'not-allowed' : 'pointer', opacity: safeCurrentPage === 1 ? 0.5 : 1 }}
+                          >
+                            &lt;&lt;
+                          </button>
+                          <button 
+                            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                            disabled={safeCurrentPage === 1}
+                            style={{ padding: 'var(--space-xs) var(--space-sm)', background: 'var(--paper)', border: 'var(--border-light)', cursor: safeCurrentPage === 1 ? 'not-allowed' : 'pointer', opacity: safeCurrentPage === 1 ? 0.5 : 1 }}
+                          >
+                            &lt;
+                          </button>
+                          <span style={{ padding: 'var(--space-xs) var(--space-sm)', fontFamily: 'var(--font-mono)' }}>Page {safeCurrentPage} of {totalPages}</span>
+                          <button 
+                            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                            disabled={safeCurrentPage === totalPages}
+                            style={{ padding: 'var(--space-xs) var(--space-sm)', background: 'var(--paper)', border: 'var(--border-light)', cursor: safeCurrentPage === totalPages ? 'not-allowed' : 'pointer', opacity: safeCurrentPage === totalPages ? 0.5 : 1 }}
+                          >
+                            &gt;
+                          </button>
+                          <button 
+                            onClick={() => setCurrentPage(totalPages)}
+                            disabled={safeCurrentPage === totalPages}
+                            style={{ padding: 'var(--space-xs) var(--space-sm)', background: 'var(--paper)', border: 'var(--border-light)', cursor: safeCurrentPage === totalPages ? 'not-allowed' : 'pointer', opacity: safeCurrentPage === totalPages ? 0.5 : 1 }}
+                          >
+                            &gt;&gt;
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
