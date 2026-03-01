@@ -263,6 +263,7 @@ body {
 .section-header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-sm);
   margin-bottom: var(--space-md);
 }

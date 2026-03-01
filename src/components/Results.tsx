@@ -29,7 +29,7 @@ export function Results({ results, onDownload, onPreview, onClear }: ResultsProp
             key={result.id}
             className={`result-item${result.error ? ' error' : ''}`}
           >
-            <div>
+            <div className="result-info">
               <span className="name">{result.name}</span>
               {result.error ? (
                 <div className="info">Error: {result.error}</div>
