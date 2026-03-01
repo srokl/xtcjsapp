@@ -132,8 +132,8 @@ function applyThreshold(data: Uint8ClampedArray, is2bit: boolean): void {
     let val = data[i];
     if (is2bit) {
       if (val < 42) val = 0;
-      else if (val < 127) val = 1;
-      else if (val < 212) val = 2;
+      else if (val < 127) val = 85;
+      else if (val < 212) val = 170;
       else val = 255;
     } else {
       val = val < 128 ? 0 : 255;
