@@ -157,6 +157,71 @@ export function runWasmPack(imageData: ImageData, is2bit: boolean): Uint8Array {
   return memArray.slice(outputPtr, outputPtr + outputSize);
 }
 
+/**
+ * Unified pipeline: Filter -> Dither -> Pack
+ * Minimizes JS <-> Wasm memory copying.
+ */
+export function runWasmPipeline(
+  imageData: ImageData, 
+  options: { contrast: number, gamma: number, invert: boolean, algorithm: string, is2bit: boolean }
+): Uint8Array {
+  if (!wasmInstance) throw new Error('Wasm not initialized');
+
+  const { width, height, data } = imageData;
+  const inputSize = width * height * 4;
+  const scratchSize = width * height * 4;
+  
+  // Calculate output size
+  let outputSize = 0;
+  if (options.is2bit) {
+    const colBytes = (height + 7) >>> 3;
+    outputSize = colBytes * width * 2;
+  } else {
+    const rowBytes = (width + 7) >>> 3;
+    outputSize = rowBytes * height;
+  }
+
+  const heapBase = (wasmInstance.exports.__heap_base as WebAssembly.Global)?.value ?? 65536;
+  const inputPtr = heapBase;
+  const scratchPtr = inputPtr + inputSize;
+  const outputPtr = scratchPtr + scratchSize;
+
+  ensureMemory(outputPtr + outputSize);
+
+  const memArray = new Uint8Array(wasmMemory.buffer);
+  memArray.set(data, inputPtr);
+
+  const exports = wasmInstance.exports as any;
+
+  // 1. Filter
+  exports.applyFilters(width, height, inputPtr, options.contrast, options.gamma, options.invert ? 1 : 0);
+
+  // 2. Dither
+  if (options.algorithm !== 'none') {
+    switch (options.algorithm) {
+      case 'floyd': exports.ditherFloyd(width, height, inputPtr, scratchPtr, options.is2bit); break;
+      case 'atkinson': exports.ditherAtkinson(width, height, inputPtr, scratchPtr, options.is2bit); break;
+      case 'ostromoukhov': exports.ditherOstromoukhov(width, height, inputPtr, scratchPtr, options.is2bit); break;
+      case 'zhoufang': exports.ditherZhouFang(width, height, inputPtr, scratchPtr, options.is2bit); break;
+      case 'sierra-lite': exports.ditherSierraLite(width, height, inputPtr, scratchPtr, options.is2bit); break;
+      case 'ordered': exports.ditherOrdered(width, height, inputPtr, options.is2bit); break;
+      case 'stochastic': exports.ditherStochastic(width, height, inputPtr, scratchPtr, options.is2bit); break;
+      case 'stucki': 
+      default: exports.ditherStucki(width, height, inputPtr, scratchPtr, options.is2bit); break;
+    }
+  }
+
+  // 3. Pack
+  memArray.fill(0, outputPtr, outputPtr + outputSize);
+  if (options.is2bit) {
+    exports.packXth(width, height, inputPtr, outputPtr);
+  } else {
+    exports.packXtc(width, height, inputPtr, outputPtr);
+  }
+
+  return memArray.slice(outputPtr, outputPtr + outputSize);
+}
+
 export function runWasmResize(
   source: ImageData,
   targetWidth: number,

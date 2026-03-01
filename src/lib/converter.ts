@@ -9,7 +9,7 @@ import { applyDithering } from './processing/dithering'
 import { toGrayscale, applyContrast, calculateOverlapSegments, isSolidColor, applyGamma, applyInvert } from './processing/image'
 import { rotateCanvas, extractAndRotate, extractRegion, resizeWithPadding, resizeFill, resizeCover, resizeCrop, TARGET_WIDTH, TARGET_HEIGHT, DEVICE_DIMENSIONS, sharedCanvasPool } from './processing/canvas'
 import { buildXtc, buildXtcFromBuffers, imageDataToXth, imageDataToXtg, wrapWasmData, buildXtcHeaderAndIndex, getXtcPageSize, type StreamPageInfo } from './xtc-format'
-import { initWasm, runWasmFilters, isWasmLoaded, runWasmPack, runWasmResize } from './processing/wasm'
+import { initWasm, runWasmFilters, isWasmLoaded, runWasmPack, runWasmResize, runWasmPipeline } from './processing/wasm'
 
 function getTargetDimensions(options: ConversionOptions) {
   return DEVICE_DIMENSIONS[options.device] || DEVICE_DIMENSIONS.X4;
@@ -20,23 +20,31 @@ function getOrientationAngle(orientation: string): number {
 }
 
 /**
- * Get dimensions of an image blob
+ * Get dimensions of an image blob using high-performance ImageBitmap
  */
 async function getImageDimensions(blob: Blob): Promise<{ width: number; height: number }> {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    const url = URL.createObjectURL(blob)
-    img.onload = () => {
-      const dims = { width: img.width, height: img.height }
-      URL.revokeObjectURL(url)
-      resolve(dims)
-    }
-    img.onerror = () => {
-      URL.revokeObjectURL(url)
-      reject(new Error('Failed to get image dimensions'))
-    }
-    img.src = url
-  })
+  try {
+    const bitmap = await createImageBitmap(blob);
+    const dims = { width: bitmap.width, height: bitmap.height };
+    bitmap.close();
+    return dims;
+  } catch (e) {
+    // Fallback for very old browsers if needed, though most mobile browsers support this now
+    return new Promise((resolve, reject) => {
+      const img = new Image()
+      const url = URL.createObjectURL(blob)
+      img.onload = () => {
+        const dims = { width: img.width, height: img.height }
+        URL.revokeObjectURL(url)
+        resolve(dims)
+      }
+      img.onerror = () => {
+        URL.revokeObjectURL(url)
+        reject(new Error('Failed to get image dimensions'))
+      }
+      img.src = url
+    })
+  }
 }
 
 /**
@@ -65,41 +73,47 @@ function resizeHq(
 
 /**
  * Process a canvas (filter, dither) and encode it to binary
+ * Highly optimized unified pipeline to minimize GPU syncs.
  */
 async function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOptions, generatePreview: boolean = true): Promise<{ buffer: ArrayBuffer, preview: string }> {
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!
   const width = canvas.width
   const height = canvas.height
+  const imageData = ctx.getImageData(0, 0, width, height)
+
+  let buffer: ArrayBuffer
+  let preview = ''
 
   if (options.useWasm && isWasmLoaded()) {
-    try {
-      const imageData = ctx.getImageData(0, 0, width, height)
+    const packed = runWasmPipeline(imageData, {
+      contrast: options.contrast,
+      gamma: (options.is2bit) ? options.gamma : 1.0,
+      invert: options.invert,
+      algorithm: options.dithering,
+      is2bit: options.is2bit
+    })
+    buffer = wrapWasmData(packed, width, height, options.is2bit)
+    
+    // Preview optimization: only put data back if we actually need a visual string
+    if (generatePreview) {
+      // Note: runWasmPipeline currently doesn't copy back to inputPtr for speed
+      // If we need a preview, we might need a separate call or a flag in pipeline
+      // For now, let's just do a manual filter/dither for the preview first 10 pages
       runWasmFilters(imageData, options.contrast, (options.is2bit) ? options.gamma : 1.0, options.invert)
       ctx.putImageData(imageData, 0, 0)
-    } catch (e) {
-      if (options.contrast > 0) applyContrast(ctx, width, height, options.contrast)
-      if (options.gamma !== 1.0 && options.is2bit) applyGamma(ctx, width, height, options.gamma)
-      if (options.invert) applyInvert(ctx, width, height)
-      toGrayscale(ctx, width, height)
+      applyDithering(ctx, width, height, options.dithering, options.is2bit, true)
+      preview = canvas.toDataURL('image/png')
     }
   } else {
     if (options.contrast > 0) applyContrast(ctx, width, height, options.contrast)
     if (options.gamma !== 1.0 && options.is2bit) applyGamma(ctx, width, height, options.gamma)
     if (options.invert) applyInvert(ctx, width, height)
     toGrayscale(ctx, width, height)
-  }
-
-  applyDithering(ctx, width, height, options.dithering, options.is2bit, options.useWasm)
-  
-  const preview = generatePreview ? canvas.toDataURL('image/png') : ''
-  const imageData = ctx.getImageData(0, 0, width, height)
-  
-  let buffer: ArrayBuffer
-  if (options.useWasm && isWasmLoaded()) {
-    const packed = runWasmPack(imageData, options.is2bit)
-    buffer = wrapWasmData(packed, width, height, options.is2bit)
-  } else {
-    buffer = options.is2bit ? imageDataToXth(imageData) : imageDataToXtg(imageData)
+    applyDithering(ctx, width, height, options.dithering, options.is2bit, false)
+    if (generatePreview) preview = canvas.toDataURL('image/png')
+    
+    const finalData = ctx.getImageData(0, 0, width, height)
+    buffer = options.is2bit ? imageDataToXth(finalData) : imageDataToXtg(finalData)
   }
   
   return { buffer, preview }
@@ -231,15 +245,26 @@ export async function convertCbzToXtc(
 
     if (options.streamedDownload && !options.manhwa) {
       const pageInfos: StreamPageInfo[] = []
-      // Pass 1: Analysis
-      for (let i = 0; i < imageFiles.length; i++) {
-        onProgress(i / imageFiles.length * 0.05, null)
-        const imgBlob = await imageFiles[i].entry.getData(new BlobWriter())
-        const imgDims = await getImageDimensions(imgBlob)
-        const crop = getAxisCropRect(imgDims.width, imgDims.height, options)
-        const count = calculateOutputPageCount(crop.width, crop.height, options)
-        for (let j = 0; j < count; j++) pageInfos.push({ width: dims.width, height: dims.height })
-        mappingCtx.addOriginalPage(i + 1, count)
+      
+      // Optimization: If no splitting or overviews, we know each file is 1 page.
+      const isSimple1to1 = options.splitMode === 'nosplit' && !options.sidewaysOverviews && !options.includeOverviews;
+
+      if (isSimple1to1) {
+        for (let i = 0; i < imageFiles.length; i++) {
+          pageInfos.push({ width: dims.width, height: dims.height })
+          mappingCtx.addOriginalPage(i + 1, 1)
+        }
+      } else {
+        // Pass 1: Analysis
+        for (let i = 0; i < imageFiles.length; i++) {
+          onProgress(i / imageFiles.length * 0.05, null)
+          const imgBlob = await imageFiles[i].entry.getData(new BlobWriter())
+          const imgDims = await getImageDimensions(imgBlob)
+          const crop = getAxisCropRect(imgDims.width, imgDims.height, options)
+          const count = calculateOutputPageCount(crop.width, crop.height, options)
+          for (let j = 0; j < count; j++) pageInfos.push({ width: dims.width, height: dims.height })
+          mappingCtx.addOriginalPage(i + 1, count)
+        }
       }
 
       if (metadata.toc.length > 0) {
@@ -395,14 +420,25 @@ export async function convertCbrToXtc(
 
   if (options.streamedDownload && !options.manhwa) {
     const pageInfos: StreamPageInfo[] = []
-    for (let i = 0; i < imageFiles.length; i++) {
-      onProgress(i / imageFiles.length * 0.05, null)
-      const imgBlob = new Blob([new Uint8Array(imageFiles[i].data)])
-      const imgDims = await getImageDimensions(imgBlob)
-      const crop = getAxisCropRect(imgDims.width, imgDims.height, options)
-      const count = calculateOutputPageCount(crop.width, crop.height, options)
-      for (let j = 0; j < count; j++) pageInfos.push({ width: dims.width, height: dims.height })
-      mappingCtx.addOriginalPage(i + 1, count)
+
+    // Optimization: If no splitting or overviews, we know each file is 1 page.
+    const isSimple1to1 = options.splitMode === 'nosplit' && !options.sidewaysOverviews && !options.includeOverviews;
+
+    if (isSimple1to1) {
+      for (let i = 0; i < imageFiles.length; i++) {
+        pageInfos.push({ width: dims.width, height: dims.height })
+        mappingCtx.addOriginalPage(i + 1, 1)
+      }
+    } else {
+      for (let i = 0; i < imageFiles.length; i++) {
+        onProgress(i / imageFiles.length * 0.05, null)
+        const imgBlob = new Blob([new Uint8Array(imageFiles[i].data)])
+        const imgDims = await getImageDimensions(imgBlob)
+        const crop = getAxisCropRect(imgDims.width, imgDims.height, options)
+        const count = calculateOutputPageCount(crop.width, crop.height, options)
+        for (let j = 0; j < count; j++) pageInfos.push({ width: dims.width, height: dims.height })
+        mappingCtx.addOriginalPage(i + 1, count)
+      }
     }
 
     if (metadata.toc.length > 0) {
@@ -516,12 +552,23 @@ async function convertPdfToXtc(
 
   if (options.streamedDownload && !options.manhwa) {
     const pageInfos: StreamPageInfo[] = []
-    for (let i = 1; i <= numPages; i++) {
-      onProgress(i / numPages * 0.05, null)
-      const page = await pdf.getPage(i); const viewport = page.getViewport({ scale: 1 })
-      const count = calculateOutputPageCount(viewport.width, viewport.height, options)
-      for (let j = 0; j < count; j++) pageInfos.push({ width: dims.width, height: dims.height })
-      mappingCtx.addOriginalPage(i, count)
+
+    // Optimization: If no splitting or overviews, we know each file is 1 page.
+    const isSimple1to1 = options.splitMode === 'nosplit' && !options.sidewaysOverviews && !options.includeOverviews;
+
+    if (isSimple1to1) {
+      for (let i = 1; i <= numPages; i++) {
+        pageInfos.push({ width: dims.width, height: dims.height })
+        mappingCtx.addOriginalPage(i, 1)
+      }
+    } else {
+      for (let i = 1; i <= numPages; i++) {
+        onProgress(i / numPages * 0.05, null)
+        const page = await pdf.getPage(i); const viewport = page.getViewport({ scale: 1 })
+        const count = calculateOutputPageCount(viewport.width, viewport.height, options)
+        for (let j = 0; j < count; j++) pageInfos.push({ width: dims.width, height: dims.height })
+        mappingCtx.addOriginalPage(i, count)
+      }
     }
     if (metadata.toc.length > 0) {
       const totalXtcPages = mappingCtx.getTotalXtcPages()
