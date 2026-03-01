@@ -1,6 +1,9 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useState } from 'react'
 import streamSaver from 'streamsaver'
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { Dropzone } from '../components/Dropzone'
 import { Viewer } from '../components/Viewer'
 import { parseXtcFile, type ParsedXtc, extractXtcPages, decodeXtcPageToCanvas } from '../lib/xtc-reader'
@@ -25,6 +28,113 @@ const LANGUAGES = [
   { code: 'pt', name: 'Portuguese' },
 ]
 
+function SortableChapterItem({ 
+  id, entry, idx, parsed, metadata, 
+  handleChapterChange, handleMoveChapter, handleRemoveChapter, 
+  animClass 
+}: any) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    ...(transform ? { zIndex: 10, position: 'relative' as const, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' } : {})
+  };
+
+  return (
+    <div 
+      ref={setNodeRef} 
+      style={style} 
+      className={animClass}
+    >
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-sm)', alignItems: 'flex-start', background: 'var(--paper)', padding: 'var(--space-md)', border: 'var(--border-light)' }}>
+        <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '30px', marginTop: '22px', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', fontWeight: 600, color: 'var(--ink-faded)' }}>
+          #{idx + 1}
+        </div>
+        <div style={{ flex: '1 1 160px' }}>
+          <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Chapter Title (max 79 chars)</label>
+          <input 
+            type="text" 
+            value={entry.title} 
+            onChange={e => handleChapterChange(idx, 'title', e.target.value)}
+            style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border-light)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
+            maxLength={79}
+          />
+        </div>
+        <div style={{ width: '80px', flex: '0 0 auto' }}>
+          <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Start Pg</label>
+          <input 
+            type="number" 
+            min={1} 
+            max={parsed.header.pageCount}
+            value={entry.startPage} 
+            onChange={e => handleChapterChange(idx, 'startPage', parseInt(e.target.value) || 1)}
+            style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border-light)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
+          />
+        </div>
+        <div style={{ width: '80px', flex: '0 0 auto' }}>
+          <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>End Pg</label>
+          <input 
+            type="number" 
+            min={1} 
+            max={parsed.header.pageCount}
+            value={entry.endPage} 
+            onChange={e => handleChapterChange(idx, 'endPage', parseInt(e.target.value) || 1)}
+            style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border-light)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
+          />
+        </div>
+        <div style={{ display: 'flex', gap: 'var(--space-xs)', marginTop: '22px' }}>
+          <button 
+            onClick={() => handleMoveChapter(idx, 'up')}
+            disabled={idx === 0}
+            style={{ padding: 'var(--space-xs)', background: 'var(--paper-dark)', color: 'var(--ink)', border: 'var(--border-light)', cursor: idx === 0 ? 'not-allowed' : 'pointer', opacity: idx === 0 ? 0.5 : 1 }}
+            aria-label="Move Up"
+            title="Move Up"
+          >
+            ↑
+          </button>
+          <button 
+            onClick={() => handleMoveChapter(idx, 'down')}
+            disabled={idx === metadata.toc.length - 1}
+            style={{ padding: 'var(--space-xs)', background: 'var(--paper-dark)', color: 'var(--ink)', border: 'var(--border-light)', cursor: idx === metadata.toc.length - 1 ? 'not-allowed' : 'pointer', opacity: idx === metadata.toc.length - 1 ? 0.5 : 1 }}
+            aria-label="Move Down"
+            title="Move Down"
+          >
+            ↓
+          </button>
+          <button 
+            onClick={() => handleRemoveChapter(idx)}
+            style={{ padding: 'var(--space-xs) var(--space-sm)', background: 'var(--accent)', color: 'white', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '0.8rem', fontWeight: 500 }}
+          >
+            Delete
+          </button>
+          <div 
+            {...attributes} 
+            {...listeners} 
+            style={{ padding: 'var(--space-xs) var(--space-sm)', background: 'var(--paper-dark)', color: 'var(--ink)', border: 'var(--border-light)', cursor: 'grab', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            title="Drag to reorder"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="8" y1="6" x2="21" y2="6"></line>
+              <line x1="8" y1="12" x2="21" y2="12"></line>
+              <line x1="8" y1="18" x2="21" y2="18"></line>
+              <line x1="3" y1="6" x2="3.01" y2="6"></line>
+              <line x1="3" y1="12" x2="3.01" y2="12"></line>
+              <line x1="3" y1="18" x2="3.01" y2="18"></line>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function MetadataEditor() {
   const [file, setFile] = useState<File | null>(null)
   const [parsed, setParsed] = useState<ParsedXtc | null>(null)
@@ -43,6 +153,27 @@ function MetadataEditor() {
   // Safe calculated pagination
   const totalPages = Math.max(1, Math.ceil(metadata.toc.length / itemsPerPage))
   const safeCurrentPage = Math.min(currentPage, totalPages)
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  )
+
+  const handleDragEnd = (event: any) => {
+    const { active, over } = event
+    if (over && active.id !== over.id) {
+      setMetadata((prev) => {
+        const oldIndex = parseInt(active.id.split('-')[1], 10)
+        const newIndex = parseInt(over.id.split('-')[1], 10)
+        if (!isNaN(oldIndex) && !isNaN(newIndex)) {
+          return { ...prev, toc: arrayMove(prev.toc, oldIndex, newIndex) }
+        }
+        return prev
+      })
+    }
+  }
 
   const handleFileDrop = async (files: File[]) => {
     if (files.length === 0) return
@@ -337,79 +468,32 @@ function MetadataEditor() {
                 {metadata.toc.length === 0 ? (
                   <p style={{ color: 'var(--ink-faded)', fontStyle: 'italic' }}>No chapters defined.</p>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
-                    {metadata.toc.slice((safeCurrentPage - 1) * itemsPerPage, safeCurrentPage * itemsPerPage).map((entry, sliceIdx) => {
-                      const idx = (safeCurrentPage - 1) * itemsPerPage + sliceIdx;
-                      const isAnimating = animatingIndex?.idx === idx;
-                      const animClass = isAnimating ? (animatingIndex.dir === 'up' ? 'animate-move-up' : 'animate-move-down') : '';
-                      return (
-                        <div key={idx} className={animClass} style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-sm)', alignItems: 'flex-start', background: 'var(--paper)', padding: 'var(--space-md)', border: 'var(--border-light)' }}>
-                          <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '30px', marginTop: '22px', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', fontWeight: 600, color: 'var(--ink-faded)' }}>
-                            #{idx + 1}
-                          </div>
-                          <div style={{ flex: '1 1 160px' }}>
-                            <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Chapter Title (max 79 chars)</label>
-                            <input 
-                              type="text" 
-                              value={entry.title} 
-                              onChange={e => handleChapterChange(idx, 'title', e.target.value)}
-                              style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border-light)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
-                              maxLength={79}
+                  <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+                      <SortableContext items={metadata.toc.map((_, i) => `chapter-${i}`)} strategy={verticalListSortingStrategy}>
+                        {metadata.toc.slice((safeCurrentPage - 1) * itemsPerPage, safeCurrentPage * itemsPerPage).map((entry, sliceIdx) => {
+                          const idx = (safeCurrentPage - 1) * itemsPerPage + sliceIdx;
+                          const isAnimating = animatingIndex?.idx === idx;
+                          const animClass = isAnimating ? (animatingIndex.dir === 'up' ? 'animate-move-up' : 'animate-move-down') : '';
+                          const id = `chapter-${idx}`;
+                          return (
+                            <SortableChapterItem 
+                              key={id}
+                              id={id}
+                              entry={entry}
+                              idx={idx}
+                              parsed={parsed}
+                              metadata={metadata}
+                              handleChapterChange={handleChapterChange}
+                              handleMoveChapter={handleMoveChapter}
+                              handleRemoveChapter={handleRemoveChapter}
+                              animClass={animClass}
                             />
-                          </div>
-                          <div style={{ width: '80px', flex: '0 0 auto' }}>
-                            <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Start Pg</label>
-                            <input 
-                              type="number" 
-                              min={1} 
-                              max={parsed.header.pageCount}
-                              value={entry.startPage} 
-                              onChange={e => handleChapterChange(idx, 'startPage', parseInt(e.target.value) || 1)}
-                              style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border-light)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
-                            />
-                          </div>
-                          <div style={{ width: '80px', flex: '0 0 auto' }}>
-                            <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>End Pg</label>
-                            <input 
-                              type="number" 
-                              min={1} 
-                              max={parsed.header.pageCount}
-                              value={entry.endPage} 
-                              onChange={e => handleChapterChange(idx, 'endPage', parseInt(e.target.value) || 1)}
-                              style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border-light)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
-                            />
-                          </div>
-                          <div style={{ display: 'flex', gap: 'var(--space-xs)', marginTop: '22px' }}>
-                            <button 
-                              onClick={() => handleMoveChapter(idx, 'up')}
-                              disabled={idx === 0}
-                              style={{ padding: 'var(--space-xs)', background: 'var(--paper-dark)', color: 'var(--ink)', border: 'var(--border-light)', cursor: idx === 0 ? 'not-allowed' : 'pointer', opacity: idx === 0 ? 0.5 : 1 }}
-                              aria-label="Move Up"
-                              title="Move Up"
-                            >
-                              ↑
-                            </button>
-                            <button 
-                              onClick={() => handleMoveChapter(idx, 'down')}
-                              disabled={idx === metadata.toc.length - 1}
-                              style={{ padding: 'var(--space-xs)', background: 'var(--paper-dark)', color: 'var(--ink)', border: 'var(--border-light)', cursor: idx === metadata.toc.length - 1 ? 'not-allowed' : 'pointer', opacity: idx === metadata.toc.length - 1 ? 0.5 : 1 }}
-                              aria-label="Move Down"
-                              title="Move Down"
-                            >
-                              ↓
-                            </button>
-                            <button 
-                              onClick={() => handleRemoveChapter(idx)}
-                              style={{ padding: 'var(--space-xs) var(--space-sm)', background: 'var(--accent)', color: 'white', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '0.8rem', fontWeight: 500 }}
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </div>
-                      )
-                    })}
-                    
-                    <div style={{ marginTop: 'var(--space-md)', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 'var(--space-md)' }}>
+                          )
+                        })}
+                      </SortableContext>
+                      
+                      <div style={{ marginTop: 'var(--space-md)', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 'var(--space-md)' }}>
                       {totalPages > 1 && (
                         <div style={{ display: 'flex', gap: 'var(--space-xs)' }}>
                           <button 
@@ -443,8 +527,9 @@ function MetadataEditor() {
                           </button>
                         </div>
                       )}
+                      </div>
                     </div>
-                  </div>
+                  </DndContext>
                 )}
               </div>
             </>
