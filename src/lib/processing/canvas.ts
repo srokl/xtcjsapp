@@ -9,6 +9,27 @@ export const DEVICE_DIMENSIONS = {
   X3: { width: 528, height: 792 }
 } as const;
 
+class CanvasPool {
+  private pool: HTMLCanvasElement[] = [];
+
+  acquire(width: number, height: number): HTMLCanvasElement {
+    const canvas = this.pool.pop() || document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (ctx) ctx.clearRect(0, 0, width, height);
+    return canvas;
+  }
+
+  release(canvas: HTMLCanvasElement) {
+    if (this.pool.length < 5) {
+      this.pool.push(canvas);
+    }
+  }
+}
+
+export const sharedCanvasPool = new CanvasPool();
+
 /**
  * Rotate canvas by specified degrees
  */

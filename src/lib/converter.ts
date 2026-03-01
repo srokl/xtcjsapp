@@ -7,7 +7,7 @@ import unrarWasm from 'node-unrar-js/esm/js/unrar.wasm?url'
 import * as pdfjsLib from 'pdfjs-dist'
 import { applyDithering } from './processing/dithering'
 import { toGrayscale, applyContrast, calculateOverlapSegments, isSolidColor, applyGamma, applyInvert } from './processing/image'
-import { rotateCanvas, extractAndRotate, extractRegion, resizeWithPadding, resizeFill, resizeCover, resizeCrop, TARGET_WIDTH, TARGET_HEIGHT, DEVICE_DIMENSIONS } from './processing/canvas'
+import { rotateCanvas, extractAndRotate, extractRegion, resizeWithPadding, resizeFill, resizeCover, resizeCrop, TARGET_WIDTH, TARGET_HEIGHT, DEVICE_DIMENSIONS, sharedCanvasPool } from './processing/canvas'
 import { buildXtc, buildXtcFromBuffers, imageDataToXth, imageDataToXtg, wrapWasmData, buildXtcHeaderAndIndex, getXtcPageSize, type StreamPageInfo } from './xtc-format'
 import { initWasm, runWasmFilters, isWasmLoaded, runWasmPack, runWasmResize } from './processing/wasm'
 
@@ -68,7 +68,7 @@ function resizeHq(
 /**
  * Process a canvas (filter, dither) and encode it to binary
  */
-async function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOptions): Promise<{ buffer: ArrayBuffer, preview: string }> {
+async function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOptions, generatePreview: boolean = true): Promise<{ buffer: ArrayBuffer, preview: string }> {
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!
   const width = canvas.width
   const height = canvas.height
@@ -93,7 +93,7 @@ async function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOp
 
   applyDithering(ctx, width, height, options.dithering, options.is2bit, options.useWasm)
   
-  const preview = canvas.toDataURL('image/png')
+  const preview = generatePreview ? canvas.toDataURL('image/png') : ''
   const imageData = ctx.getImageData(0, 0, width, height)
   
   let buffer: ArrayBuffer
@@ -271,7 +271,7 @@ export async function convertCbzToXtc(
       // Pass 2: Data Processing
       for (let i = 0; i < imageFiles.length; i++) {
         const imgBlob = await imageFiles[i].entry.getData(new BlobWriter())
-        const result = await processImageAsBinary(imgBlob, i + 1, options)
+        const result = await processImageAsBinary(imgBlob, i + 1, options, pageImages.length < 10)
         for (const res of result.results) {
           await writer.write(new Uint8Array(res.buffer))
           if (pageImages.length < 10) pageImages.push(res.preview)
@@ -299,10 +299,10 @@ export async function convertCbzToXtc(
           })
           const slices = await stitcher.append(img)
           for (const slice of slices) {
-            currentResults.push(await processAndEncode(slice.canvas, options))
+            currentResults.push(await processAndEncode(slice.canvas, options, pageImages.length < 10))
           }
         } else {
-          const result = await processImageAsBinary(imgBlob, i + 1, options)
+          const result = await processImageAsBinary(imgBlob, i + 1, options, pageImages.length < 10)
           currentResults = result.results
         }
         for (const res of currentResults) {
@@ -315,7 +315,7 @@ export async function convertCbzToXtc(
       
       if (stitcher) {
         for (const p of stitcher.finish()) {
-          const res = await processAndEncode(p.canvas, options)
+          const res = await processAndEncode(p.canvas, options, pageImages.length < 10)
           pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
           if (pageImages.length < 10) pageImages.push(res.preview)
         }
@@ -425,7 +425,7 @@ export async function convertCbrToXtc(
 
     for (let i = 0; i < imageFiles.length; i++) {
       const imgBlob = new Blob([new Uint8Array(imageFiles[i].data)])
-      const result = await processImageAsBinary(imgBlob, i + 1, options)
+      const result = await processImageAsBinary(imgBlob, i + 1, options, pageImages.length < 10)
       for (const res of result.results) {
         await writer.write(new Uint8Array(res.buffer))
         if (pageImages.length < 10) pageImages.push(res.preview)
@@ -450,10 +450,10 @@ export async function convertCbrToXtc(
         })
         const slices = await stitcher.append(img)
         for (const slice of slices) {
-          currentResults.push(await processAndEncode(slice.canvas, options))
+          currentResults.push(await processAndEncode(slice.canvas, options, pageImages.length < 10))
         }
       } else {
-        const result = await processImageAsBinary(imgBlob, i + 1, options)
+        const result = await processImageAsBinary(imgBlob, i + 1, options, pageImages.length < 10)
         currentResults = result.results
       }
       for (const res of currentResults) {
@@ -465,7 +465,7 @@ export async function convertCbrToXtc(
     }
     if (stitcher) {
       for (const p of stitcher.finish()) {
-        const res = await processAndEncode(p.canvas, options)
+        const res = await processAndEncode(p.canvas, options, pageImages.length < 10)
         pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
         if (pageImages.length < 10) pageImages.push(res.preview)
       }
@@ -542,9 +542,10 @@ async function convertPdfToXtc(
     
     for (let i = 1; i <= numPages; i++) {
       const page = await pdf.getPage(i); const scale = 2.0; const viewport = page.getViewport({ scale })
-      const canvas = document.createElement('canvas'); canvas.width = viewport.width; canvas.height = viewport.height
+      const canvas = sharedCanvasPool.acquire(viewport.width, viewport.height)
       await page.render({ canvasContext: canvas.getContext('2d')!, viewport, background: 'rgb(255,255,255)' }).promise
-      const xtcPages = await processCanvasAsImage(canvas, i, options)
+      const xtcPages = await processCanvasAsImage(canvas, i, options, pageImages.length < 10)
+      sharedCanvasPool.release(canvas)
       for (const res of xtcPages) {
         await writer.write(new Uint8Array(res.buffer))
         if (pageImages.length < 10) pageImages.push(res.preview)
@@ -558,17 +559,18 @@ async function convertPdfToXtc(
     let stitcher = options.manhwa ? new ManhwaStitcher(options) : null
     for (let i = 1; i <= numPages; i++) {
       const page = await pdf.getPage(i); const scale = 2.0; const viewport = page.getViewport({ scale })
-      const canvas = document.createElement('canvas'); canvas.width = viewport.width; canvas.height = viewport.height
+      const canvas = sharedCanvasPool.acquire(viewport.width, viewport.height)
       await page.render({ canvasContext: canvas.getContext('2d')!, viewport, background: 'rgb(255,255,255)' }).promise
       let currentResults: { buffer: ArrayBuffer, preview: string }[] = []
       if (stitcher) {
         const slices = await stitcher.append(canvas)
         for (const slice of slices) {
-          currentResults.push(await processAndEncode(slice.canvas, options))
+          currentResults.push(await processAndEncode(slice.canvas, options, pageImages.length < 10))
         }
       } else {
-        currentResults = await processCanvasAsImage(canvas, i, options)
+        currentResults = await processCanvasAsImage(canvas, i, options, pageImages.length < 10)
       }
+      sharedCanvasPool.release(canvas)
       for (const res of currentResults) {
         pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
         if (pageImages.length < 10) pageImages.push(res.preview)
@@ -578,7 +580,7 @@ async function convertPdfToXtc(
     }
     if (stitcher) {
       for (const p of stitcher.finish()) {
-        const res = await processAndEncode(p.canvas, options)
+        const res = await processAndEncode(p.canvas, options, pageImages.length < 10)
         pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
         if (pageImages.length < 10) pageImages.push(res.preview)
       }
@@ -624,7 +626,7 @@ async function convertVideoToXtc(file: File, options: ConversionOptions, onProgr
     let canvas = frames[i]; const angle = getOrientationAngle(options.orientation)
     if (angle !== 0 && (angle === 180 || canvas.width >= canvas.height)) canvas = rotateCanvas(canvas, angle)
     const finalCanvas = resizeWithPadding(canvas, 0, dims.width, dims.height)
-    const res = await processAndEncode(finalCanvas, options)
+    const res = await processAndEncode(finalCanvas, options, pageImages.length < 10)
     pageBuffers.push(res.buffer); pageInfos.push({ width: dims.width, height: dims.height })
     if (pageImages.length < 10) pageImages.push(res.preview)
     if (i % 5 === 0) onProgress((i + 1) / frames.length, null)
@@ -662,14 +664,14 @@ async function extractFramesFromVideo(file: File, fps: number): Promise<HTMLCanv
   })
 }
 
-async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: number, options: ConversionOptions): Promise<{ buffer: ArrayBuffer, preview: string }[]> {
+async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: number, options: ConversionOptions, generatePreview: boolean = true): Promise<{ buffer: ArrayBuffer, preview: string }[]> {
   const dims = getTargetDimensions(options); const results: { buffer: ArrayBuffer, preview: string }[] = []; const padColor = options.padBlack ? 0 : 255
   const crop = getAxisCropRect(sourceCanvas.width, sourceCanvas.height, options)
   const croppedCanvas = document.createElement('canvas'); croppedCanvas.width = crop.width; croppedCanvas.height = crop.height
   croppedCanvas.getContext('2d')!.drawImage(sourceCanvas, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height)
 
-  if (options.sidewaysOverviews) results.push(await processAndEncode(resizeWithPadding(rotateCanvas(croppedCanvas, 90), padColor, dims.width, dims.height), options))
-  if (options.includeOverviews) results.push(await processAndEncode(resizeWithPadding(croppedCanvas, padColor, dims.width, dims.height), options))
+  if (options.sidewaysOverviews) results.push(await processAndEncode(resizeWithPadding(rotateCanvas(croppedCanvas, 90), padColor, dims.width, dims.height), options, generatePreview))
+  if (options.includeOverviews) results.push(await processAndEncode(resizeWithPadding(croppedCanvas, padColor, dims.width, dims.height), options, generatePreview))
   
   const isSingleImage = options.sourceType === 'image' && !options.manhwa && options.splitMode === 'nosplit'
   if (isSingleImage) {
@@ -679,7 +681,7 @@ async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: nu
     else if (options.imageMode === 'cover') final = resizeCover(proc, dims.width, dims.height)
     else if (options.imageMode === 'crop') final = resizeCrop(proc, dims.width, dims.height)
     else final = resizeWithPadding(proc, padColor, dims.width, dims.height)
-    results.push(await processAndEncode(final, options)); return results
+    results.push(await processAndEncode(final, options, generatePreview)); return results
   }
 
   if (options.manhwa) {
@@ -688,41 +690,42 @@ async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: nu
     const sliceStep = dims.height - Math.floor(dims.height * (options.manhwaOverlap / 100))
     for (let y = 0; y < newHeight; ) {
       let h = Math.min(dims.height, newHeight - y); if (h < dims.height && newHeight > dims.height) { y = newHeight - dims.height; h = dims.height }
-      results.push(await processAndEncode(resizeWithPadding(extractRegion(resized, 0, y, dims.width, h), padColor, dims.width, dims.height), options))
+      results.push(await processAndEncode(resizeWithPadding(extractRegion(resized, 0, y, dims.width, h), padColor, dims.width, dims.height), options, generatePreview))
       if (y + h >= newHeight) break; y += sliceStep
     }
     return results
   }
 
-  if (options.orientation === 'portrait') { results.push(await processAndEncode(resizeWithPadding(croppedCanvas, padColor, dims.width, dims.height), options)); return results }
+  if (options.orientation === 'portrait') { results.push(await processAndEncode(resizeWithPadding(croppedCanvas, padColor, dims.width, dims.height), options, generatePreview)); return results }
   
   if (crop.width < crop.height && options.splitMode !== 'nosplit') {
     if (options.splitMode === 'overlap') {
       const segs = calculateOverlapSegments(crop.width, crop.height, dims.width, dims.height)
       for (const seg of segs) {
         const canvas = resizeWithPadding(extractAndRotate(croppedCanvas, seg.x, seg.y, seg.w, seg.h), padColor, dims.width, dims.height)
-        results.push(await processAndEncode(canvas, options))
+        results.push(await processAndEncode(canvas, options, generatePreview))
       }
     } else {
       const half = Math.floor(crop.height / 2)
-      results.push(await processAndEncode(resizeWithPadding(extractAndRotate(croppedCanvas, 0, 0, crop.width, half), padColor, dims.width, dims.height), options))
-      results.push(await processAndEncode(resizeWithPadding(extractAndRotate(croppedCanvas, 0, half, crop.width, crop.height - half), padColor, dims.width, dims.height), options))
+      results.push(await processAndEncode(resizeWithPadding(extractAndRotate(croppedCanvas, 0, 0, crop.width, half), padColor, dims.width, dims.height), options, generatePreview))
+      results.push(await processAndEncode(resizeWithPadding(extractAndRotate(croppedCanvas, 0, half, crop.width, crop.height - half), padColor, dims.width, dims.height), options, generatePreview))
     }
   } else {
-    results.push(await processAndEncode(resizeWithPadding(rotateCanvas(croppedCanvas, 90), padColor, dims.width, dims.height), options))
+    results.push(await processAndEncode(resizeWithPadding(rotateCanvas(croppedCanvas, 90), padColor, dims.width, dims.height), options, generatePreview))
   }
   return results
 }
 
-async function processImageAsBinary(imgBlob: Blob, pageNum: number, options: ConversionOptions): Promise<{ results: { buffer: ArrayBuffer, preview: string }[] }> {
+async function processImageAsBinary(imgBlob: Blob, pageNum: number, options: ConversionOptions, generatePreview: boolean = true): Promise<{ results: { buffer: ArrayBuffer, preview: string }[] }> {
   return new Promise((resolve, reject) => {
     const img = new Image(); const url = URL.createObjectURL(imgBlob)
     img.onload = async () => {
       try {
-        const canvas = document.createElement('canvas'); canvas.width = img.width; canvas.height = img.height
+        const canvas = sharedCanvasPool.acquire(img.width, img.height)
         canvas.getContext('2d')!.drawImage(img, 0, 0)
         URL.revokeObjectURL(url)
-        const results = await processCanvasAsImage(canvas, pageNum, options)
+        const results = await processCanvasAsImage(canvas, pageNum, options, generatePreview)
+        sharedCanvasPool.release(canvas)
         resolve({ results })
       } catch (e) { reject(e) }
     }

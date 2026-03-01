@@ -80,5 +80,16 @@ export default defineConfig({
   ],
   build: {
     outDir: 'dist',
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', '@tanstack/react-router'],
+          'pdf-worker': ['pdfjs-dist'],
+          'pdf-lib': ['pdf-lib'],
+          'zipjs': ['@zip.js/zip.js'],
+          'unrar': ['node-unrar-js'],
+        }
+      }
+    }
   },
 })
