@@ -19,6 +19,7 @@ export interface ConversionOptions {
   sourceType: 'cbz' | 'pdf' | 'image' | 'video'
   useWasm: boolean
   streamedDownload: boolean
+  compressXtcz: boolean
 }
 
 export interface ConversionResult {

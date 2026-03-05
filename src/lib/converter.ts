@@ -9,6 +9,7 @@ import { applyDithering, applyDitheringToData } from './processing/dithering'
 import { toGrayscale, applyContrast, calculateOverlapSegments, isSolidColor, applyGamma, applyInvert, applyUnifiedFilters } from './processing/image'
 import { rotateCanvas, extractAndRotate, extractRegion, resizeWithPadding, resizeFill, resizeCover, resizeCrop, TARGET_WIDTH, TARGET_HEIGHT, DEVICE_DIMENSIONS, sharedCanvasPool } from './processing/canvas'
 import { buildXtc, buildXtcFromBuffers, imageDataToXth, imageDataToXtg, wrapWasmData, buildXtcHeaderAndIndex, getXtcPageSize, type StreamPageInfo } from './xtc-format'
+import { compressXtczLz4 } from './processing/lz4-compress'
 import { initWasm, runWasmFilters, isWasmLoaded, runWasmPack, runWasmResize, runWasmPipeline } from './processing/wasm'
 
 function getTargetDimensions(options: ConversionOptions) {
@@ -242,7 +243,7 @@ export async function convertCbzToXtc(
 
     const mappingCtx = new PageMappingContext()
     const dims = getTargetDimensions(options)
-    const outputFileName = file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xtch' : '.xtc')
+    const outputFileName = file.name.replace(/\.[^/.]+$/, options.compressXtcz ? '.xtcz' : (options.is2bit ? '.xtch' : '.xtc'))
     const pageImages: string[] = []
 
     if (options.streamedDownload && !options.manhwa) {
@@ -396,7 +397,8 @@ export async function convertCbzToXtc(
       } else {
         const allBuffers: ArrayBuffer[] = []
         for (const blob of pageBlobs) allBuffers.push(await blob.arrayBuffer())
-        const xtcData = await buildXtcFromBuffers(allBuffers, { metadata, is2bit: options.is2bit })
+        let xtcData = await buildXtcFromBuffers(allBuffers, { metadata, is2bit: options.is2bit })
+        if (options.compressXtcz) xtcData = compressXtczLz4(xtcData)
         return { name: outputFileName, data: xtcData, size: xtcData.byteLength, pageCount: pageInfos.length, pageImages }
       }
     }
@@ -443,7 +445,7 @@ export async function convertCbrToXtc(
   }
   metadata.toc = imageFiles.map((_, index) => ({ title: `Page ${index + 1 + tocPageOffset}`, startPage: index + 1, endPage: index + 1 }))
 
-  const mappingCtx = new PageMappingContext(); const dims = getTargetDimensions(options); const outputFileName = file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xtch' : '.xtc'); 
+  const mappingCtx = new PageMappingContext(); const dims = getTargetDimensions(options); const outputFileName = file.name.replace(/\.[^/.]+$/, options.compressXtcz ? '.xtcz' : (options.is2bit ? '.xtch' : '.xtc')); 
   const pageImages: string[] = []
 
   if (options.streamedDownload && !options.manhwa) {
@@ -575,7 +577,8 @@ export async function convertCbrToXtc(
     } else {
       const allBuffers: ArrayBuffer[] = []
       for (const blob of pageBlobs) allBuffers.push(await blob.arrayBuffer())
-      const xtcData = await buildXtcFromBuffers(allBuffers, { metadata, is2bit: options.is2bit })
+      let xtcData = await buildXtcFromBuffers(allBuffers, { metadata, is2bit: options.is2bit })
+      if (options.compressXtcz) xtcData = compressXtczLz4(xtcData)
       return { name: outputFileName, data: xtcData, size: xtcData.byteLength, pageCount: pageInfos.length, pageImages }
     }
   }
@@ -598,7 +601,7 @@ async function convertPdfToXtc(
     metadata.toc.push({ title, startPage: i, endPage: i })
   }
 
-  const mappingCtx = new PageMappingContext(); const dims = getTargetDimensions(options); const outputFileName = file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xtch' : '.xtc')
+  const mappingCtx = new PageMappingContext(); const dims = getTargetDimensions(options); const outputFileName = file.name.replace(/\.[^/.]+$/, options.compressXtcz ? '.xtcz' : (options.is2bit ? '.xtch' : '.xtc'))
   const pageImages: string[] = []
 
   if (options.streamedDownload && !options.manhwa) {
@@ -742,7 +745,8 @@ async function convertPdfToXtc(
     } else {
       const allBuffers: ArrayBuffer[] = []
       for (const blob of pageBlobs) allBuffers.push(await blob.arrayBuffer())
-      const xtcData = await buildXtcFromBuffers(allBuffers, { metadata, is2bit: options.is2bit })
+      let xtcData = await buildXtcFromBuffers(allBuffers, { metadata, is2bit: options.is2bit })
+      if (options.compressXtcz) xtcData = compressXtczLz4(xtcData)
       URL.revokeObjectURL(url)
       return { name: outputFileName, data: xtcData, size: xtcData.byteLength, pageCount: pageInfos.length, pageImages }
     }
@@ -781,7 +785,7 @@ async function convertVideoToXtc(file: File, options: ConversionOptions, onProgr
     }
     onProgress(Math.min(1, (i + CONCURRENCY) / frames.length), null)
   }
-  const outputFileName = file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xtch' : '.xtc')
+  const outputFileName = file.name.replace(/\.[^/.]+$/, options.compressXtcz ? '.xtcz' : (options.is2bit ? '.xtch' : '.xtc'))
   if (options.streamedDownload) {
     const headerAndIndex = buildXtcHeaderAndIndex(pageInfos, { is2bit: options.is2bit })
     let totalSize = headerAndIndex.byteLength
@@ -790,7 +794,8 @@ async function convertVideoToXtc(file: File, options: ConversionOptions, onProgr
     await writer.write(headerAndIndex); for (const buf of pageBuffers) await writer.write(new Uint8Array(buf))
     await writer.close(); return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages, size: totalSize }
   } else {
-    const xtcData = await buildXtcFromBuffers(pageBuffers, { is2bit: options.is2bit })
+    let xtcData = await buildXtcFromBuffers(pageBuffers, { is2bit: options.is2bit })
+    if (options.compressXtcz) xtcData = compressXtczLz4(xtcData)
     return { name: outputFileName, data: xtcData, size: xtcData.byteLength, pageCount: pageBuffers.length, pageImages }
   }
 }

@@ -234,6 +234,24 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
         </div>
       )}
 
+      <div className="option checkbox-option">
+        <label htmlFor="compressXtcz">
+          <input
+            type="checkbox"
+            id="compressXtcz"
+            checked={options.compressXtcz}
+            onChange={(e) => onChange({ ...options, compressXtcz: e.target.checked })}
+          />
+          Compress to .xtcz (Experimental LZ4)
+        </label>
+      </div>
+
+      {options.compressXtcz && (
+        <div style={{ fontSize: '0.7rem', color: 'var(--ink-faded)', marginTop: '-0.5rem', marginBottom: 'var(--space-sm)', fontStyle: 'italic', paddingLeft: '2.5rem' }}>
+          Requires firmware 5.1.6 or higher. Significantly reduces file size.
+        </div>
+      )}
+
       {options.is2bit && (
         <div className="option">
           <label htmlFor="gamma">Gamma Correction</label>

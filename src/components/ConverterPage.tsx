@@ -88,6 +88,7 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
     sourceType: fileType,
     useWasm: false,
     streamedDownload: false,
+    compressXtcz: false,
   })
 
   const handleFiles = useCallback((files: File[]) => {
