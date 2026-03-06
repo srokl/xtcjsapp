@@ -113,8 +113,7 @@ export function decompressXtczLz4(compressedData: ArrayBuffer | Uint8Array): Arr
       result.set(chunkData, writeOffset);
       writeOffset += size;
     } else {
-      const decompressedSize = lz4.decompressBlock(chunkData, result, writeOffset, uncompressedSize - writeOffset);
-      writeOffset += decompressedSize;
+      writeOffset = lz4.decompressBlock(chunkData, result, 0, size, writeOffset);
     }
   }
 
