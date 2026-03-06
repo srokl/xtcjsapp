@@ -88,7 +88,7 @@ function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOptions,
   if (options.useWasm && isWasmLoaded()) {
     const packed = runWasmPipeline(imageData, {
       contrast: options.contrast,
-      gamma: (options.is2bit) ? options.gamma : 1.0,
+      gamma: options.gamma,
       invert: options.invert,
       algorithm: options.dithering,
       is2bit: options.is2bit
@@ -96,7 +96,7 @@ function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOptions,
     buffer = wrapWasmData(packed, width, height, options.is2bit)
     
     if (generatePreview) {
-      runWasmFilters(imageData, options.contrast, (options.is2bit) ? options.gamma : 1.0, options.invert)
+      runWasmFilters(imageData, options.contrast, options.gamma, options.invert)
       ctx.putImageData(imageData, 0, 0)
       applyDithering(ctx, width, height, options.dithering, options.is2bit, true)
       preview = canvas.toDataURL('image/png')
@@ -105,7 +105,7 @@ function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOptions,
     // Unified JS Pipeline: One getImageData, One loop, One putImageData (if preview)
     applyUnifiedFilters(imageData.data, {
       contrast: options.contrast,
-      gamma: (options.is2bit) ? options.gamma : 1.0,
+      gamma: options.gamma,
       invert: options.invert
     })
     
