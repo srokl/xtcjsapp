@@ -99,11 +99,13 @@ export function decompressXtczLz4(compressedData: ArrayBuffer | Uint8Array): Arr
     const descriptor = view.getUint32(readOffset, true);
     readOffset += 4;
     
-    const isUncompressed = (descriptor & 0x80000000) !== 0;
+    // JS bitwise operators work on 32-bit signed integers. 
+    // We use unsigned right shift to safely check the highest bit.
+    const isUncompressed = (descriptor >>> 31) !== 0;
     const size = descriptor & 0x7FFFFFFF;
     
     if (readOffset + size > e.length) {
-      throw new Error("Invalid XTCZ: chunk data out of bounds");
+      throw new Error(`Invalid XTCZ: chunk data out of bounds at chunk ${i}`);
     }
 
     const chunkData = e.subarray(readOffset, readOffset + size);

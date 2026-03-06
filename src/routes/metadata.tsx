@@ -202,7 +202,8 @@ function MetadataEditor() {
         setMetadata(parsedData.metadata || { toc: [] })
       }
     } catch (e) {
-      alert("Failed to parse file. Ensure it's a valid XTC/XTCH/XTG/XTH format.")
+      console.error("File parse error:", e);
+      alert("Failed to parse file. Ensure it's a valid XTC/XTCH/XTG/XTH/XTCZ format.")
       setFile(null)
     } finally {
       setIsProcessing(false)
