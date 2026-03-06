@@ -23,6 +23,7 @@ function AboutPage() {
           <li><strong>Multiple formats:</strong> Convert CBZ/CBR (manga/comics), PDF documents, single images, and video files to XTC.</li>
           <li><strong>WebAssembly Acceleration:</strong> Optional high-performance Wasm pipeline for ultra-fast filtering, dithering, and packing.</li>
           <li><strong>2-bit Support:</strong> Full support for the enhanced 4-level grayscale XTCH format for superior image quality.</li>
+          <li><strong>XTCZ Compression:</strong> Experimental LZ4 block compression support to significantly reduce file sizes on firmware 5.1.6+.</li>
           <li><strong>Advanced Dithering:</strong> Choose from <strong>Stucki</strong> (Default), Atkinson, Floyd-Steinberg, or experimental <strong>Zhou-Fang</strong>, <strong>Ostromoukhov</strong>, and <strong>Stochastic</strong> (Hilbert Curve) algorithms.</li>
           <li><strong>High-Quality Scaling:</strong> Uses Box Filter/Area Averaging for sharp, detailed downscaling before 1-bit dithering.</li>
           <li><strong>Manhwa Mode:</strong> Continuous vertical stitching for webtoons with customizable overlap.</li>

@@ -10,9 +10,8 @@ export function Dropzone({ onFiles, fileType = 'cbz', multiple = true }: Dropzon
   const [isDragover, setIsDragover] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const accept = fileType === 'pdf' 
-    ? '.pdf,.PDF' 
-    : (fileType === 'image' ? '.jpg,.jpeg,.png,.webp,.bmp,.gif' : (fileType === 'video' ? '.mp4,.webm,.mkv,.avi,.mov' : (fileType === 'xtc' ? '.xtc,.xtch,.xtg,.xth' : '.cbz,.CBZ,.cbr,.CBR')))
+  const accept = fileType === 'pdf' ? '.pdf,.PDF' 
+    : (fileType === 'image' ? '.jpg,.jpeg,.png,.webp,.bmp,.gif' : (fileType === 'video' ? '.mp4,.webm,.mkv,.avi,.mov' : (fileType === 'xtc' ? '.xtc,.xtch,.xtg,.xth,.xtcz' : '.cbz,.CBZ,.cbr,.CBR')))
   const label = fileType === 'pdf' ? 'PDF' : (fileType === 'image' ? 'Image' : (fileType === 'video' ? 'Video' : (fileType === 'xtc' ? 'XTC/XTCH/XTG/XTH' : 'CBZ/CBR')))
 
   const filterFiles = useCallback((files: FileList) => {

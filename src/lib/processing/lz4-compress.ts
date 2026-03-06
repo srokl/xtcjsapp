@@ -71,3 +71,52 @@ export function compressXtczLz4(uncompressedData: ArrayBuffer | Uint8Array): Arr
   
   return result.buffer;
 }
+
+/**
+ * Decompresses an XTCZ (LZ4) ArrayBuffer back into its original uncompressed XTC payload.
+ */
+export function decompressXtczLz4(compressedData: ArrayBuffer | Uint8Array): ArrayBuffer {
+  const e = compressedData instanceof Uint8Array ? compressedData : new Uint8Array(compressedData);
+  
+  if (e.length < 18) throw new Error("Invalid XTCZ: file too small");
+  
+  // Verify magic 'XTZ4'
+  if (e[0] !== 88 || e[1] !== 84 || e[2] !== 90 || e[3] !== 52) {
+    throw new Error("Invalid XTCZ: bad magic number");
+  }
+
+  const view = new DataView(e.buffer, e.byteOffset, e.length);
+  const uncompressedSize = view.getUint32(4, true);
+  const numChunks = view.getUint32(12, true);
+
+  const result = new Uint8Array(uncompressedSize);
+  let readOffset = 18;
+  let writeOffset = 0;
+
+  for (let i = 0; i < numChunks; i++) {
+    if (readOffset >= e.length) break;
+    
+    const descriptor = view.getUint32(readOffset, true);
+    readOffset += 4;
+    
+    const isUncompressed = (descriptor & 0x80000000) !== 0;
+    const size = descriptor & 0x7FFFFFFF;
+    
+    if (readOffset + size > e.length) {
+      throw new Error("Invalid XTCZ: chunk data out of bounds");
+    }
+
+    const chunkData = e.subarray(readOffset, readOffset + size);
+    readOffset += size;
+
+    if (isUncompressed) {
+      result.set(chunkData, writeOffset);
+      writeOffset += size;
+    } else {
+      const decompressedSize = lz4.decompressBlock(chunkData, result, writeOffset, uncompressedSize - writeOffset);
+      writeOffset += decompressedSize;
+    }
+  }
+
+  return result.buffer;
+}

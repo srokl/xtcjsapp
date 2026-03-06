@@ -8,6 +8,7 @@ import { Dropzone } from '../components/Dropzone'
 import { Viewer } from '../components/Viewer'
 import { parseXtcFile, type ParsedXtc, extractXtcPages, decodeXtcPageToCanvas } from '../lib/xtc-reader'
 import { buildXtcFromBuffers } from '../lib/xtc-format'
+import { compressXtczLz4 } from '../lib/processing/lz4-compress'
 import type { BookMetadata, TocEntry } from '../lib/metadata/types'
 
 export const Route = createFileRoute('/metadata')({
@@ -227,7 +228,7 @@ function MetadataEditor() {
     }
   }
 
-  const handleSave = async () => {
+  const handleSave = async (asXtcz: boolean = false) => {
     if (!parsed || !file || isRawPage) return
 
     // Validate chapters
@@ -254,8 +255,14 @@ function MetadataEditor() {
         ...metadata,
         createTime: Math.floor(Date.now() / 1000)
       }
-      const newBuffer = await buildXtcFromBuffers(parsed.pageData, { metadata: finalMetadata, is2bit })
-      const ext = is2bit ? '.xtch' : '.xtc'
+      let newBuffer = await buildXtcFromBuffers(parsed.pageData, { metadata: finalMetadata, is2bit })
+      
+      const shouldCompress = asXtcz || parsed.header.isXtcz;
+      if (shouldCompress) {
+        newBuffer = compressXtczLz4(newBuffer)
+      }
+      
+      const ext = shouldCompress ? '.xtcz' : (is2bit ? '.xtch' : '.xtc')
       const baseName = file.name.replace(/\.[^/.]+$/, '')
       const fileName = `${baseName}_edited${ext}`
 
@@ -361,12 +368,17 @@ function MetadataEditor() {
             <h3 style={{ marginBottom: 'var(--space-sm)' }}>File Info</h3>
             <p><strong>Name:</strong> {file.name}</p>
             {!isRawPage && <p><strong>Pages:</strong> {parsed.header.pageCount}</p>}
-            <p><strong>Type:</strong> {isRawPage ? (file.name.toLowerCase().endsWith('.xth') ? 'XTH (2-bit Page)' : 'XTG (1-bit Page)') : (parsed.header.is2bit ? 'XTCH (2-bit)' : 'XTC (1-bit)')}</p>
+            <p><strong>Type:</strong> {isRawPage ? (file.name.toLowerCase().endsWith('.xth') ? 'XTH (2-bit Page)' : 'XTG (1-bit Page)') : (parsed.header.isXtcz ? 'XTCZ (LZ4 Compressed)' : (parsed.header.is2bit ? 'XTCH (2-bit)' : 'XTC (1-bit)'))}</p>
             {isRawPage && <p style={{ color: 'var(--accent)', fontWeight: 'bold', marginTop: 'var(--space-sm)' }}>XTG/XTH preview only</p>}
             
-            <div style={{ marginTop: 'var(--space-md)', display: 'flex', gap: 'var(--space-sm)' }}>
+            <div style={{ marginTop: 'var(--space-md)', display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap' }}>
               <button className="btn-preview" onClick={handlePreview}>Preview</button>
-              {!isRawPage && <button className="btn-download" onClick={handleSave}>Save & Download</button>}
+              {!isRawPage && (
+                <>
+                  <button className="btn-download" onClick={() => handleSave(false)}>Save & Download</button>
+                  <button className="btn-download" onClick={() => handleSave(true)} style={{ background: 'var(--accent-hover)' }}>Compress to .xtcz</button>
+                </>
+              )}
               <button className="btn-clear-results" onClick={() => { setFile(null); setParsed(null); setPreviewPages([]); setIsRawPage(false); }}>Close File</button>
             </div>
           </div>

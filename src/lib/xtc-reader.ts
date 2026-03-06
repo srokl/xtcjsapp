@@ -2,6 +2,7 @@
 
 import { TARGET_WIDTH, TARGET_HEIGHT } from './processing/canvas'
 import type { BookMetadata, TocEntry } from './metadata/types'
+import { decompressXtczLz4 } from './processing/lz4-compress'
 
 export interface XtcHeader {
   magic: string
@@ -13,6 +14,7 @@ export interface XtcHeader {
   indexOffset: bigint
   dataOffset: bigint
   tocOffset: bigint
+  isXtcz?: boolean
 }
 
 export interface XtcIndexEntry {
@@ -27,6 +29,20 @@ export interface ParsedXtc {
   metadata?: BookMetadata
   entries: XtcIndexEntry[]
   pageData: ArrayBuffer[]
+  rawBuffer: ArrayBuffer
+}
+
+/**
+ * Helper to check if a buffer is XTCZ and decompress if necessary
+ */
+function getDecompressedBuffer(buffer: ArrayBuffer): { buffer: ArrayBuffer, isXtcz: boolean } {
+  if (buffer.byteLength >= 4) {
+    const uint8 = new Uint8Array(buffer, 0, 4);
+    if (uint8[0] === 88 && uint8[1] === 84 && uint8[2] === 90 && uint8[3] === 52) { // XTZ4
+      return { buffer: decompressXtczLz4(buffer), isXtcz: true };
+    }
+  }
+  return { buffer, isXtcz: false };
 }
 
 /**
@@ -115,9 +131,11 @@ function parseIndexEntry(view: DataView, offset: number): XtcIndexEntry {
 /**
  * Parse an XTC file and extract all page data
  */
-export async function parseXtcFile(buffer: ArrayBuffer): Promise<ParsedXtc> {
+export async function parseXtcFile(inputBuffer: ArrayBuffer): Promise<ParsedXtc> {
+  const { buffer, isXtcz } = getDecompressedBuffer(inputBuffer);
   const view = new DataView(buffer)
   const header = parseXtcHeader(view)
+  header.isXtcz = isXtcz;
   const metadata = parseMetadata(view, header)
 
   const entries: XtcIndexEntry[] = []
@@ -135,13 +153,14 @@ export async function parseXtcFile(buffer: ArrayBuffer): Promise<ParsedXtc> {
     pageData.push(data)
   }
 
-  return { header, metadata, entries, pageData }
+  return { header, metadata, entries, pageData, rawBuffer: buffer }
 }
 
 /**
  * Get page count from XTC file without parsing all data
  */
-export async function getXtcPageCount(buffer: ArrayBuffer): Promise<number> {
+export async function getXtcPageCount(inputBuffer: ArrayBuffer): Promise<number> {
+  const { buffer } = getDecompressedBuffer(inputBuffer);
   const view = new DataView(buffer)
   const header = parseXtcHeader(view)
   return header.pageCount
