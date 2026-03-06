@@ -65,8 +65,45 @@ export function applyDitheringToData(
     case 'stochastic':
       applyStochastic(data, width, height, is2bit);
       break;
+    case 'matt-parker':
+      applyMattParker(data, width, height, is2bit);
+      break;
     default:
       applyFloydSteinberg(data, width, height, is2bit);
+  }
+}
+
+/**
+ * Matt Parker Dithering (3x3 Ordered Dither using Parker Square)
+ * From: youtube.com/watch?v=kT4p1GXq4HY
+ */
+function applyMattParker(data: Uint8ClampedArray, width: number, height: number, is2bit: boolean): void {
+  const parker = [
+    [0.23, 0.41, 0.29],
+    [0.41, 0.37, 0.01],
+    [0.29, 0.01, 0.47]
+  ];
+
+  for (let y = 0; y < height; y++) {
+    const rowOffset = y * width * 4;
+    const py = y % 3;
+    for (let x = 0; x < width; x++) {
+      const idx = rowOffset + x * 4;
+      const gray = data[idx] / 255;
+      const threshold = parker[x % 3][py];
+      
+      let val;
+      if (is2bit) {
+        // Map 0.0-1.0 to 4 levels (0, 85, 170, 255)
+        const raw = gray * 3;
+        const level = Math.floor(raw + threshold);
+        val = Math.min(3, level) * 85;
+      } else {
+        val = gray > threshold ? 255 : 0;
+      }
+      
+      data[idx] = data[idx + 1] = data[idx + 2] = val;
+    }
   }
 }
 

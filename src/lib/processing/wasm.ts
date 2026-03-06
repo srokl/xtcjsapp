@@ -108,6 +108,9 @@ export function runWasmDither(imageData: ImageData, algorithm: string, is2bit: b
     case 'stochastic':
       exports.ditherStochastic(width, height, inputPtr, scratchPtr, is2bit);
       break;
+    case 'matt-parker':
+      exports.ditherMattParker(width, height, inputPtr, is2bit);
+      break;
     case 'stucki':
     default:
       exports.ditherStucki(width, height, inputPtr, scratchPtr, is2bit);
@@ -206,6 +209,7 @@ export function runWasmPipeline(
       case 'sierra-lite': exports.ditherSierraLite(width, height, inputPtr, scratchPtr, options.is2bit); break;
       case 'ordered': exports.ditherOrdered(width, height, inputPtr, options.is2bit); break;
       case 'stochastic': exports.ditherStochastic(width, height, inputPtr, scratchPtr, options.is2bit); break;
+      case 'matt-parker': exports.ditherMattParker(width, height, inputPtr, options.is2bit); break;
       case 'stucki': 
       default: exports.ditherStucki(width, height, inputPtr, scratchPtr, options.is2bit); break;
     }

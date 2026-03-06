@@ -297,6 +297,7 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
           <option value="sierra-lite">Sierra Lite</option>
           <option value="ordered">Ordered</option>
           <option value="stochastic">Stochastic</option>
+          <option value="matt-parker">Matt Parker</option>
           <option value="none">None</option>
         </select>
       </div>

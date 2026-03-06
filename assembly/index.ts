@@ -619,6 +619,43 @@ export function ditherOrdered(width: i32, height: i32, srcPtr: usize, is2bit: bo
   }
 }
 
+// 9. Matt Parker (Parker Square 3x3)
+export function ditherMattParker(width: i32, height: i32, srcPtr: usize, is2bit: bool): void {
+  for (let y = 0; y < height; y++) {
+    let py = y % 3;
+    let rowOffset = y * width * 4;
+    for (let x = 0; x < width; x++) {
+      let px = x % 3;
+      let idx = rowOffset + (x << 2);
+      let gray = <f32>load<u8>(srcPtr + idx) / 255.0;
+      
+      let threshold: f32 = 0;
+      // Parker Index Matrix Lookup
+      if (py == 0) {
+        if (px == 0) threshold = 0.23; else if (px == 1) threshold = 0.41; else threshold = 0.29;
+      } else if (py == 1) {
+        if (px == 0) threshold = 0.41; else if (px == 1) threshold = 0.37; else threshold = 0.01;
+      } else {
+        if (px == 0) threshold = 0.29; else if (px == 1) threshold = 0.01; else threshold = 0.47;
+      }
+      
+      let val: u8;
+      if (is2bit) {
+        let raw = gray * 3.0;
+        let level = <i32>Math.floor(raw + threshold);
+        if (level > 3) level = 3;
+        val = <u8>(level * 85);
+      } else {
+        val = gray > threshold ? 255 : 0;
+      }
+      
+      store<u8>(srcPtr + idx, val);
+      store<u8>(srcPtr + idx + 1, val);
+      store<u8>(srcPtr + idx + 2, val);
+    }
+  }
+}
+
 // 8. Stochastic (Hilbert Curve)
 export function ditherStochastic(width: i32, height: i32, srcPtr: usize, scratchPtr: usize, is2bit: bool): void {
   // Hilbert curve traversal
