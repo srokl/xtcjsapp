@@ -380,7 +380,7 @@ function MetadataEditor() {
                 ) : (
                   <>
                     <button className="btn-download" onClick={() => handleSave(false)}>Save & Download</button>
-                    <button className="btn-download" onClick={() => handleSave(true)} style={{ background: 'var(--accent-hover)' }}>Compress to .xtcz</button>
+                    <button className="btn-download" onClick={() => handleSave(true)} style={{ background: 'var(--accent-hover)' }}>Save & compress to XTCZ</button>
                   </>
                 )
               )}
