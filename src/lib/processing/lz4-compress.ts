@@ -31,11 +31,6 @@ export function compressXtczLz4(uncompressedData: ArrayBuffer | Uint8Array): Arr
   a.push(writeU32LE(t)); // Uncompressed size
   a.push(writeU32LE(n)); // Block size
 
-  // Unknown header fields required by the reader
-  const numChunks = Math.ceil(t / n);
-  a.push(writeU32LE(numChunks));
-  a.push(writeU16LE(1010)); 
-
   const r = 65536;
   const i = new Array(r);
   for (let o = 0; o < r; o++) i[o] = 0;
@@ -78,7 +73,7 @@ export function compressXtczLz4(uncompressedData: ArrayBuffer | Uint8Array): Arr
 export function decompressXtczLz4(compressedData: ArrayBuffer | Uint8Array): ArrayBuffer {
   const e = compressedData instanceof Uint8Array ? compressedData : new Uint8Array(compressedData);
   
-  if (e.length < 18) throw new Error("Invalid XTCZ: file too small");
+  if (e.length < 12) throw new Error("Invalid XTCZ: file too small");
   
   // Verify magic 'XTZ4'
   if (e[0] !== 88 || e[1] !== 84 || e[2] !== 90 || e[3] !== 52) {
@@ -87,14 +82,14 @@ export function decompressXtczLz4(compressedData: ArrayBuffer | Uint8Array): Arr
 
   const view = new DataView(e.buffer, e.byteOffset, e.length);
   const uncompressedSize = view.getUint32(4, true);
-  const numChunks = view.getUint32(12, true);
 
   const result = new Uint8Array(uncompressedSize);
-  let readOffset = 18;
+  let readOffset = 12; // Header is exactly 12 bytes
   let writeOffset = 0;
 
-  for (let i = 0; i < numChunks; i++) {
-    if (readOffset >= e.length) break;
+  let chunkIndex = 0;
+  while (readOffset < e.length && writeOffset < uncompressedSize) {
+    if (readOffset + 4 > e.length) break;
     
     const descriptor = view.getUint32(readOffset, true);
     readOffset += 4;
@@ -105,7 +100,7 @@ export function decompressXtczLz4(compressedData: ArrayBuffer | Uint8Array): Arr
     const size = descriptor & 0x7FFFFFFF;
     
     if (readOffset + size > e.length) {
-      throw new Error(`Invalid XTCZ: chunk data out of bounds at chunk ${i}`);
+      throw new Error(`Invalid XTCZ: chunk data out of bounds at chunk ${chunkIndex}`);
     }
 
     const chunkData = e.subarray(readOffset, readOffset + size);
@@ -115,8 +110,10 @@ export function decompressXtczLz4(compressedData: ArrayBuffer | Uint8Array): Arr
       result.set(chunkData, writeOffset);
       writeOffset += size;
     } else {
-      writeOffset = lz4.decompressBlock(chunkData, result, 0, size, writeOffset);
+      const written = lz4.decompressBlock(chunkData, result, 0, size, writeOffset);
+      writeOffset = written;
     }
+    chunkIndex++;
   }
 
   return result.buffer;
