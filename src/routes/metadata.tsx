@@ -375,10 +375,14 @@ function MetadataEditor() {
             <div style={{ marginTop: 'var(--space-md)', display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap' }}>
               <button className="btn-preview" onClick={handlePreview}>Preview</button>
               {!isRawPage && (
-                <>
-                  <button className="btn-download" onClick={() => handleSave(false)}>Save & Download</button>
-                  <button className="btn-download" onClick={() => handleSave(true)} style={{ background: 'var(--accent-hover)' }}>Compress to .xtcz</button>
-                </>
+                parsed.header.isXtcz ? (
+                  <button className="btn-download" onClick={() => handleSave(true)}>Save and compress to .xtcz</button>
+                ) : (
+                  <>
+                    <button className="btn-download" onClick={() => handleSave(false)}>Save & Download</button>
+                    <button className="btn-download" onClick={() => handleSave(true)} style={{ background: 'var(--accent-hover)' }}>Compress to .xtcz</button>
+                  </>
+                )
               )}
               <button className="btn-clear-results" onClick={() => { setFile(null); setParsed(null); setPreviewPages([]); setIsRawPage(false); }}>Close File</button>
             </div>
