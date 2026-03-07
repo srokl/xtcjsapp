@@ -198,41 +198,49 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
         </label>
       </div>
 
-      <div className="option checkbox-option">
-        <label htmlFor="useWasm">
-          <input
-            type="checkbox"
-            id="useWasm"
-            checked={options.useWasm}
-            onChange={(e) => onChange({ ...options, useWasm: e.target.checked })}
-          />
-          Use WebAssembly (Faster Encoding)
-        </label>
-      </div>
+      {!isImageMode && (
+        <>
+          <div className="option checkbox-option">
+            <label htmlFor="useWasm">
+              <input
+                type="checkbox"
+                id="useWasm"
+                checked={options.useWasm}
+                onChange={(e) => onChange({ ...options, useWasm: e.target.checked })}
+              />
+              Use WebAssembly (Faster Encoding)
+            </label>
+          </div>
 
-      {options.useWasm && (
-        <div style={{ fontSize: '0.7rem', color: 'var(--ink-faded)', marginTop: '-0.5rem', marginBottom: 'var(--space-sm)', fontStyle: 'italic', paddingLeft: '2.5rem' }}>
-          Note: If encoding fails, you may need to enable "Experimental WebAssembly" in <code>chrome://flags</code>
-        </div>
+          {options.useWasm && (
+            <div style={{ fontSize: '0.7rem', color: 'var(--ink-faded)', marginTop: '-0.5rem', marginBottom: 'var(--space-sm)', fontStyle: 'italic', paddingLeft: '2.5rem' }}>
+              Note: If encoding fails, you may need to enable "Experimental WebAssembly" in <code>chrome://flags</code>
+            </div>
+          )}
+        </>
       )}
 
-      <div className={`option checkbox-option${options.compressXtcz ? ' disabled' : ''}`}>
-        <label htmlFor="streamedDownload">
-          <input
-            type="checkbox"
-            id="streamedDownload"
-            checked={options.streamedDownload}
-            disabled={options.compressXtcz}
-            onChange={(e) => onChange({ ...options, streamedDownload: e.target.checked })}
-          />
-          Streamed Downloading (Memory Constrained)
-        </label>
-      </div>
+      {!isImageMode && (
+        <>
+          <div className={`option checkbox-option${options.compressXtcz ? ' disabled' : ''}`}>
+            <label htmlFor="streamedDownload">
+              <input
+                type="checkbox"
+                id="streamedDownload"
+                checked={options.streamedDownload}
+                disabled={options.compressXtcz}
+                onChange={(e) => onChange({ ...options, streamedDownload: e.target.checked })}
+              />
+              Streamed Downloading (Memory Constrained)
+            </label>
+          </div>
 
-      {options.streamedDownload && (
-        <div style={{ fontSize: '0.7rem', color: 'var(--ink-faded)', marginTop: '-0.5rem', marginBottom: 'var(--space-sm)', fontStyle: 'italic', paddingLeft: '2.5rem' }}>
-          Writes directly to disk. Use for very large files if the browser crashes.
-        </div>
+          {options.streamedDownload && (
+            <div style={{ fontSize: '0.7rem', color: 'var(--ink-faded)', marginTop: '-0.5rem', marginBottom: 'var(--space-sm)', fontStyle: 'italic', paddingLeft: '2.5rem' }}>
+              Writes directly to disk. Use for very large files if the browser crashes.
+            </div>
+          )}
+        </>
       )}
 
       {!isImageMode && (
