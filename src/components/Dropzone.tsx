@@ -12,7 +12,7 @@ export function Dropzone({ onFiles, fileType = 'cbz', multiple = true }: Dropzon
 
   const accept = fileType === 'pdf' ? '.pdf,.PDF' 
     : (fileType === 'image' ? '.jpg,.jpeg,.png,.webp,.bmp,.gif' : (fileType === 'video' ? '.mp4,.webm,.mkv,.avi,.mov' : (fileType === 'xtc' ? '.xtc,.xtch,.xtg,.xth,.xtcz' : '.cbz,.CBZ,.cbr,.CBR')))
-  const label = fileType === 'pdf' ? 'PDF' : (fileType === 'image' ? 'Image' : (fileType === 'video' ? 'Video' : (fileType === 'xtc' ? 'XTC/XTCH/XTG/XTH' : 'CBZ/CBR')))
+  const label = fileType === 'pdf' ? 'PDF' : (fileType === 'image' ? 'Image' : (fileType === 'video' ? 'Video' : (fileType === 'xtc' ? 'XTC/XTCH/XTG/XTH/XTCZ' : 'CBZ/CBR')))
 
   const filterFiles = useCallback((files: FileList) => {
     if (fileType === 'pdf') {
@@ -32,7 +32,7 @@ export function Dropzone({ onFiles, fileType = 'cbz', multiple = true }: Dropzon
     }
     if (fileType === 'xtc') {
       return Array.from(files).filter(f =>
-        /\.(xtc|xtch|xtg|xth)$/i.test(f.name)
+        /\.(xtc|xtch|xtg|xth|xtcz)$/i.test(f.name)
       )
     }
     // Accept both .cbz and .cbr for comic book type
