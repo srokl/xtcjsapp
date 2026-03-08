@@ -302,9 +302,9 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
           onChange={(e) => onChange({ ...options, dithering: e.target.value })}
         >
           <option value="floyd">Floyd-Steinberg</option>
-          <option value="stucki">Stucki (Experimental)</option>
+          <option value="stucki">Stucki</option>
           <option value="ostromoukhov">Ostromoukhov (Experimental)</option>
-          <option value="zhoufang">Zhou-Fang (Experimental)</option>
+          <option value="zhoufang">Zhou-Fang (Default)</option>
           <option value="atkinson">Atkinson</option>
           <option value="sierra-lite">Sierra Lite</option>
           <option value="ordered">Ordered</option>

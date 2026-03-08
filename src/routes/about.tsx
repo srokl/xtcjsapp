@@ -24,7 +24,7 @@ function AboutPage() {
           <li><strong>WebAssembly Acceleration:</strong> Optional high-performance Wasm pipeline for ultra-fast filtering, dithering, and packing.</li>
           <li><strong>2-bit Support:</strong> Full support for the enhanced 4-level grayscale XTCH format for superior image quality.</li>
           <li><strong>XTCZ Compression:</strong> Experimental LZ4 block compression support to significantly reduce file sizes on firmware 5.1.6+.</li>
-          <li><strong>Advanced Dithering:</strong> Choose from <strong>Stucki</strong> (Default), Atkinson, Floyd-Steinberg, or experimental <strong>Zhou-Fang</strong>, <strong>Ostromoukhov</strong>, and <strong>Stochastic</strong> (Hilbert Curve) algorithms.</li>
+          <li><strong>Advanced Dithering:</strong> Choose from <strong>Zhou-Fang</strong> (Default), Stucki, Atkinson, Floyd-Steinberg, or experimental <strong>Ostromoukhov</strong>, <strong>Stochastic</strong> (Hilbert Curve), and <strong>Matt Parker</strong> algorithms.</li>
           <li><strong>High-Quality Scaling:</strong> Uses Box Filter/Area Averaging for sharp, detailed downscaling before 1-bit dithering.</li>
           <li><strong>Manhwa Mode:</strong> Continuous vertical stitching for webtoons with customizable overlap.</li>
           <li><strong>Memory Optimized:</strong> "Streamed Downloading" option writes massive files (like 2GB CBZs) directly to disk, bypassing browser memory limits.</li>
@@ -65,7 +65,7 @@ function AboutPage() {
         </details>
         <details className="faq-item">
           <summary>What dithering algorithm should I use?</summary>
-          <p><strong>Stucki</strong> is the default and provides the best balance of sharpness and detail for manga. For a smoother look, try <strong>Zhou-Fang</strong> or <strong>Ostromoukhov</strong>. For crisp text with less noise, use <strong>Atkinson</strong>.</p>
+          <p><strong>Zhou-Fang</strong> is the default and provides the best balance of smoothness and detail for manga, significantly reducing noise/worms compared to traditional methods. For sharper, higher-contrast edges, try <strong>Stucki</strong>. For crisp text with less noise, use <strong>Atkinson</strong>.</p>
         </details>
         <details className="faq-item">
           <summary>Why are my landscape pages split?</summary>

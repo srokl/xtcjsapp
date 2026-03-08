@@ -69,7 +69,7 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
   const [viewerPages, setViewerPages] = useState<string[]>([])
   const [options, setOptions] = useState<ConversionOptions>({
     splitMode: (fileType === 'image' || fileType === 'video') ? 'nosplit' : 'overlap',
-    dithering: 'stucki',
+    dithering: 'zhoufang',
     contrast: 0, // Default 0 (None) for all file types
     horizontalMargin: 0,
     verticalMargin: 0,
