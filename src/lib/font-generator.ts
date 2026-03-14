@@ -24,12 +24,21 @@ const VERTICAL_SYMBOLS = new Set([
 // Characters that need to be shifted to the top-right in vertical layout
 const VERTICAL_PUNCTUATION_SHIFT = new Set(['、', '。', '，', '．', ',', '.']);
 
-function getVerticalPunctuationOffset(char: string, fontSizePx: number): { x: number, y: number } {
+function getVerticalPunctuationOffset(char: string, fontSizePx: number, isPreview: boolean = false): { x: number, y: number } {
   if (VERTICAL_PUNCTUATION_SHIFT.has(char)) {
-    // We will apply this shift AFTER the -90 degree rotation.
-    // In the rotated space, the comma is at the bottom-right.
-    // We want it at the top-right. So we need to move it UP (negative Y).
-    return { x: 0, y: -fontSizePx * 0.55 }; 
+    if (isPreview) {
+      // In the unrotated preview space:
+      // Comma draws at bottom-left (-0.25w, +0.25h relative to center).
+      // We want it at top-right (+0.25w, -0.25h).
+      // Shift X by +0.5, Y by -0.5.
+      return { x: fontSizePx * 0.5, y: -fontSizePx * 0.5 };
+    } else {
+      // In the rotated generator space (-90 degrees):
+      // The bottom-left comma is rotated to the bottom-right (+0.25w, +0.25h).
+      // We want it at top-right (+0.25w, -0.25h).
+      // Shift Y by -0.5.
+      return { x: 0, y: -fontSizePx * 0.5 }; 
+    }
   }
   return { x: 0, y: 0 };
 }
@@ -93,8 +102,8 @@ export class XTEinkFontBinary {
     this.fontbin = new Uint8Array(this.charByte * this.totalChar);
   }
 
-  getSuggestedFileName(title: string) {
-    return `${title} ${this.width}×${this.height}.bin`;
+  getSuggestedFileName(title: string, pt: number) {
+    return `${title}.${pt}pt.${this.width}x${this.height}.bin`;
   }
 
   setPixel(charCode: number, x: number, y: number, value: boolean) {
@@ -164,7 +173,7 @@ export async function generateFontBinary(
           ctx.rotate(-Math.PI / 2); // Rotate -90 degrees for vertical layout (Upright on e-reader)
           
           // Apply punctuation shift AFTER rotation so we are working in the visual space
-          const offset = getVerticalPunctuationOffset(charStr, fontSizePx);
+          const offset = getVerticalPunctuationOffset(charStr, fontSizePx, false);
           if (offset.x !== 0 || offset.y !== 0) {
             ctx.translate(offset.x, offset.y);
           }
@@ -195,7 +204,7 @@ export async function generateFontBinary(
     onProgress(end / binary.totalChar);
   }
   
-  const name = binary.getSuggestedFileName(options.fontFamily);
+  const name = binary.getSuggestedFileName(options.fontFamily, options.fontSize);
   return { buffer: binary.fontbin.buffer, name };
 }
 
@@ -291,18 +300,9 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
           ctx.rotate(Math.PI / 2);
         } else {
           // For upright characters, we still need to shift punctuation correctly.
-          // Since the preview doesn't rotate -90, we can just apply the offset directly
-          // based on visual UP and RIGHT.
-          // In an unrotated canvas, UP is -Y, RIGHT is +X.
-          const offset = getVerticalPunctuationOffset(charStr, fontSizePx);
-          // offset is {x: 0, y: -0.55*font} which means UP. We need it TOP-RIGHT.
-          // In vertical layout, commas are at top right. 
-          // Our function currently returns {x: 0, y: -0.55*H}.
-          // Let's adjust it for the preview specifically. Wait, the preview draws it without rotation.
-          // If it's bottom-left originally, and we want it top-right, we must shift it UP and RIGHT.
+          const offset = getVerticalPunctuationOffset(charStr, fontSizePx, true);
           if (offset.x !== 0 || offset.y !== 0) {
-            // Shift Up and Right
-            ctx.translate(fontSizePx * 0.4, offset.y);
+            ctx.translate(offset.x, offset.y);
           }
         }
       }
