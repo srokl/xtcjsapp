@@ -14,6 +14,7 @@ import { Route as PdfRouteImport } from './routes/pdf'
 import { Route as MetadataRouteImport } from './routes/metadata'
 import { Route as MergeRouteImport } from './routes/merge'
 import { Route as ImageRouteImport } from './routes/image'
+import { Route as FontRouteImport } from './routes/font'
 import { Route as Feature4RouteImport } from './routes/feature4'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as IndexRouteImport } from './routes/index'
@@ -43,6 +44,11 @@ const ImageRoute = ImageRouteImport.update({
   path: '/image',
   getParentRoute: () => rootRouteImport,
 } as any)
+const FontRoute = FontRouteImport.update({
+  id: '/font',
+  path: '/font',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const Feature4Route = Feature4RouteImport.update({
   id: '/feature4',
   path: '/feature4',
@@ -63,6 +69,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/feature4': typeof Feature4Route
+  '/font': typeof FontRoute
   '/image': typeof ImageRoute
   '/merge': typeof MergeRoute
   '/metadata': typeof MetadataRoute
@@ -73,6 +80,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/feature4': typeof Feature4Route
+  '/font': typeof FontRoute
   '/image': typeof ImageRoute
   '/merge': typeof MergeRoute
   '/metadata': typeof MetadataRoute
@@ -84,6 +92,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/feature4': typeof Feature4Route
+  '/font': typeof FontRoute
   '/image': typeof ImageRoute
   '/merge': typeof MergeRoute
   '/metadata': typeof MetadataRoute
@@ -96,6 +105,7 @@ export interface FileRouteTypes {
     | '/'
     | '/about'
     | '/feature4'
+    | '/font'
     | '/image'
     | '/merge'
     | '/metadata'
@@ -106,6 +116,7 @@ export interface FileRouteTypes {
     | '/'
     | '/about'
     | '/feature4'
+    | '/font'
     | '/image'
     | '/merge'
     | '/metadata'
@@ -116,6 +127,7 @@ export interface FileRouteTypes {
     | '/'
     | '/about'
     | '/feature4'
+    | '/font'
     | '/image'
     | '/merge'
     | '/metadata'
@@ -127,6 +139,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AboutRoute: typeof AboutRoute
   Feature4Route: typeof Feature4Route
+  FontRoute: typeof FontRoute
   ImageRoute: typeof ImageRoute
   MergeRoute: typeof MergeRoute
   MetadataRoute: typeof MetadataRoute
@@ -171,6 +184,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ImageRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/font': {
+      id: '/font'
+      path: '/font'
+      fullPath: '/font'
+      preLoaderRoute: typeof FontRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/feature4': {
       id: '/feature4'
       path: '/feature4'
@@ -199,6 +219,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AboutRoute: AboutRoute,
   Feature4Route: Feature4Route,
+  FontRoute: FontRoute,
   ImageRoute: ImageRoute,
   MergeRoute: MergeRoute,
   MetadataRoute: MetadataRoute,

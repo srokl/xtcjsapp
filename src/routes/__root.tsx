@@ -111,6 +111,9 @@ function RootLayout() {
           <Link to="/merge" className={`nav-tab${location.pathname === '/merge' ? ' active' : ''}`}>
             Merge / Split
           </Link>
+          <Link to="/font" className={`nav-tab${location.pathname === '/font' ? ' active' : ''}`}>
+            Font
+          </Link>
         </nav>
 
         <Outlet />

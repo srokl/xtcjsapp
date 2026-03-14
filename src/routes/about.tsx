@@ -29,6 +29,7 @@ function AboutPage() {
           <li><strong>Manhwa Mode:</strong> Continuous vertical stitching for webtoons with customizable overlap.</li>
           <li><strong>Memory Optimized:</strong> "Streamed Downloading" option writes massive files (like 2GB CBZs) directly to disk, bypassing browser memory limits.</li>
           <li><strong>Metadata & TOC Editor:</strong> View, add, delete, and reorder chapters, and edit title/author information directly inside XTC/XTCH files.</li>
+          <li><strong>Font Generator:</strong> Create custom `.bin` fonts for your device with full control over weight, spacing, smoothing, hinting, and advanced vertical text punctuation layout.</li>
           <li><strong>Merge & Split:</strong> Easily split huge archives into smaller volumes or merge multiple volumes together while preserving chapters.</li>
         </ul>
       </section>
