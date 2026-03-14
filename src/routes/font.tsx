@@ -36,6 +36,7 @@ function FontPage() {
   const [showBoundary, setShowBoundary] = useState(false)
   const [customFontName, setCustomFontName] = useState<string | null>(null)
   const [zoomScale, setZoomScale] = useState(1)
+  const [monitorPpi, setMonitorPpi] = useState(96)
   
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -271,19 +272,38 @@ function FontPage() {
             </div>
           </div>
           
-          <div style={{ marginBottom: 'var(--space-md)' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 'bold' }}>Zoom: {zoomScale.toFixed(1)}x</span>
+          <div style={{ marginBottom: 'var(--space-md)', display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)', flexWrap: 'wrap' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)', flex: 1 }}>
+                <span style={{ fontSize: '0.85rem', fontWeight: 'bold', minWidth: '80px' }}>Zoom: {zoomScale.toFixed(2)}x</span>
+                <input 
+                  type="range" 
+                  min="0.1" 
+                  max="3" 
+                  step="0.01" 
+                  value={zoomScale}
+                  onChange={(e) => setZoomScale(parseFloat(e.target.value))}
+                  style={{ flex: 1 }}
+                />
+              </label>
+              <button 
+                className="btn-preview" 
+                style={{ padding: 'var(--space-xs) var(--space-sm)', fontSize: '0.75rem', margin: 0 }}
+                onClick={() => setZoomScale(monitorPpi / 220)}
+              >
+                Real Size (4.3")
+              </button>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)', padding: 'var(--space-sm)', background: 'var(--paper)', borderRadius: '4px', border: 'var(--border)' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 'bold' }}>Monitor PPI Calibration:</span>
               <input 
-                type="range" 
-                min="0.5" 
-                max="3" 
-                step="0.1" 
-                value={zoomScale}
-                onChange={(e) => setZoomScale(parseFloat(e.target.value))}
-                style={{ flex: 1 }}
+                type="number" 
+                value={monitorPpi} 
+                onChange={e => setMonitorPpi(parseInt(e.target.value) || 96)}
+                style={{ width: '60px', padding: '2px 4px', fontSize: '0.75rem', background: 'var(--paper-dark)', border: 'var(--border)', color: 'var(--ink)' }}
               />
-            </label>
+              <span style={{ fontSize: '0.7rem', color: 'var(--ink-light)' }}>(Laptop ~141, Desktop ~92)</span>
+            </div>
           </div>
           
           <div style={{ 
