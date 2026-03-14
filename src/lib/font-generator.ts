@@ -21,6 +21,17 @@ const VERTICAL_SYMBOLS = new Set([
   '-', '—', '–', '…', '⋯', '_', '~', '～', 'ー'
 ]);
 
+// Characters that need to be shifted to the top-right in vertical layout
+const VERTICAL_PUNCTUATION_SHIFT = new Set(['、', '。', '，', '．', ',', '.']);
+
+function getVerticalPunctuationOffset(char: string, fontSizePx: number): { x: number, y: number } {
+  if (VERTICAL_PUNCTUATION_SHIFT.has(char)) {
+    // Shift right and up to move from bottom-left to top-right
+    return { x: fontSizePx * 0.5, y: -fontSizePx * 0.5 };
+  }
+  return { x: 0, y: 0 };
+}
+
 function isVerticalSymbol(char: string): boolean {
   return VERTICAL_SYMBOLS.has(char);
 }
@@ -140,7 +151,15 @@ export async function generateFontBinary(
       
       ctx.save();
       
-      ctx.translate(box.width / 2 + options.xOffset, box.height / 2 + options.yOffset);
+      let puncOffsetX = 0;
+      let puncOffsetY = 0;
+      if (options.vertical) {
+        const offset = getVerticalPunctuationOffset(charStr, fontSizePx);
+        puncOffsetX = offset.x;
+        puncOffsetY = offset.y;
+      }
+      
+      ctx.translate(box.width / 2 + options.xOffset + puncOffsetX, box.height / 2 + options.yOffset + puncOffsetY);
       
       if (options.vertical) {
         if (options.verticalSymbols && isVerticalSymbol(charStr)) {
@@ -280,10 +299,18 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
       }
 
       ctx.save();
-      
+
+      let puncOffsetX = 0;
+      let puncOffsetY = 0;
+      if (options.vertical) {
+        const offset = getVerticalPunctuationOffset(charStr, fontSizePx);
+        puncOffsetX = offset.x;
+        puncOffsetY = offset.y;
+      }
+
       // We must translate to the CENTER of the character box to use textBaseline='middle' and textAlign='center'
-      ctx.translate(currentX + charBoxW / 2 + options.xOffset, currentY + charBoxH / 2 + options.yOffset);
-      
+      ctx.translate(currentX + charBoxW / 2 + options.xOffset + puncOffsetX, currentY + charBoxH / 2 + options.yOffset + puncOffsetY);
+
       // The original toolkit rotates the *binary* output by -90 degrees, but the visual preview
       // displays the text upright (Standard CJK vertical reading style).
       // Therefore, we DO NOT rotate the context here in the preview, UNLESS it's a vertical symbol.
