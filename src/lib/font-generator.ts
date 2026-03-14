@@ -26,8 +26,10 @@ const VERTICAL_PUNCTUATION_SHIFT = new Set(['、', '。', '，', '．', ',', '.'
 
 function getVerticalPunctuationOffset(char: string, fontSizePx: number): { x: number, y: number } {
   if (VERTICAL_PUNCTUATION_SHIFT.has(char)) {
-    // Shift right and up to move from bottom-left to top-right
-    return { x: fontSizePx * 0.5, y: -fontSizePx * 0.5 };
+    // We will apply this shift AFTER the -90 degree rotation.
+    // In the rotated space, the comma is at the bottom-right.
+    // We want it at the top-right. So we need to move it UP (negative Y).
+    return { x: 0, y: -fontSizePx * 0.55 }; 
   }
   return { x: 0, y: 0 };
 }
@@ -151,48 +153,21 @@ export async function generateFontBinary(
       
       ctx.save();
       
-      let puncOffsetX = 0;
-      let puncOffsetY = 0;
-      if (options.vertical) {
-        const offset = getVerticalPunctuationOffset(charStr, fontSizePx);
-        puncOffsetX = offset.x;
-        puncOffsetY = offset.y;
-      }
-      
-      ctx.translate(box.width / 2 + options.xOffset + puncOffsetX, box.height / 2 + options.yOffset + puncOffsetY);
+      ctx.translate(box.width / 2 + options.xOffset, box.height / 2 + options.yOffset);
       
       if (options.vertical) {
         if (options.verticalSymbols && isVerticalSymbol(charStr)) {
-          // If vertical symbols option is checked, rotate specific punctuation
-          // CJK vertical punctuation is rotated 90 degrees clockwise relative to upright characters
-          // Wait, the original toolkit rotates the whole context by -90 for vertical fonts, 
-          // meaning the e-reader expects the binary image to be rotated -90 degrees.
-          // Let's think about this:
-          // In standard vertical mode without the flag, the glyph is rotated -90.
-          // If it's a vertical symbol, it needs to be rotated an ADDITIONAL 90 degrees?
-          // Let's assume standard rotation is -Math.PI / 2.
-          // To make a dash '-' vertical, it should be rotated by +90 relative to the standard upright text.
-          // Since the whole binary is rotated -90, to make it vertical on screen we don't rotate it,
-          // so the net rotation is 0 instead of -90? Or we rotate it 90 degrees more?
-          // Actually, if the entire string is drawn rotated -90, a horizontal '-' becomes vertical on the reader.
-          // If a character shouldn't be rotated (it should stay upright on the reader), it needs -90.
-          // CJK characters are upright on the reader, so they are drawn rotated -90 in the file.
-          // If a symbol like '-' should ALSO be upright? No, '-' should be vertical '|'.
-          // If it's drawn rotated -90, it will be '|' on the reader!
-          // So if we *don't* want it to be upright, but rather "sideways", we should rotate it differently.
-          // Wait! Let's check what the user wants. The user says "some japanese '-', '...', and '()' and other japanese parenthesis kanjis is still landscape viewing I want it to view vertically add render option for vertical symbols".
-          // If they are "landscape viewing", it means they are currently drawn rotated -90 (making them upright on the e-reader, thus looking "landscape" because the text flows vertically).
-          // We need to rotate them by an extra +90 (or -90) so they flow inline with the vertical text.
-          // The CJK glyphs are rotated -90. We should rotate symbols by 0 (or -180).
-          // Let's just use 0 (don't rotate).
           ctx.rotate(0);
         } else if (!options.verticalEnglishUpright && isEnglishOrNumber(charStr)) {
-          // English and numbers are typically rotated 90 degrees clockwise in vertical text (so they read sideways).
-          // If verticalEnglishUpright is false, they should NOT be drawn upright.
-          // Rotation 0 means they will appear sideways on the e-reader.
           ctx.rotate(0);
         } else {
           ctx.rotate(-Math.PI / 2); // Rotate -90 degrees for vertical layout (Upright on e-reader)
+          
+          // Apply punctuation shift AFTER rotation so we are working in the visual space
+          const offset = getVerticalPunctuationOffset(charStr, fontSizePx);
+          if (offset.x !== 0 || offset.y !== 0) {
+            ctx.translate(offset.x, offset.y);
+          }
         }
       }
       
@@ -300,16 +275,8 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
 
       ctx.save();
 
-      let puncOffsetX = 0;
-      let puncOffsetY = 0;
-      if (options.vertical) {
-        const offset = getVerticalPunctuationOffset(charStr, fontSizePx);
-        puncOffsetX = offset.x;
-        puncOffsetY = offset.y;
-      }
-
       // We must translate to the CENTER of the character box to use textBaseline='middle' and textAlign='center'
-      ctx.translate(currentX + charBoxW / 2 + options.xOffset + puncOffsetX, currentY + charBoxH / 2 + options.yOffset + puncOffsetY);
+      ctx.translate(currentX + charBoxW / 2 + options.xOffset, currentY + charBoxH / 2 + options.yOffset);
 
       // The original toolkit rotates the *binary* output by -90 degrees, but the visual preview
       // displays the text upright (Standard CJK vertical reading style).
@@ -322,6 +289,21 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
         } else if (!options.verticalEnglishUpright && isEnglishOrNumber(charStr)) {
           // If English is not set to remain upright, it reads sideways.
           ctx.rotate(Math.PI / 2);
+        } else {
+          // For upright characters, we still need to shift punctuation correctly.
+          // Since the preview doesn't rotate -90, we can just apply the offset directly
+          // based on visual UP and RIGHT.
+          // In an unrotated canvas, UP is -Y, RIGHT is +X.
+          const offset = getVerticalPunctuationOffset(charStr, fontSizePx);
+          // offset is {x: 0, y: -0.55*font} which means UP. We need it TOP-RIGHT.
+          // In vertical layout, commas are at top right. 
+          // Our function currently returns {x: 0, y: -0.55*H}.
+          // Let's adjust it for the preview specifically. Wait, the preview draws it without rotation.
+          // If it's bottom-left originally, and we want it top-right, we must shift it UP and RIGHT.
+          if (offset.x !== 0 || offset.y !== 0) {
+            // Shift Up and Right
+            ctx.translate(fontSizePx * 0.4, offset.y);
+          }
         }
       }
       
