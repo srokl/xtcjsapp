@@ -30,12 +30,17 @@ function isEnglishOrNumber(char: string): boolean {
   return /^[\x20-\x7E]+$/.test(char) && !isVerticalSymbol(char);
 }
 
+const DEVICE_PPI = 220;
+const PT_TO_PX = DEVICE_PPI / 72;
+
 export function measureCharSize(options: FontGenerationOptions): { width: number, height: number } {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d')!;
   
+  const fontSizePx = options.fontSize * PT_TO_PX;
+
   // Use 'px' to match generation, avoiding CSS vs Device pixel ratio scaling issues
-  const fontString = `${options.fontStyle} ${options.fontWeight} ${options.fontSize}px "${options.fontFamily}", sans-serif`;
+  const fontString = `${options.fontStyle} ${options.fontWeight} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
   ctx.font = fontString;
   
   const metrics = ctx.measureText("坐");
@@ -46,8 +51,8 @@ export function measureCharSize(options: FontGenerationOptions): { width: number
   if (isNaN(h) || h === 0) {
     h = Math.round(metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent);
   }
-  if (h === 0) h = options.fontSize;
-  if (w === 0) w = options.fontSize;
+  if (h === 0) h = fontSizePx;
+  if (w === 0) w = fontSizePx;
 
   // Add spacing
   let finalW = w + options.charSpacing;
@@ -112,7 +117,8 @@ export async function generateFontBinary(
   // Apply smoothing option
   ctx.imageSmoothingEnabled = options.smoothing;
 
-  const fontString = `${options.fontStyle} ${options.fontWeight} ${options.fontSize}px "${options.fontFamily}", sans-serif`;
+  const fontSizePx = options.fontSize * PT_TO_PX;
+  const fontString = `${options.fontStyle} ${options.fontWeight} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
   
   // We process chunks to avoid freezing the UI completely
   const CHUNK_SIZE = 1024;
@@ -222,7 +228,8 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
   ctx.imageSmoothingEnabled = options.smoothing;
   
   // Font string uses 'px' not 'pt' to ensure 1:1 mapping on the canvas buffer without OS scaling interference
-  const fontString = `${options.fontStyle} ${options.fontWeight} ${options.fontSize}px "${options.fontFamily}", sans-serif`;
+  const fontSizePx = options.fontSize * PT_TO_PX;
+  const fontString = `${options.fontStyle} ${options.fontWeight} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
   ctx.font = fontString;
   ctx.fillStyle = 'black'; // Draw text in black on white for e-ink preview
   ctx.textBaseline = 'middle';

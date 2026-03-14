@@ -322,10 +322,19 @@ function FontPage() {
           </div>
 
           <div style={{ marginTop: 'var(--space-xl)', fontSize: '0.85rem', color: 'var(--ink-light)', lineHeight: '1.6' }}>
-            <div style={{ fontWeight: 'bold', marginBottom: 'var(--space-xs)', color: 'var(--ink)' }}>Estimated display parameters:</div>
-            <div>Single char size (with spacing): ~{Math.round(options.fontSize + options.charSpacing)}x{Math.round(options.fontSize + options.lineSpacing)}px</div>
-            <div>Screen capacity: {Math.floor(800 / (options.fontSize + options.lineSpacing))} lines, {Math.floor(480 / (options.fontSize + options.charSpacing))} chars per line</div>
-            <div>Max chars on screen: {Math.floor(800 / (options.fontSize + options.lineSpacing)) * Math.floor(480 / (options.fontSize + options.charSpacing))} characters</div>
+            <div style={{ fontWeight: 'bold', marginBottom: 'var(--space-xs)', color: 'var(--ink)' }}>Estimated display parameters (220 PPI):</div>
+            {(() => {
+              const fontSizePx = options.fontSize * (220 / 72);
+              const totalW = fontSizePx + options.charSpacing;
+              const totalH = fontSizePx + options.lineSpacing;
+              return (
+                <>
+                  <div>Single char size (with spacing): ~{Math.round(totalW)}x{Math.round(totalH)}px</div>
+                  <div>Screen capacity: {Math.floor(800 / totalH)} lines, {Math.floor(480 / totalW)} chars per line</div>
+                  <div>Max chars on screen: {Math.floor(800 / totalH) * Math.floor(480 / totalW)} characters</div>
+                </>
+              );
+            })()}
             <div style={{ fontStyle: 'italic', marginTop: 'var(--space-xs)' }}>Preview styles and data are for reference only, please refer to the actual device.</div>
           </div>
 
