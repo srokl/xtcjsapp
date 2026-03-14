@@ -24,21 +24,14 @@ const VERTICAL_SYMBOLS = new Set([
 // Characters that need to be shifted to the top-right in vertical layout
 const VERTICAL_PUNCTUATION_SHIFT = new Set(['、', '。', '，', '．', ',', '.']);
 
-function getVerticalPunctuationOffset(char: string, fontSizePx: number, isPreview: boolean = false): { x: number, y: number } {
+function getVerticalPunctuationOffset(char: string, fontSizePx: number): { x: number, y: number } {
   if (VERTICAL_PUNCTUATION_SHIFT.has(char)) {
-    if (isPreview) {
-      // In the unrotated preview space:
-      // Comma draws at bottom-left (-0.25w, +0.25h relative to center).
-      // We want it at top-right (+0.25w, -0.25h).
-      // Shift X by +0.5, Y by -0.5.
-      return { x: fontSizePx * 0.5, y: -fontSizePx * 0.5 };
-    } else {
-      // In the rotated generator space (-90 degrees):
-      // The bottom-left comma is rotated to the bottom-right (+0.25w, +0.25h).
-      // We want it at top-right (+0.25w, -0.25h).
-      // Shift Y by -0.5.
-      return { x: 0, y: -fontSizePx * 0.5 }; 
-    }
+    // Both preview (unrotated) and generator (post-rotation) spaces align such that:
+    // +X is Visual Right
+    // -Y is Visual Up
+    // A standard comma sits at the bottom-left. We want it at the top-right.
+    // So we shift it Right (+0.5) and Up (-0.5).
+    return { x: fontSizePx * 0.5, y: -fontSizePx * 0.5 };
   }
   return { x: 0, y: 0 };
 }
@@ -173,7 +166,7 @@ export async function generateFontBinary(
           ctx.rotate(-Math.PI / 2); // Rotate -90 degrees for vertical layout (Upright on e-reader)
           
           // Apply punctuation shift AFTER rotation so we are working in the visual space
-          const offset = getVerticalPunctuationOffset(charStr, fontSizePx, false);
+          const offset = getVerticalPunctuationOffset(charStr, fontSizePx);
           if (offset.x !== 0 || offset.y !== 0) {
             ctx.translate(offset.x, offset.y);
           }
@@ -300,7 +293,7 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
           ctx.rotate(Math.PI / 2);
         } else {
           // For upright characters, we still need to shift punctuation correctly.
-          const offset = getVerticalPunctuationOffset(charStr, fontSizePx, true);
+          const offset = getVerticalPunctuationOffset(charStr, fontSizePx);
           if (offset.x !== 0 || offset.y !== 0) {
             ctx.translate(offset.x, offset.y);
           }
