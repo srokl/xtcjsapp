@@ -15,9 +15,7 @@ const SYSTEM_FONTS = [
 function FontPage() {
   const [options, setOptions] = useState<FontGenerationOptions>({
     fontFamily: 'serif',
-    fontSize: 24,
-    width: 24,
-    height: 24,
+    fontSize: 10,
     fontWeight: 'normal',
     fontStyle: 'normal',
     vertical: false,
@@ -27,7 +25,9 @@ function FontPage() {
     lineSpacing: 0,
     threshold: 128,
     yOffset: 0,
-    xOffset: 0
+    xOffset: 0,
+    smoothing: true,
+    hinting: true
   })
 
   const [previewText, setPreviewText] = useState('abcdefghijklmnopqrstuvwxyz\nABCDEFGHIJKLMNOPQRSTUVWXYZ\n0123456789\n`~!@#$%^&*()-_=+[{]}\\|;:\'",<.>/?\n永不妥协')
