@@ -39,6 +39,7 @@ function FontPage() {
   const [monitorPpi, setMonitorPpi] = useState(126)
   const [calibrating, setCalibrating] = useState(false)
   const [calibWidth, setCalibWidth] = useState(250) // pixels that should match 5cm
+  const [previewCutoffCount, setPreviewCutoffCount] = useState(0)
   
   // 5cm = 1.9685 inches. PPI = pixels / 1.9685
   const updatePpiFromCalib = (px: number) => {
@@ -67,7 +68,8 @@ function FontPage() {
 
   useEffect(() => {
     if (canvasRef.current) {
-      previewFontCharacter(canvasRef.current, previewText, options, showBoundary)
+      const count = previewFontCharacter(canvasRef.current, previewText, options, showBoundary)
+      setPreviewCutoffCount(count)
     }
   }, [options, previewText, showBoundary])
 
@@ -76,9 +78,13 @@ function FontPage() {
     setProgress(0)
 
     try {
-      const { buffer, name } = await generateFontBinary(options, (p) => {
+      const { buffer, name, cutoffCount } = await generateFontBinary(options, (p) => {
         setProgress(p)
       })
+      
+      if (cutoffCount > 0) {
+        alert(`Warning: ${cutoffCount} characters were cutoff because they exceeded the character bounding box. Consider reducing font size or increasing spacing.`)
+      }
 
       const fileStream = streamSaver.createWriteStream(name, {
         size: buffer.byteLength,
@@ -255,6 +261,22 @@ function FontPage() {
                   <input 
                     type="radio" 
                     name="textPreset"
+                    onChange={() => setPreviewText('吾輩は猫である。名前はまだ無い。\nどこで生れたかとんと見当がつかぬ。ー〜｜\n「坊っちゃん」‥‥［（｛｝）］')}
+                  />
+                  Japanese (Tategaki)
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
+                  <input 
+                    type="radio" 
+                    name="textPreset"
+                    onChange={() => setPreviewText('El veloz murciélago hindú comía feliz cardillo y escabeche.\n¿Qué extraña aventura nos aguarda hoy?\n¡Mañana será otro día mejor! (1234567890)')}
+                  />
+                  Spanish / Latin
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
+                  <input 
+                    type="radio" 
+                    name="textPreset"
                     defaultChecked
                     onChange={() => setPreviewText('abcdefghijklmnopqrstuvwxyz\nABCDEFGHIJKLMNOPQRSTUVWXYZ\n0123456789\n`~!@#$%^&*()-_=+[{]}\\|;:\'",<.>/?\n永不妥协')}
                   />
@@ -302,6 +324,12 @@ function FontPage() {
                 Real Size (4.3")
               </button>
             </div>
+
+            {previewCutoffCount > 0 && (
+              <div style={{ color: '#ff4444', fontSize: '0.75rem', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 'var(--space-xs)', background: 'rgba(255, 68, 68, 0.1)', padding: 'var(--space-xs) var(--space-sm)', borderRadius: '4px' }}>
+                <span>⚠️ {previewCutoffCount} characters cutoff in preview (highlighted in red)</span>
+              </div>
+            )}
             
             <div style={{ padding: 'var(--space-sm)', background: 'var(--paper)', borderRadius: '4px', border: 'var(--border)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-xs)' }}>

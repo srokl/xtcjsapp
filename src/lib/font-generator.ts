@@ -45,6 +45,46 @@ function isEnglishOrNumber(char: string): boolean {
   return /^[\x20-\x7E]+$/.test(char) && !isVerticalSymbol(char);
 }
 
+/**
+ * Checks if a character's glyph will be cutoff by the bounding box.
+ */
+function isCharCutoff(ctx: CanvasRenderingContext2D, char: string, box: { width: number, height: number }, options: FontGenerationOptions): boolean {
+  const metrics = ctx.measureText(char);
+  const halfW = box.width / 2;
+  const halfH = box.height / 2;
+
+  // Visual boundaries relative to the center anchor
+  let left = -metrics.actualBoundingBoxLeft;
+  let right = metrics.actualBoundingBoxRight;
+  let top = -metrics.actualBoundingBoxAscent;
+  let bottom = metrics.actualBoundingBoxDescent;
+
+  if (options.vertical && !isVerticalSymbol(char) && !(!options.verticalEnglishUpright && isEnglishOrNumber(char))) {
+    // For rotated characters (-90 deg), the axes swap
+    // Unrotated Top (Ascent) -> Rotated Left
+    // Unrotated Bottom (Descent) -> Rotated Right
+    // Unrotated Left -> Rotated Bottom
+    // Unrotated Right -> Rotated Top
+    const vLeft = -metrics.actualBoundingBoxAscent;
+    const vRight = metrics.actualBoundingBoxDescent;
+    const vTop = -metrics.actualBoundingBoxRight;
+    const vBottom = metrics.actualBoundingBoxLeft;
+    
+    left = vLeft;
+    right = vRight;
+    top = vTop;
+    bottom = vBottom;
+  }
+
+  // Check if any edge + offset exceeds half-box dimensions
+  return (
+    left + options.xOffset < -halfW ||
+    right + options.xOffset > halfW ||
+    top + options.yOffset < -halfH ||
+    bottom + options.yOffset > halfH
+  );
+}
+
 const DEVICE_PPI = 220;
 const PT_TO_PX = DEVICE_PPI / 72;
 
@@ -129,7 +169,7 @@ export class XTEinkFontBinary {
 export async function generateFontBinary(
   options: FontGenerationOptions,
   onProgress: (progress: number) => void
-): Promise<{ buffer: ArrayBuffer, name: string }> {
+): Promise<{ buffer: ArrayBuffer, name: string, cutoffCount: number }> {
   const box = measureCharSize(options);
   const binary = new XTEinkFontBinary(box.width, box.height);
   
@@ -144,6 +184,8 @@ export async function generateFontBinary(
   const fontSizePx = options.fontSize * PT_TO_PX;
   const fontString = `${options.fontStyle} ${options.fontWeight} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
   
+  let cutoffCount = 0;
+
   // We process chunks to avoid freezing the UI completely
   const CHUNK_SIZE = 1024;
   
@@ -162,6 +204,10 @@ export async function generateFontBinary(
       ctx.textBaseline = 'middle';
       ctx.textAlign = 'center';
       
+      if (isCharCutoff(ctx, charStr, box, options)) {
+        cutoffCount++;
+      }
+
       ctx.save();
       
       ctx.translate(box.width / 2 + options.xOffset, box.height / 2 + options.yOffset);
@@ -207,10 +253,10 @@ export async function generateFontBinary(
   }
   
   const name = binary.getSuggestedFileName(options.fontFamily, options.fontSize);
-  return { buffer: binary.fontbin.buffer, name };
+  return { buffer: binary.fontbin.buffer, name, cutoffCount };
 }
 
-export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, options: FontGenerationOptions, showBoundary: boolean = false) {
+export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, options: FontGenerationOptions, showBoundary: boolean = false): number {
   // Always set fixed screen preview dimensions to 480x800 for the XTEink X4
   const SCREEN_W = 480;
   const SCREEN_H = 800;
@@ -242,14 +288,15 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
 
   // Start rendering near the top left, with a small margin
   // For vertical text, it usually starts Top-Right
-  const startX = options.vertical ? SCREEN_W - charBoxW - 20 : 20;
+  const startX = options.vertical ? SCREEN_W - charBoxH - 20 : 20;
   const startY = 20;
 
   const lines = text.split('\n');
   let currentX = startX;
   let currentY = startY;
 
-  const drawnBoxes: {x: number, y: number, w: number, h: number}[] = [];
+  const drawnBoxes: {x: number, y: number, w: number, h: number, isCutoff: boolean}[] = [];
+  let cutoffCount = 0;
 
   for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
     const line = lines[lineIdx];
@@ -284,10 +331,13 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
         }
       }
 
+      const isCutoff = isCharCutoff(ctx, charStr, box, options);
+      if (isCutoff) cutoffCount++;
+
       ctx.save();
 
       // We must translate to the CENTER of the character box to use textBaseline='middle' and textAlign='center'
-      ctx.translate(currentX + charBoxH / 2 + options.xOffset, currentY + charBoxW / 2 + options.yOffset);
+      ctx.translate(currentX + (options.vertical ? charBoxH : charBoxW) / 2 + options.xOffset, currentY + (options.vertical ? charBoxW : charBoxH) / 2 + options.yOffset);
 
       // The original toolkit rotates the *binary* output by -90 degrees, but the visual preview
       // displays the text upright (Standard CJK vertical reading style).
@@ -313,9 +363,9 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
       ctx.restore();
 
       if (options.vertical) {
-        drawnBoxes.push({ x: currentX, y: currentY, w: charBoxH, h: charBoxW });
+        drawnBoxes.push({ x: currentX, y: currentY, w: charBoxH, h: charBoxW, isCutoff });
       } else {
-        drawnBoxes.push({ x: currentX, y: currentY, w: charBoxW, h: charBoxH });
+        drawnBoxes.push({ x: currentX, y: currentY, w: charBoxW, h: charBoxH, isCutoff });
       }
 
       // Advance cursor
@@ -342,13 +392,20 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
   
   ctx.putImageData(imageData, 0, 0);
 
-  // Draw boundary boxes exactly where characters were rendered
-  if (showBoundary) {
-    ctx.strokeStyle = '#ff0000';
-    ctx.lineWidth = 1;
-    for (const box of drawnBoxes) {
-      // Draw inner border to not leak into adjacent characters
-      ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1);
+  // Draw boundary boxes and warnings
+  drawnBoxes.forEach(b => {
+    if (b.isCutoff) {
+      ctx.fillStyle = 'rgba(255, 0, 0, 0.15)';
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+      ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
+    } else if (showBoundary) {
+      ctx.strokeStyle = 'rgba(0, 0, 255, 0.15)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
     }
-  }
+  });
+
+  return cutoffCount;
 }
