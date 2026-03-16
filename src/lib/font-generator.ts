@@ -169,7 +169,7 @@ export class XTEinkFontBinary {
 export async function generateFontBinary(
   options: FontGenerationOptions,
   onProgress: (progress: number) => void
-): Promise<{ buffer: ArrayBuffer, name: string, cutoffCount: number }> {
+): Promise<{ buffer: ArrayBuffer, name: string, cutoffCount: number, cutoffChars: string[] }> {
   const box = measureCharSize(options);
   const binary = new XTEinkFontBinary(box.width, box.height);
   
@@ -184,7 +184,7 @@ export async function generateFontBinary(
   const fontSizePx = options.fontSize * PT_TO_PX;
   const fontString = `${options.fontStyle} ${options.fontWeight} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
   
-  let cutoffCount = 0;
+  const cutoffChars: string[] = [];
 
   // We process chunks to avoid freezing the UI completely
   const CHUNK_SIZE = 1024;
@@ -205,7 +205,7 @@ export async function generateFontBinary(
       ctx.textAlign = 'center';
       
       if (isCharCutoff(ctx, charStr, box, options)) {
-        cutoffCount++;
+        cutoffChars.push(charStr);
       }
 
       ctx.save();
@@ -253,10 +253,10 @@ export async function generateFontBinary(
   }
   
   const name = binary.getSuggestedFileName(options.fontFamily, options.fontSize);
-  return { buffer: binary.fontbin.buffer, name, cutoffCount };
+  return { buffer: binary.fontbin.buffer, name, cutoffCount: cutoffChars.length, cutoffChars };
 }
 
-export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, options: FontGenerationOptions, showBoundary: boolean = false): number {
+export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, options: FontGenerationOptions, showBoundary: boolean = false): { count: number, chars: string[] } {
   // Always set fixed screen preview dimensions to 480x800 for the XTEink X4
   const SCREEN_W = 480;
   const SCREEN_H = 800;
@@ -296,7 +296,7 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
   let currentY = startY;
 
   const drawnBoxes: {x: number, y: number, w: number, h: number, isCutoff: boolean}[] = [];
-  let cutoffCount = 0;
+  const cutoffChars = new Set<string>();
 
   for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
     const line = lines[lineIdx];
@@ -332,7 +332,7 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
       }
 
       const isCutoff = isCharCutoff(ctx, charStr, box, options);
-      if (isCutoff) cutoffCount++;
+      if (isCutoff) cutoffChars.add(charStr);
 
       ctx.save();
 
@@ -407,5 +407,5 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
     }
   });
 
-  return cutoffCount;
+  return { count: cutoffChars.size, chars: Array.from(cutoffChars) };
 }

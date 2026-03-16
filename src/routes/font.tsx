@@ -40,6 +40,9 @@ function FontPage() {
   const [calibrating, setCalibrating] = useState(false)
   const [calibWidth, setCalibWidth] = useState(250) // pixels that should match 5cm
   const [previewCutoffCount, setPreviewCutoffCount] = useState(0)
+  const [cutoffChars, setCutoffChars] = useState<string[]>([])
+  const [generatedCutoffChars, setGeneratedCutoffChars] = useState<string[]>([])
+  const [displayLimit, setDisplayLimit] = useState(500)
   
   // 5cm = 1.9685 inches. PPI = pixels / 1.9685
   const updatePpiFromCalib = (px: number) => {
@@ -68,22 +71,25 @@ function FontPage() {
 
   useEffect(() => {
     if (canvasRef.current) {
-      const count = previewFontCharacter(canvasRef.current, previewText, options, showBoundary)
-      setPreviewCutoffCount(count)
+      const result = previewFontCharacter(canvasRef.current, previewText, options, showBoundary)
+      setPreviewCutoffCount(result.count)
+      setCutoffChars(result.chars)
     }
   }, [options, previewText, showBoundary])
 
   const handleGenerate = async () => {
     setIsGenerating(true)
     setProgress(0)
+    setGeneratedCutoffChars([])
 
     try {
-      const { buffer, name, cutoffCount } = await generateFontBinary(options, (p) => {
+      const { buffer, name, cutoffCount, cutoffChars: chars } = await generateFontBinary(options, (p) => {
         setProgress(p)
       })
       
       if (cutoffCount > 0) {
-        alert(`Warning: ${cutoffCount} characters were cutoff because they exceeded the character bounding box. Consider reducing font size or increasing spacing.`)
+        setGeneratedCutoffChars(chars)
+        alert(`Warning: ${cutoffCount} characters were cutoff because they exceeded the character bounding box. Check the bottom of the page for the list.`)
       }
 
       const fileStream = streamSaver.createWriteStream(name, {
@@ -438,6 +444,77 @@ function FontPage() {
           </div>
         </div>
       </div>
+
+      {cutoffChars.length > 0 && (
+        <div style={{ marginTop: 'var(--space-xl)', background: 'rgba(255, 68, 68, 0.05)', border: '1px solid rgba(255, 68, 68, 0.3)', borderRadius: '8px', padding: 'var(--space-lg)' }}>
+          <h3 style={{ color: '#ff4444', marginBottom: 'var(--space-sm)', fontSize: '1rem' }}>⚠️ Cutoff Characters in Preview</h3>
+          <p style={{ fontSize: '0.85rem', marginBottom: 'var(--space-md)', color: 'var(--ink)' }}>
+            The following {cutoffChars.length} characters in your <strong>preview text</strong> exceed the character bounding box and will be clipped. 
+            Try <strong>reducing font size</strong>, <strong>increasing line/char spacing</strong>, or <strong>adjusting X/Y offsets</strong>.
+          </p>
+          <div style={{ 
+            display: 'flex', 
+            flexWrap: 'wrap', 
+            gap: 'var(--space-xs)', 
+            fontFamily: options.fontFamily, 
+            fontSize: '1.5rem',
+            background: 'white',
+            padding: 'var(--space-md)',
+            borderRadius: '4px',
+            border: '1px solid var(--border)',
+            color: 'black'
+          }}>
+            {cutoffChars.map((char, idx) => (
+              <div key={idx} style={{ width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #eee', position: 'relative' }}>
+                {char}
+                <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(255, 0, 0, 0.1)' }}></div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {generatedCutoffChars.length > 0 && (
+        <div style={{ marginTop: 'var(--space-xl)', background: 'rgba(255, 68, 68, 0.05)', border: '1px solid rgba(255, 68, 68, 0.3)', borderRadius: '8px', padding: 'var(--space-lg)' }}>
+          <h3 style={{ color: '#ff4444', marginBottom: 'var(--space-sm)', fontSize: '1rem' }}>⚠️ Full Font Cutoff Report</h3>
+          <p style={{ fontSize: '0.85rem', marginBottom: 'var(--space-md)', color: 'var(--ink)' }}>
+            During full font generation, <strong>{generatedCutoffChars.length}</strong> characters were found to exceed the {Math.round(options.fontSize * (220/72) + options.charSpacing)}x{Math.round(options.fontSize * (220/72) + options.lineSpacing)}px bounding box.
+            Showing first 500 symbols:
+          </p>
+          <div style={{ 
+            display: 'flex', 
+            flexWrap: 'wrap', 
+            gap: 'var(--space-xs)', 
+            fontFamily: options.fontFamily, 
+            fontSize: '1.2rem',
+            maxHeight: '400px',
+            overflowY: 'auto',
+            background: 'white',
+            padding: 'var(--space-md)',
+            borderRadius: '4px',
+            border: '1px solid var(--border)',
+            color: 'black'
+          }}>
+            {generatedCutoffChars.slice(0, displayLimit).map((char, idx) => (
+              <div key={idx} title={`U+${char.charCodeAt(0).toString(16).toUpperCase()}`} style={{ width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #eee', position: 'relative' }}>
+                {char}
+                <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(255, 0, 0, 0.1)' }}></div>
+              </div>
+            ))}
+          </div>
+          {generatedCutoffChars.length > displayLimit && (
+            <div style={{ marginTop: 'var(--space-md)', textAlign: 'center' }}>
+              <button 
+                onClick={() => setDisplayLimit(prev => prev + 500)}
+                className="btn-preview"
+                style={{ padding: 'var(--space-sm) var(--space-lg)' }}
+              >
+                Load More (+500) — {generatedCutoffChars.length - displayLimit} remaining
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
