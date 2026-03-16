@@ -257,24 +257,24 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
     // Reset starting position for new line based on orientation
     if (options.vertical) {
       currentY = startY;
-      if (lineIdx > 0) currentX -= charBoxW;
+      if (lineIdx > 0) currentX -= charBoxH;
     } else {
       currentX = startX;
       if (lineIdx > 0) currentY += charBoxH;
     }
 
     if (!options.vertical && currentY + charBoxH > SCREEN_H) break;
-    if (options.vertical && currentX < 0) break;
+    if (options.vertical && currentX - charBoxH < 0) break;
 
     for (let i = 0; i < line.length; i++) {
       const charStr = line[i];
 
       // Auto word wrap
       if (options.vertical) {
-        if (currentY + charBoxH > SCREEN_H) {
+        if (currentY + charBoxW > SCREEN_H) {
           currentY = startY;
-          currentX -= charBoxW;
-          if (currentX < 0) break;
+          currentX -= charBoxH;
+          if (currentX - charBoxH < 0) break;
         }
       } else {
         if (currentX + charBoxW > SCREEN_W) {
@@ -287,7 +287,7 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
       ctx.save();
 
       // We must translate to the CENTER of the character box to use textBaseline='middle' and textAlign='center'
-      ctx.translate(currentX + charBoxW / 2 + options.xOffset, currentY + charBoxH / 2 + options.yOffset);
+      ctx.translate(currentX + charBoxH / 2 + options.xOffset, currentY + charBoxW / 2 + options.yOffset);
 
       // The original toolkit rotates the *binary* output by -90 degrees, but the visual preview
       // displays the text upright (Standard CJK vertical reading style).
@@ -312,11 +312,15 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
       ctx.fillText(charStr, 0, 0);
       ctx.restore();
 
-      drawnBoxes.push({ x: currentX, y: currentY, w: charBoxW, h: charBoxH });
+      if (options.vertical) {
+        drawnBoxes.push({ x: currentX, y: currentY, w: charBoxH, h: charBoxW });
+      } else {
+        drawnBoxes.push({ x: currentX, y: currentY, w: charBoxW, h: charBoxH });
+      }
 
       // Advance cursor
       if (options.vertical) {
-        currentY += charBoxH;
+        currentY += charBoxW;
       } else {
         currentX += charBoxW;
       }
