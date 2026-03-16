@@ -73,6 +73,15 @@ export function measureCharSize(options: FontGenerationOptions): { width: number
   let finalW = w + options.charSpacing;
   let finalH = h + options.lineSpacing;
   
+  if (options.vertical) {
+    // When vertical is enabled, the characters are rotated -90 degrees.
+    // This means the visual height becomes the binary box width, and visual width becomes binary box height.
+    // To prevent cutoff (especially for English descenders), we swap the dimensions.
+    const temp = finalW;
+    finalW = finalH;
+    finalH = temp;
+  }
+  
   if (finalW < 5) finalW = 5;
   if (finalH < 5) finalH = 5;
 
