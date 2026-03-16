@@ -259,17 +259,25 @@ function FontPage() {
                   <input 
                     type="radio" 
                     name="textPreset"
-                    onChange={() => setPreviewText('月落烏啼霜滿天，江楓漁火對愁眠。\n姑蘇城外寒山寺，夜半鐘聲到客船。')}
+                    onChange={() => setPreviewText('あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん\nアイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン\n吾輩は猫である。名前はまだ無い。ー〜｜‥「」『』［］（）｛｝')}
                   />
-                  Traditional Chinese
+                  Japanese (Full Kana + Symbols)
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
                   <input 
                     type="radio" 
                     name="textPreset"
-                    onChange={() => setPreviewText('吾輩は猫である。名前はまだ無い。\nどこで生れたかとんと見当がつかぬ。ー〜｜\n「坊っちゃん」‥‥［（｛｝）］')}
+                    onChange={() => setPreviewText('、。，．・：；？！ー〜｜‥「」『』［］（）｛｝〈〉《》【】〔〕〖〗〘〙〚〙\n+-*/=≠≈<>≤≥%‰&@#$£€¢¥^©®™')}
                   />
-                  Japanese (Tategaki)
+                  CJK & Math Symbols
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
+                  <input 
+                    type="radio" 
+                    name="textPreset"
+                    onChange={() => setPreviewText('月落乌啼霜满天，江枫渔火对愁眠。\n天地玄黄，宇宙洪荒。日月盈昃，辰宿列张。\n寒来暑往，秋收冬藏。闰余成岁，律吕调阳。')}
+                  />
+                  Chinese (Classical)
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
                   <input 
@@ -284,9 +292,9 @@ function FontPage() {
                     type="radio" 
                     name="textPreset"
                     defaultChecked
-                    onChange={() => setPreviewText('abcdefghijklmnopqrstuvwxyz\nABCDEFGHIJKLMNOPQRSTUVWXYZ\n0123456789\n`~!@#$%^&*()-_=+[{]}\\|;:\'",<.>/?\n永不妥协')}
+                    onChange={() => setPreviewText('abcdefghijklmnopqrstuvwxyz\nABCDEFGHIJKLMNOPQRSTUVWXYZ\n0123456789\n`~!@#$%^&*()-_=+[{]}\\|;:\'",<.>/?\nQuick brown fox jumps over the lazy dog.')}
                   />
-                  English Characters
+                  English (Full Alpha-Numeric)
                 </label>
               </div>
             </div>
