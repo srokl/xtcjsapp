@@ -24,7 +24,12 @@ const VERTICAL_SYMBOLS = new Set([
 // Characters that need to be shifted to the top-right in vertical layout
 const VERTICAL_PUNCTUATION_SHIFT = new Set(['、', '。', '，', '．', ',', '.']);
 
-function getVerticalPunctuationOffset(char: string, fontSizePx: number): { x: number, y: number } {
+const VERTICAL_SUTEGANA = new Set([
+  'ぁ', 'ぃ', 'ぅ', 'ぇ', 'ぉ', 'っ', 'ゃ', 'ゅ', 'ょ', 'ゎ', 'ゕ', 'ゖ',
+  'ァ', 'ィ', 'ゥ', 'ェ', 'ォ', 'ッ', 'ャ', 'ュ', 'ョ', 'ヮ', 'ヵ', 'ヶ'
+]);
+
+function getVerticalCharOffset(char: string, fontSizePx: number): { x: number, y: number } {
   if (VERTICAL_PUNCTUATION_SHIFT.has(char)) {
     // Both preview (unrotated) and generator (post-rotation) spaces align such that:
     // +X is Visual Right
@@ -32,6 +37,12 @@ function getVerticalPunctuationOffset(char: string, fontSizePx: number): { x: nu
     // A standard comma sits at the bottom-left. We want it at the top-right.
     // So we shift it Right (+0.5) and Up (-0.5).
     return { x: fontSizePx * 0.5, y: -fontSizePx * 0.5 };
+  }
+  if (VERTICAL_SUTEGANA.has(char)) {
+    // Sutegana (small kana) also need to be placed in the top-right quadrant.
+    // Because they are larger than commas, we use a slightly smaller shift to prevent them from
+    // being pushed completely out of the character bounding box.
+    return { x: fontSizePx * 0.25, y: -fontSizePx * 0.25 };
   }
   return { x: 0, y: 0 };
 }
@@ -220,8 +231,8 @@ export async function generateFontBinary(
         } else {
           ctx.rotate(-Math.PI / 2); // Rotate -90 degrees for vertical layout (Upright on e-reader)
           
-          // Apply punctuation shift AFTER rotation so we are working in the visual space
-          const offset = getVerticalPunctuationOffset(charStr, fontSizePx);
+          // Apply punctuation/sutegana shift AFTER rotation so we are working in the visual space
+          const offset = getVerticalCharOffset(charStr, fontSizePx);
           if (offset.x !== 0 || offset.y !== 0) {
             ctx.translate(offset.x, offset.y);
           }
@@ -352,7 +363,7 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
           ctx.rotate(Math.PI / 2);
         } else {
           // For upright characters, we still need to shift punctuation correctly.
-          const offset = getVerticalPunctuationOffset(charStr, fontSizePx);
+          const offset = getVerticalCharOffset(charStr, fontSizePx);
           if (offset.x !== 0 || offset.y !== 0) {
             ctx.translate(offset.x, offset.y);
           }
