@@ -29,27 +29,17 @@ const VERTICAL_SUTEGANA = new Set([
   'ァ', 'ィ', 'ゥ', 'ェ', 'ォ', 'ッ', 'ャ', 'ュ', 'ョ', 'ヮ', 'ヵ', 'ヶ'
 ]);
 
-function getVerticalCharOffset(char: string, fontSizePx: number, isPreview: boolean): { x: number, y: number } {
+function getVerticalCharOffset(char: string, fontSizePx: number): { x: number, y: number } {
   if (VERTICAL_PUNCTUATION_SHIFT.has(char)) {
-    // The user empirically confirmed that { x: 0, y: -0.55 } places punctuation perfectly in the Top-Right 
-    // on the actual device. We will use this exact value for the generator, and a mapped value for the preview.
-    if (isPreview) {
-      // In unrotated preview, to match the device's top-right, we shift Right and Up.
-      return { x: fontSizePx * 0.55, y: -fontSizePx * 0.55 };
-    } else {
-      // In the rotated generator space, this isolated value works perfectly.
-      return { x: 0, y: -fontSizePx * 0.55 };
-    }
+    // In unrotated visual space, comma draws at bottom-left. 
+    // We want it at top-right, so we shift Right (+X) and Up (-Y).
+    return { x: fontSizePx * 0.5, y: -fontSizePx * 0.5 };
   }
   
   if (VERTICAL_SUTEGANA.has(char)) {
-    // Sutegana (small kana) require an independent, smaller shift to reach the top-right quadrant
-    // without getting completely pushed out of bounds.
-    if (isPreview) {
-      return { x: fontSizePx * 0.25, y: -fontSizePx * 0.25 };
-    } else {
-      return { x: fontSizePx * 0.25, y: -fontSizePx * 0.25 }; // Let's apply a symmetrical shift for sutegana in both spaces for now
-    }
+    // Sutegana (small kana) require an independent, smaller shift to reach the top-right quadrant.
+    // A smaller shift prevents them from exceeding the character bounding box (which causes them to be cutoff/red).
+    return { x: fontSizePx * 0.15, y: -fontSizePx * 0.15 };
   }
   
   return { x: 0, y: 0 };
@@ -72,36 +62,46 @@ function isCharCutoff(ctx: CanvasRenderingContext2D, char: string, box: { width:
   const halfW = box.width / 2;
   const halfH = box.height / 2;
 
-  // Visual boundaries relative to the center anchor
+  // 1. Initial visual boundaries relative to the center anchor (unrotated)
   let left = -metrics.actualBoundingBoxLeft;
   let right = metrics.actualBoundingBoxRight;
   let top = -metrics.actualBoundingBoxAscent;
   let bottom = metrics.actualBoundingBoxDescent;
 
+  // 2. Apply any punctuation/sutegana shifts in the visual space
   const fontSizePx = options.fontSize * (220 / 72);
   let vOffset = { x: 0, y: 0 };
-
+  
   if (options.vertical && !isVerticalSymbol(char) && !(!options.verticalEnglishUpright && isEnglishOrNumber(char))) {
-    // For rotated characters (-90 deg), the axes swap
-    const vLeft = -metrics.actualBoundingBoxAscent;
-    const vRight = metrics.actualBoundingBoxDescent;
-    const vTop = -metrics.actualBoundingBoxRight;
-    const vBottom = metrics.actualBoundingBoxLeft;
+     vOffset = getVerticalCharOffset(char, fontSizePx);
+  }
+  
+  left += vOffset.x;
+  right += vOffset.x;
+  top += vOffset.y;
+  bottom += vOffset.y;
+
+  // 3. If the character is going to be rotated -90 degrees, swap the axes for the final bounds check
+  if (options.vertical && !isVerticalSymbol(char) && !(!options.verticalEnglishUpright && isEnglishOrNumber(char))) {
+    // Rotation of -90 degrees maps coordinates: (x, y) -> (y, -x)
+    // So new X bounds come from old Y bounds, and new Y bounds come from old -X bounds
+    const vLeft = top;          // min Y becomes min X
+    const vRight = bottom;      // max Y becomes max X
+    const vTop = -right;        // min -X (which is -max X) becomes min Y
+    const vBottom = -left;      // max -X (which is -min X) becomes max Y
     
     left = vLeft;
     right = vRight;
     top = vTop;
     bottom = vBottom;
-
-    vOffset = getVerticalCharOffset(char, fontSizePx, false);
   }
 
-  // Check if any edge + options offset + punctuation offset exceeds half-box dimensions
+  // 4. Check if any edge + manual offset exceeds half-box dimensions
   return (
-    left + options.xOffset + vOffset.x < -halfW ||
-    right + options.xOffset + vOffset.x > halfW ||
-    top + options.yOffset + vOffset.y < -halfH ||
-    bottom + options.yOffset + vOffset.y > halfH
+    left + options.xOffset < -halfW ||
+    right + options.xOffset > halfW ||
+    top + options.yOffset < -halfH ||
+    bottom + options.yOffset > halfH
   );
 }
 
