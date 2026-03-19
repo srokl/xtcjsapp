@@ -84,8 +84,24 @@ function isCharCutoff(ctx: CanvasRenderingContext2D, char: string, box: { width:
   const fontSizePx = options.fontSize * (220 / 72);
   let vOffset = { x: 0, y: 0 };
   
-  if (options.vertical && !isVerticalSymbol(char) && !(!options.verticalEnglishUpright && isEnglishOrNumber(char))) {
+  // Determine if this character will be rotated -90 in the generator
+  let isRotatedMinus90 = false;
+  if (options.vertical) {
+    if (options.verticalSymbols && isVerticalSymbol(char)) {
+      isRotatedMinus90 = false; // Category 1: rotate(0)
+    } else if (!options.verticalEnglishUpright && isEnglishOrNumber(char)) {
+      isRotatedMinus90 = false; // Category 3: rotate(0)
+    } else {
+      isRotatedMinus90 = true;  // Category 2 & 4: rotate(-90)
+    }
+  }
+
+  if (isRotatedMinus90) {
      vOffset = getVerticalCharOffset(char, fontSizePx, false);
+  } else if (options.vertical && isVerticalSymbol(char)) {
+     // Some vertical symbols might need shifts, though currently none do.
+  } else if (!options.vertical && VERTICAL_PUNCTUATION_SHIFT.has(char)) {
+     // If we ever want horizontal punctuation shifts, we'd add them here.
   }
   
   left += vOffset.x;
@@ -93,27 +109,36 @@ function isCharCutoff(ctx: CanvasRenderingContext2D, char: string, box: { width:
   top += vOffset.y;
   bottom += vOffset.y;
 
-  // 3. If the character is going to be rotated -90 degrees, swap the axes for the final bounds check
-  if (options.vertical && !isVerticalSymbol(char) && !(!options.verticalEnglishUpright && isEnglishOrNumber(char))) {
-    // Rotation of -90 degrees maps coordinates: (x, y) -> (y, -x)
-    // So new X bounds come from old Y bounds, and new Y bounds come from old -X bounds
-    const vLeft = top;          // min Y becomes min X
-    const vRight = bottom;      // max Y becomes max X
-    const vTop = -right;        // min -X (which is -max X) becomes min Y
-    const vBottom = -left;      // max -X (which is -min X) becomes max Y
-    
-    left = vLeft;
-    right = vRight;
-    top = vTop;
-    bottom = vBottom;
+  // 3. Map the character's bounds to the generator's binary box.
+  // In `generateFontBinary`, `box.width` and `box.height` are the binary dimensions.
+  // If `isRotatedMinus90` is true, the generator calls `ctx.rotate(-Math.PI / 2)`.
+  // This means the context's X axis points UP, and Y axis points RIGHT relative to the binary box.
+  // If it's false (`ctx.rotate(0)`), the axes are standard (X=Right, Y=Down).
+  
+  let finalLeft, finalRight, finalTop, finalBottom;
+
+  if (isRotatedMinus90) {
+    // Rotation of -90 degrees maps: (x, y) -> (y, -x)
+    // So the character's unrotated Y bounds map to the binary box's X bounds.
+    // The character's unrotated X bounds map to the binary box's Y bounds (inverted).
+    finalLeft = top;          
+    finalRight = bottom;      
+    finalTop = -right;        
+    finalBottom = -left;      
+  } else {
+    // No rotation. The character's X bounds map to the binary box's X bounds.
+    finalLeft = left;
+    finalRight = right;
+    finalTop = top;
+    finalBottom = bottom;
   }
 
   // 4. Check if any edge + manual offset exceeds half-box dimensions
   return (
-    left + options.xOffset < -halfW ||
-    right + options.xOffset > halfW ||
-    top + options.yOffset < -halfH ||
-    bottom + options.yOffset > halfH
+    finalLeft + options.xOffset < -halfW ||
+    finalRight + options.xOffset > halfW ||
+    finalTop + options.yOffset < -halfH ||
+    finalBottom + options.yOffset > halfH
   );
 }
 
