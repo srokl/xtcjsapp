@@ -18,7 +18,7 @@ export interface FontGenerationOptions {
 const VERTICAL_SYMBOLS = new Set([
   '(', ')', '[', ']', '{', '}', '<', '>',
   '（', '）', '【', '】', '《', '》', '〈', '〉', '「', '」', '『', '』', '［', '］', '｛', '｝',
-  '-', '—', '–', '…', '⋯', '‥', '_', '~', '～', 'ー', '｜'
+  '-', '—', '–', '…', '⋯', '‥', '_', '~', '～', '〜', 'ー', '｜'
 ]);
 
 // Characters that need to be shifted to the top-right in vertical layout
