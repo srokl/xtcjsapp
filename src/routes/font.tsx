@@ -165,24 +165,39 @@ function FontPage() {
             </div>
 
             <div style={{ display: 'flex', gap: 'var(--space-md)' }}>
-              <label style={{ flex: 1 }}>
-                <strong style={{ fontSize: '0.85rem' }}>Line Spacing (px)</strong><br/>
-                <input 
-                  type="number" 
-                  value={options.lineSpacing} 
-                  onChange={e => setOptions({ ...options, lineSpacing: parseInt(e.target.value) || 0 })}
-                  style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
-                />
-              </label>
-              <label style={{ flex: 1 }}>
-                <strong style={{ fontSize: '0.85rem' }}>Char Spacing (px)</strong><br/>
-                <input 
-                  type="number" 
-                  value={options.charSpacing} 
-                  onChange={e => setOptions({ ...options, charSpacing: parseInt(e.target.value) || 0 })}
-                  style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
-                />
-              </label>
+              {options.vertical ? (
+                <label style={{ flex: 1 }}>
+                  <strong style={{ fontSize: '0.85rem' }}>Square Box Padding (px)</strong><br/>
+                  <input 
+                    type="number" 
+                    value={options.lineSpacing} 
+                    onChange={e => setOptions({ ...options, lineSpacing: parseInt(e.target.value) || 0, charSpacing: parseInt(e.target.value) || 0 })}
+                    style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
+                  />
+                  <div style={{ fontSize: '0.7rem', color: 'var(--ink-light)', marginTop: '4px' }}>Expands the square grid equally.</div>
+                </label>
+              ) : (
+                <>
+                  <label style={{ flex: 1 }}>
+                    <strong style={{ fontSize: '0.85rem' }}>Height Padding (px)</strong><br/>
+                    <input 
+                      type="number" 
+                      value={options.lineSpacing} 
+                      onChange={e => setOptions({ ...options, lineSpacing: parseInt(e.target.value) || 0 })}
+                      style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
+                    />
+                  </label>
+                  <label style={{ flex: 1 }}>
+                    <strong style={{ fontSize: '0.85rem' }}>Width Padding (px)</strong><br/>
+                    <input 
+                      type="number" 
+                      value={options.charSpacing} 
+                      onChange={e => setOptions({ ...options, charSpacing: parseInt(e.target.value) || 0 })}
+                      style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
+                    />
+                  </label>
+                </>
+              )}
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)', marginTop: 'var(--space-sm)' }}>
