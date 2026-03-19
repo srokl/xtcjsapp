@@ -29,20 +29,15 @@ const VERTICAL_SUTEGANA = new Set([
   'ァ', 'ィ', 'ゥ', 'ェ', 'ォ', 'ッ', 'ャ', 'ュ', 'ョ', 'ヮ', 'ヵ', 'ヶ'
 ]);
 
-function getVerticalCharOffset(char: string, fontSizePx: number): { x: number, y: number } {
+function getVerticalCharOffset(char: string, fontSizePx: number, isPreview: boolean): { x: number, y: number } {
   if (VERTICAL_PUNCTUATION_SHIFT.has(char)) {
-    // Both preview (unrotated) and generator (post-rotation) spaces align such that:
-    // +X is Visual Right
-    // -Y is Visual Up
-    // A standard comma sits at the bottom-left. We want it at the top-right.
-    // So we shift it Right (+0.5) and Up (-0.5).
-    return { x: fontSizePx * 0.5, y: -fontSizePx * 0.5 };
+    // In preview (unrotated): shift Right (+X) and Up (-Y)
+    // In generator (rotated -90): character is already at Bottom-Right visually, so just shift Up (-Y)
+    return isPreview ? { x: fontSizePx * 0.5, y: -fontSizePx * 0.5 } : { x: 0, y: -fontSizePx * 0.5 };
   }
   if (VERTICAL_SUTEGANA.has(char)) {
-    // Sutegana (small kana) also need to be placed in the top-right quadrant.
-    // Because they are larger than commas, we use a slightly smaller shift to prevent them from
-    // being pushed completely out of the character bounding box.
-    return { x: fontSizePx * 0.25, y: -fontSizePx * 0.25 };
+    // Same logic for sutegana, but with a smaller shift to avoid pushing them completely out
+    return isPreview ? { x: fontSizePx * 0.25, y: -fontSizePx * 0.25 } : { x: 0, y: -fontSizePx * 0.25 };
   }
   return { x: 0, y: 0 };
 }
@@ -70,12 +65,11 @@ function isCharCutoff(ctx: CanvasRenderingContext2D, char: string, box: { width:
   let top = -metrics.actualBoundingBoxAscent;
   let bottom = metrics.actualBoundingBoxDescent;
 
+  const fontSizePx = options.fontSize * (220 / 72);
+  let vOffset = { x: 0, y: 0 };
+
   if (options.vertical && !isVerticalSymbol(char) && !(!options.verticalEnglishUpright && isEnglishOrNumber(char))) {
     // For rotated characters (-90 deg), the axes swap
-    // Unrotated Top (Ascent) -> Rotated Left
-    // Unrotated Bottom (Descent) -> Rotated Right
-    // Unrotated Left -> Rotated Bottom
-    // Unrotated Right -> Rotated Top
     const vLeft = -metrics.actualBoundingBoxAscent;
     const vRight = metrics.actualBoundingBoxDescent;
     const vTop = -metrics.actualBoundingBoxRight;
@@ -85,14 +79,16 @@ function isCharCutoff(ctx: CanvasRenderingContext2D, char: string, box: { width:
     right = vRight;
     top = vTop;
     bottom = vBottom;
+
+    vOffset = getVerticalCharOffset(char, fontSizePx, false);
   }
 
-  // Check if any edge + offset exceeds half-box dimensions
+  // Check if any edge + options offset + punctuation offset exceeds half-box dimensions
   return (
-    left + options.xOffset < -halfW ||
-    right + options.xOffset > halfW ||
-    top + options.yOffset < -halfH ||
-    bottom + options.yOffset > halfH
+    left + options.xOffset + vOffset.x < -halfW ||
+    right + options.xOffset + vOffset.x > halfW ||
+    top + options.yOffset + vOffset.y < -halfH ||
+    bottom + options.yOffset + vOffset.y > halfH
   );
 }
 
@@ -232,7 +228,7 @@ export async function generateFontBinary(
           ctx.rotate(-Math.PI / 2); // Rotate -90 degrees for vertical layout (Upright on e-reader)
           
           // Apply punctuation/sutegana shift AFTER rotation so we are working in the visual space
-          const offset = getVerticalCharOffset(charStr, fontSizePx);
+          const offset = getVerticalCharOffset(charStr, fontSizePx, false);
           if (offset.x !== 0 || offset.y !== 0) {
             ctx.translate(offset.x, offset.y);
           }
@@ -363,7 +359,7 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
           ctx.rotate(Math.PI / 2);
         } else {
           // For upright characters, we still need to shift punctuation correctly.
-          const offset = getVerticalCharOffset(charStr, fontSizePx);
+          const offset = getVerticalCharOffset(charStr, fontSizePx, true);
           if (offset.x !== 0 || offset.y !== 0) {
             ctx.translate(offset.x, offset.y);
           }

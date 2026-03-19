@@ -36,20 +36,11 @@ function FontPage() {
   const [showBoundary, setShowBoundary] = useState(false)
   const [customFontName, setCustomFontName] = useState<string | null>(null)
   const [zoomScale, setZoomScale] = useState(1)
-  const [monitorPpi, setMonitorPpi] = useState(126)
-  const [calibrating, setCalibrating] = useState(false)
-  const [calibWidth, setCalibWidth] = useState(250) // pixels that should match 5cm
   const [previewCutoffCount, setPreviewCutoffCount] = useState(0)
   const [cutoffChars, setCutoffChars] = useState<string[]>([])
   const [generatedCutoffChars, setGeneratedCutoffChars] = useState<string[]>([])
   const [displayLimit, setDisplayLimit] = useState(500)
   
-  // 5cm = 1.9685 inches. PPI = pixels / 1.9685
-  const updatePpiFromCalib = (px: number) => {
-    setCalibWidth(px)
-    setMonitorPpi(Math.round(px / 1.9685039))
-  }
-
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   const handleFontUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -333,9 +324,24 @@ function FontPage() {
               <button 
                 className="btn-preview" 
                 style={{ padding: 'var(--space-xs) var(--space-sm)', fontSize: '0.75rem', margin: 0 }}
-                onClick={() => setZoomScale(monitorPpi / 220)}
+                onClick={() => setZoomScale(1)}
               >
-                Real Size (4.3")
+                1x
+              </button>
+              <button 
+                className="btn-preview" 
+                style={{ padding: 'var(--space-xs) var(--space-sm)', fontSize: '0.75rem', margin: 0 }}
+                onClick={() => {
+                  const container = document.getElementById('preview-container');
+                  if (container) {
+                    const availableHeight = container.clientHeight - 32; // minus padding
+                    setZoomScale(availableHeight / 800);
+                  } else {
+                    setZoomScale(0.7); // fallback
+                  }
+                }}
+              >
+                Fit to Screen
               </button>
             </div>
 
@@ -344,42 +350,9 @@ function FontPage() {
                 <span>⚠️ {previewCutoffCount} characters cutoff in preview (highlighted in red)</span>
               </div>
             )}
-            
-            <div style={{ padding: 'var(--space-sm)', background: 'var(--paper)', borderRadius: '4px', border: 'var(--border)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-xs)' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: 'bold' }}>Monitor PPI: {monitorPpi}</span>
-                <button 
-                  onClick={() => setCalibrating(!calibrating)}
-                  style={{ padding: '2px 8px', fontSize: '0.7rem', cursor: 'pointer', background: calibrating ? 'var(--accent)' : 'var(--paper-dark)', border: 'var(--border)', color: 'white', borderRadius: '4px' }}
-                >
-                  {calibrating ? 'Close Calibration' : 'Calibrate with Ruler'}
-                </button>
-              </div>
-              
-              {calibrating ? (
-                <div style={{ padding: 'var(--space-sm)', border: '1px dashed var(--accent)', borderRadius: '4px', marginTop: 'var(--space-xs)' }}>
-                  <p style={{ fontSize: '0.7rem', margin: '0 0 var(--space-xs) 0' }}>Adjust slider until the red line below is exactly <strong>5 cm (50 mm)</strong> on your screen:</p>
-                  <input 
-                    type="range" min="50" max="600" step="1" 
-                    value={calibWidth} 
-                    onChange={e => updatePpiFromCalib(parseInt(e.target.value))}
-                    style={{ width: '100%', marginBottom: 'var(--space-sm)' }}
-                  />
-                  <div style={{ width: `${calibWidth}px`, height: '4px', background: '#ff4444', margin: '0 auto', borderRadius: '2px' }}></div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', width: `${calibWidth}px`, margin: '4px auto 0 auto', fontSize: '0.65rem' }}>
-                    <span>0</span>
-                    <span>5cm</span>
-                  </div>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', gap: 'var(--space-sm)', fontSize: '0.7rem', color: 'var(--ink-light)' }}>
-                  <span>Current representation: <strong>{((480 * zoomScale) / monitorPpi).toFixed(2)}"</strong> ({( ((480 * zoomScale) / monitorPpi) * 2.54 ).toFixed(1)} cm) width</span>
-                </div>
-              )}
-            </div>
           </div>
           
-          <div style={{ 
+          <div id="preview-container" style={{ 
             flex: '1 1 auto', 
             width: '100%',
             height: '600px',
