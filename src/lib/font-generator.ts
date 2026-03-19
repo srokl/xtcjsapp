@@ -31,14 +31,27 @@ const VERTICAL_SUTEGANA = new Set([
 
 function getVerticalCharOffset(char: string, fontSizePx: number, isPreview: boolean): { x: number, y: number } {
   if (VERTICAL_PUNCTUATION_SHIFT.has(char)) {
-    // In preview (unrotated): shift Right (+X) and Up (-Y)
-    // In generator (rotated -90): character is already at Bottom-Right visually, so just shift Up (-Y)
-    return isPreview ? { x: fontSizePx * 0.5, y: -fontSizePx * 0.5 } : { x: 0, y: -fontSizePx * 0.5 };
+    // The user empirically confirmed that { x: 0, y: -0.55 } places punctuation perfectly in the Top-Right 
+    // on the actual device. We will use this exact value for the generator, and a mapped value for the preview.
+    if (isPreview) {
+      // In unrotated preview, to match the device's top-right, we shift Right and Up.
+      return { x: fontSizePx * 0.55, y: -fontSizePx * 0.55 };
+    } else {
+      // In the rotated generator space, this isolated value works perfectly.
+      return { x: 0, y: -fontSizePx * 0.55 };
+    }
   }
+  
   if (VERTICAL_SUTEGANA.has(char)) {
-    // Same logic for sutegana, but with a smaller shift to avoid pushing them completely out
-    return isPreview ? { x: fontSizePx * 0.25, y: -fontSizePx * 0.25 } : { x: 0, y: -fontSizePx * 0.25 };
+    // Sutegana (small kana) require an independent, smaller shift to reach the top-right quadrant
+    // without getting completely pushed out of bounds.
+    if (isPreview) {
+      return { x: fontSizePx * 0.25, y: -fontSizePx * 0.25 };
+    } else {
+      return { x: fontSizePx * 0.25, y: -fontSizePx * 0.25 }; // Let's apply a symmetrical shift for sutegana in both spaces for now
+    }
   }
+  
   return { x: 0, y: 0 };
 }
 
