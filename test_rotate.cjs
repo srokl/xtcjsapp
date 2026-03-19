@@ -1,54 +1,22 @@
-// Let's summarize the state machine for rendering characters vertically:
-
-// CATEGORY 1: VERTICAL SYMBOLS (Brackets, Dashes, etc)
-// isVerticalSymbol = true
-// isEnglishOrNumber = false
-// Generator: rotate(0) // Draws upright in binary, displays sideways on reader
-// Preview: rotate(+90) // Displays sideways in preview
-// Shift: None
-// Cutoff axes swap: No
-
-// CATEGORY 2: CJK Characters & Japanese Punctuation (、 。)
-// isVerticalSymbol = false
-// isEnglishOrNumber = false
-// Generator: rotate(-90) // Draws sideways in binary, displays upright on reader
-// Preview: rotate(0) // Displays upright in preview
-// Shift: Applied (for punctuation and sutegana)
-// Cutoff axes swap: Yes
-
-// CATEGORY 3: English / Numbers (when Upright = false)
-// isVerticalSymbol = false
-// isEnglishOrNumber = true
-// Generator: rotate(0) // Draws upright in binary, displays sideways on reader
-// Preview: rotate(+90) // Displays sideways in preview
-// Shift: None
-// Cutoff axes swap: No
-
-// CATEGORY 4: English / Numbers (when Upright = true)
-// isVerticalSymbol = false
-// isEnglishOrNumber = true
-// Generator: rotate(-90) // Draws sideways in binary, displays upright on reader
-// Preview: rotate(0) // Displays upright in preview
-// Shift: Applied (for punctuation)
-// Cutoff axes swap: Yes
-
-// THE ISSUE: "the english punctutation in vertical reading. in preview its out of bounds from the box. and does not warning it. check also in font generator if its properly inbox english punctuations."
-// Which english punctuation? `,` and `.`
-// The user mentions it's "out of bounds from the box" in the preview.
-// Let's check `previewFontCharacter`:
-// `drawnBoxes` uses `w: charBoxH, h: charBoxW` (swapped) when `options.vertical` is true.
-// And `ctx.fillRect(currentX, currentY, charBoxH, charBoxW)` for cutoff highlight.
-// And `ctx.translate(currentX + charBoxH / 2, currentY + charBoxW / 2)`
-// So the PREVIEW box is always swapped in vertical mode!
-// But if English is NOT upright, the character is rotated +90 inside that swapped box.
-// If it's a comma `,`, it's an English character.
-// If English is NOT upright, it falls into Category 3.
-// Preview: translates to center of swapped box, rotates +90, draws comma at (0,0).
-// Cutoff check: DOES NOT swap axes.
-// Wait, if preview ALWAYS swaps the box size (`w: charBoxH, h: charBoxW`), and the context is rotated +90, then visually the character's unrotated width maps to visual height, and unrotated height maps to visual width.
-// BUT `isCharCutoff` only swaps axes in the cutoff check if it's Category 2 or 4!
-// So for Category 1 and 3 (rotate 0 in generator, +90 in preview), `isCharCutoff` checks the UNROTATED bounds against the swapped box dimensions (`halfW = box.width / 2`, but wait... `box.width` is already swapped at the top of the file!)
-// Let's check `measureCharSize`:
+// What about the single quote ' and double quote " in the screenshot?
+// They are also floating top-right.
+// Why?
+// Let's check getVerticalCharOffset:
+// ```
+// function getVerticalCharOffset(char: string, fontSizePx: number, isPreview: boolean): { x: number, y: number } {
+//   if (VERTICAL_PUNCTUATION_SHIFT.has(char)) {
+// ```
+// Wait, I didn't include `'` or `"` in VERTICAL_PUNCTUATION_SHIFT.
+// Let's look at the screenshot again carefully.
+// The screenshot shows standard english characters cut off.
+// The parenthesis `)` is rotated +90 in the preview. It's too wide for the visual width (which is charBoxH).
+// Why is the parenthesis cut off?
+// In `previewFontCharacter`:
+// `drawnBoxes.push({ x: currentX, y: currentY, w: charBoxH, h: charBoxW, isCutoff });`
+// The highlight box has `w: charBoxH` and `h: charBoxW`.
+// For vertical mode, `charBoxH` is the unrotated width, and `charBoxW` is the unrotated height.
+// Wait!
+// In `measureCharSize`:
 // ```
 //   if (options.vertical) {
 //     const temp = finalW;
@@ -56,47 +24,45 @@
 //     finalH = temp;
 //   }
 // ```
-// So `box.width` is the VISUAL HEIGHT (unrotated height).
-// `box.height` is the VISUAL WIDTH (unrotated width).
-// 
-// So `halfW` = Unrotated Height / 2.
-// `halfH` = Unrotated Width / 2.
-//
-// In `isCharCutoff`:
-// For Category 3 (English NOT upright):
-// It DOES NOT swap axes.
-// So it checks `left < -halfW`
-// `left` is Unrotated X bounds (-metrics.actualBoundingBoxLeft).
-// It's checking Unrotated X against `halfW` (which is Unrotated Height / 2).
-// So it's comparing X to Height, and Y to Width!
-// This means the bounds check is COMPLETELY BACKWARDS for Category 1 and 3!
-// That's why it doesn't warn.
-//
-// But wait! If in Category 3, the generator uses `rotate(0)`.
-// So the generator draws Unrotated X into `box.width` (Unrotated Height).
-// So the generator ALSO draws X into Height!
-// If it draws X into Height, a character that is visually wide but short (like `—` em-dash) will be drawn upright into a tall, narrow box. It will be cutoff in the generator!
-// 
-// Let's fix `isCharCutoff` to perfectly map to `generateFontBinary`.
+// So `box.width` = unrotated Height (Tall).
+// `box.height` = unrotated Width (Narrow).
+// So `charBoxW` = Tall.
+// `charBoxH` = Narrow.
+// In `previewFontCharacter` for vertical mode:
+// `w: charBoxH` (Narrow)
+// `h: charBoxW` (Tall)
+// This is correct! The preview box is Narrow and Tall.
+// But the parenthesis `)` is drawn rotated +90.
+// So it is visually WIDE and SHORT!
+// A wide/short character drawn inside a narrow/tall box WILL spill out the sides!
+// The screenshot shows exactly this: The `)` is horizontal, sticking out of the left and right sides of the tall/narrow red box!
+// That is physically what happens if you take a tall `)` and rotate it 90 degrees.
+// BUT why is the e-reader able to display it without cutoff?
+// The e-reader receives a binary box that is `box.width` (Tall) x `box.height` (Narrow).
 // In `generateFontBinary`:
-// 1. `ctx.translate(box.width / 2, box.height / 2);`
-// 2. 
-// ```
-//       if (options.vertical) {
-//         if (options.verticalSymbols && isVerticalSymbol(charStr)) {
-//           ctx.rotate(0);
-//         } else if (!options.verticalEnglishUpright && isEnglishOrNumber(charStr)) {
-//           ctx.rotate(0);
-//         } else {
-//           ctx.rotate(-Math.PI / 2);
-// ```
+// If it's a `)`, it's a `VERTICAL_SYMBOL`.
+// `isRotatedMinus90 = false`.
+// So it calls `ctx.rotate(0)`.
+// It draws `)` UPRIGHT into a canvas of width=Tall, height=Narrow.
+// `)` is a tall character.
+// It draws it upright into a box with `height=Narrow`!
+// IT WILL BE CUT OFF ON THE TOP AND BOTTOM IN THE BINARY!
+// 
+// If it's cut off in the binary, it will be cut off on the e-reader!
+// Why wasn't it cut off before?
+// Because before, we didn't swap the dimensions in `measureCharSize`!
+// Before, `box.width` was Narrow, `box.height` was Tall.
+// The generator drew `)` upright into Narrow/Tall. It fit perfectly!
+// And the generator drew `坐` rotated -90 into Narrow/Tall. `坐` is square so it fit perfectly!
+// And the generator drew English rotated 0 into Narrow/Tall. They fit perfectly vertically, but if they were wide words... wait, English characters are narrow and tall. So they fit perfectly!
 //
-// If we want `isCharCutoff` to be identical:
-// Just simulate exactly this!
-// ```javascript
-// function isCharCutoff(...) {
-//   // We can just use the ctx transform matrix!
-//   // But canvas 2d doesn't easily let us transform bounding boxes.
-//   // Let's do it manually.
-// }
-// ```
+// BUT wait, I swapped the dimensions because of the English character `g` being cut off.
+// "some english font like "g" is cutoff in vertical reading option. maybe swap the value of x and y"
+// When I swapped them, `box.width` became Tall, and `box.height` became Narrow.
+// This fixed `g` when it was drawn `rotate(-90)` (because it needs horizontal space to be drawn sideways, so it needs `box.width` to be Tall).
+// BUT if we swap them globally, we break EVERYTHING that is drawn `rotate(0)` (like `)`, `|`, `‥`) because they are drawn upright and now have a Narrow `box.height`!
+//
+// We CANNOT swap the global box dimensions! The global box MUST be square, OR we must dynamically adjust per character (which the .bin format doesn't support, it's fixed width/height for ALL chars).
+// If the font is fixed width/height for ALL chars, and we have chars drawn sideways AND chars drawn upright, the box MUST be large enough in BOTH dimensions!
+// We need the box to be `max(finalW, finalH)` for BOTH width and height!
+// If we make it square, it will fit everything regardless of rotation!

@@ -22,7 +22,8 @@ const VERTICAL_SYMBOLS = new Set([
 ]);
 
 // Characters that need to be shifted to the top-right in vertical layout
-const VERTICAL_PUNCTUATION_SHIFT = new Set(['、', '。', '，', '．', ',', '.']);
+// We only include Japanese/CJK full-width punctuation here. Standard English punctuation stays on the baseline.
+const VERTICAL_PUNCTUATION_SHIFT = new Set(['、', '。', '，', '．']);
 
 const VERTICAL_SUTEGANA = new Set([
   'ぁ', 'ぃ', 'ぅ', 'ぇ', 'ぉ', 'っ', 'ゃ', 'ゅ', 'ょ', 'ゎ', 'ゕ', 'ゖ',
@@ -171,12 +172,13 @@ export function measureCharSize(options: FontGenerationOptions): { width: number
   let finalH = h + options.lineSpacing;
   
   if (options.vertical) {
-    // When vertical is enabled, the characters are rotated -90 degrees.
-    // This means the visual height becomes the binary box width, and visual width becomes binary box height.
-    // To prevent cutoff (especially for English descenders), we swap the dimensions.
-    const temp = finalW;
-    finalW = finalH;
-    finalH = temp;
+    // In vertical mode, some characters are drawn sideways (rotated -90), and some are drawn upright (rotate 0).
+    // Because the .bin format requires a single globally fixed width/height for ALL characters,
+    // a rectangular box will inevitably cut off one group or the other.
+    // The only mathematically safe solution is to force a square box based on the largest dimension.
+    const maxDim = Math.max(finalW, finalH);
+    finalW = maxDim;
+    finalH = maxDim;
   }
   
   if (finalW < 5) finalW = 5;
