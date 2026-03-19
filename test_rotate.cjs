@@ -1,33 +1,24 @@
-// Let's think about the e-reader space again.
-// The user said: "the punctutation got also involved in sutegana moving. now the japanese punctutation is in top left now. bring it back to top right also."
-// Before the sutegana change, the code was:
-// return isPreview ? { x: fontSizePx * 0.5, y: -fontSizePx * 0.5 } : { x: 0, y: -fontSizePx * 0.5 };
-// And the user said it was at the "top left".
-// So { x: 0, y: -0.5 } moved it to the TOP-LEFT.
-// Wait! If { x: 0, y: -0.5 } goes to Top-Left.
-// And { x: 0.5, y: -0.5 } goes to Top-Left?
-// When I introduced sutegana, the punctuation code DID NOT CHANGE for the generator:
-// `return isPreview ? { x: fontSizePx * 0.5, y: -fontSizePx * 0.5 } : { x: 0, y: -fontSizePx * 0.5 };`
-// If it didn't change for the generator, but the user noticed it moved, maybe the `isPreview` flag is wrong, or the boundary fix changed how it draws?
-// Ah! In `isCharCutoff`, I passed `isPreview = false` for the offset calculation.
-// But wait, the previous commit that the user said was "so near... its now in top right" was:
-// `return { x: 0, y: -fontSizePx * 0.55 };` (applied AFTER rotation).
-// Let's re-read the exact history.
-// User: "its gone again"
-// Me: Fixed to `return { x: 0, y: -fontSizePx * 0.55 };` (applied after rotation).
-// User: "its now in top right, youre so near to solve it."
-// Me: Changed it to `isPreview ? { x: 0.5, y: -0.5 } : { x: 0, y: -0.5 }`.
-// User: "still in top left".
-// Me: Changed to `{ x: 0.5, y: -0.5 }` without isPreview.
-// User: (No complaint about top left, just asked for fileformat).
-// Me: Added fileformat.
-// User: "still in top left".
-// Me: Changed back to `isPreview` flag: `isPreview ? { x: 0.5, y: -0.5 } : { x: 0, y: -0.5 }` AND added cutoff detection.
-// User: "boundary box does not detect".
-// Me: Fixed boundary box.
-// User: "the punctutation got also involved in sutegana moving. now the japanese punctutation is in top left now. bring it back to top right also. from before code isolate both."
-
-// The user is asking to isolate them.
-// The code that got it to "top right" (the "so near" one) was:
-// { x: 0, y: -fontSizePx * 0.55 }
-// Let's just use that EXACT code for punctuation in the generator, and use a separate explicit offset for sutegana.
+// Let's explicitly separate the offsets for preview vs generator because the coordinate spaces are fundamentally different.
+// The user explicitly stated in a previous prompt that `{ x: 0, y: -0.55 }` for punctuation in the GENERATOR worked perfectly to put it in the "top right".
+// Why did that work?
+// Context rotated by -Math.PI / 2.
+// Translation by { x: 0, y: -0.55 * fontSizePx }
+// Original canvas coords: Right is +X, Down is +Y.
+// After rotation (-90 deg), the X axis points UP. The Y axis points RIGHT.
+// Translation of `y = -0.55` moves it along the negative Y axis, which is LEFT visually.
+// So the generator moves the punctuation LEFT.
+// Why does moving it LEFT put it in the Top-Right?
+// Ah! In vertical text on the e-reader, lines flow from RIGHT to LEFT.
+// If you draw the glyph, and it's placed in the box, perhaps the box itself is drawn rotated or placed differently?
+// Regardless of the internal device mapping, the empirical truth from the user is:
+// For GENERATOR punctuation (rotated): { x: 0, y: -0.55 } -> works perfectly (puts it in top right).
+// 
+// For PREVIEW punctuation (unrotated):
+// If generator uses {x: 0, y: -0.55}, we need the preview to match this visual outcome.
+// In the preview, it's not rotated. To move something visually to the Top-Right, we shift Right (+X) and Up (-Y).
+// 
+// For SUTEGANA:
+// Sutegana normally draws in the center-left or center-bottom.
+// The user said: "the sutegana 'yo' character has small tiny cutoff in generated font but in preview it does not cutoff.."
+// This proves the generator offset and the preview offset are misaligned.
+// Let's bring back `isPreview` flag so we can tune them completely independently.

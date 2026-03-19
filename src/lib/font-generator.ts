@@ -29,17 +29,29 @@ const VERTICAL_SUTEGANA = new Set([
   'ァ', 'ィ', 'ゥ', 'ェ', 'ォ', 'ッ', 'ャ', 'ュ', 'ョ', 'ヮ', 'ヵ', 'ヶ'
 ]);
 
-function getVerticalCharOffset(char: string, fontSizePx: number): { x: number, y: number } {
+function getVerticalCharOffset(char: string, fontSizePx: number, isPreview: boolean): { x: number, y: number } {
   if (VERTICAL_PUNCTUATION_SHIFT.has(char)) {
-    // In unrotated visual space, comma draws at bottom-left. 
-    // We want it at top-right, so we shift Right (+X) and Up (-Y).
-    return { x: fontSizePx * 0.5, y: -fontSizePx * 0.5 };
+    if (isPreview) {
+      // Unrotated preview: Shift Right and Up
+      return { x: fontSizePx * 0.55, y: -fontSizePx * 0.55 };
+    } else {
+      // Rotated generator: This empirically works perfectly for the device
+      return { x: 0, y: -fontSizePx * 0.55 };
+    }
   }
   
   if (VERTICAL_SUTEGANA.has(char)) {
-    // Sutegana (small kana) require an independent, smaller shift to reach the top-right quadrant.
-    // A smaller shift prevents them from exceeding the character bounding box (which causes them to be cutoff/red).
-    return { x: fontSizePx * 0.15, y: -fontSizePx * 0.15 };
+    // Sutegana (small kana) require an independent, smaller shift.
+    if (isPreview) {
+      // Unrotated preview: Shift slightly Right and Up
+      return { x: fontSizePx * 0.15, y: -fontSizePx * 0.15 };
+    } else {
+      // Rotated generator: The previous {x: 0.15, y: -0.15} shifted it LEFT and UP.
+      // If it was getting slightly cut off, it's because it was hitting the left/top edge in the binary.
+      // We will adjust it to just shift purely UP (which is X in the rotated space) and NOT left/right (Y).
+      // Let's use x: 0.15 (move UP) and y: 0 (don't move left/right).
+      return { x: fontSizePx * 0.15, y: 0 };
+    }
   }
   
   return { x: 0, y: 0 };
@@ -73,7 +85,7 @@ function isCharCutoff(ctx: CanvasRenderingContext2D, char: string, box: { width:
   let vOffset = { x: 0, y: 0 };
   
   if (options.vertical && !isVerticalSymbol(char) && !(!options.verticalEnglishUpright && isEnglishOrNumber(char))) {
-     vOffset = getVerticalCharOffset(char, fontSizePx);
+     vOffset = getVerticalCharOffset(char, fontSizePx, false);
   }
   
   left += vOffset.x;
