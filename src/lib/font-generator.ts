@@ -30,27 +30,18 @@ const VERTICAL_SUTEGANA = new Set([
   'ァ', 'ィ', 'ゥ', 'ェ', 'ォ', 'ッ', 'ャ', 'ュ', 'ョ', 'ヮ', 'ヵ', 'ヶ'
 ]);
 
-function getVerticalCharOffset(char: string, fontSizePx: number, isPreview: boolean): { x: number, y: number } {
+function getVerticalCharOffset(char: string, fontSizePx: number): { x: number, y: number } {
   if (VERTICAL_PUNCTUATION_SHIFT.has(char)) {
-    if (isPreview) {
-      // Unrotated preview: Shift Right (+0.55) and Up (-0.55)
-      return { x: fontSizePx * 0.55, y: -fontSizePx * 0.55 };
-    } else {
-      // Rotated generator (-90 deg):
-      // To achieve visual Right (+0.55), we need generator +Y.
-      // To achieve visual Up (-0.55), we need generator +X.
-      return { x: fontSizePx * 0.55, y: fontSizePx * 0.55 };
-    }
+    // Both preview (unrotated) and generator (post-rotation) visually share the same translation vector
+    // because the e-reader's physical +90 rotation perfectly cancels out the generator's -90 rotation.
+    // To move from bottom-left to top-right, we shift Right (+X) and Up (-Y).
+    return { x: fontSizePx * 0.55, y: -fontSizePx * 0.55 };
   }
   
   if (VERTICAL_SUTEGANA.has(char)) {
-    if (isPreview) {
-      // Unrotated preview: Shift slightly Right (+0.15) and Up (-0.15)
-      return { x: fontSizePx * 0.15, y: -fontSizePx * 0.15 };
-    } else {
-      // Rotated generator (-90 deg): Same logic, +Y for Right, +X for Up.
-      return { x: fontSizePx * 0.15, y: fontSizePx * 0.15 };
-    }
+    // Sutegana (small kana) require an independent, smaller shift.
+    // Shift slightly Right (+X) and Up (-Y)
+    return { x: fontSizePx * 0.15, y: -fontSizePx * 0.15 };
   }
   
   return { x: 0, y: 0 };
@@ -96,7 +87,7 @@ function isCharCutoff(ctx: CanvasRenderingContext2D, char: string, box: { width:
   }
 
   if (isRotatedMinus90) {
-     vOffset = getVerticalCharOffset(char, fontSizePx, false);
+     vOffset = getVerticalCharOffset(char, fontSizePx);
   } else if (options.vertical && isVerticalSymbol(char)) {
      // Some vertical symbols might need shifts, though currently none do.
   } else if (!options.vertical && VERTICAL_PUNCTUATION_SHIFT.has(char)) {
@@ -278,7 +269,7 @@ export async function generateFontBinary(
           ctx.rotate(-Math.PI / 2); // Rotate -90 degrees for vertical layout (Upright on e-reader)
           
           // Apply punctuation/sutegana shift AFTER rotation so we are working in the visual space
-          const offset = getVerticalCharOffset(charStr, fontSizePx, false);
+          const offset = getVerticalCharOffset(charStr, fontSizePx);
           if (offset.x !== 0 || offset.y !== 0) {
             ctx.translate(offset.x, offset.y);
           }
@@ -409,7 +400,7 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
           ctx.rotate(Math.PI / 2);
         } else {
           // For upright characters, we still need to shift punctuation correctly.
-          const offset = getVerticalCharOffset(charStr, fontSizePx, true);
+          const offset = getVerticalCharOffset(charStr, fontSizePx);
           if (offset.x !== 0 || offset.y !== 0) {
             ctx.translate(offset.x, offset.y);
           }
