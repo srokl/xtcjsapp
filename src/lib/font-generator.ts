@@ -33,25 +33,23 @@ const VERTICAL_SUTEGANA = new Set([
 function getVerticalCharOffset(char: string, fontSizePx: number, isPreview: boolean): { x: number, y: number } {
   if (VERTICAL_PUNCTUATION_SHIFT.has(char)) {
     if (isPreview) {
-      // Unrotated preview: Shift Right and Up
+      // Unrotated preview: Shift Right (+0.55) and Up (-0.55)
       return { x: fontSizePx * 0.55, y: -fontSizePx * 0.55 };
     } else {
-      // Rotated generator: This empirically works perfectly for the device
-      return { x: 0, y: -fontSizePx * 0.55 };
+      // Rotated generator (-90 deg):
+      // To achieve visual Right (+0.55), we need generator +Y.
+      // To achieve visual Up (-0.55), we need generator +X.
+      return { x: fontSizePx * 0.55, y: fontSizePx * 0.55 };
     }
   }
   
   if (VERTICAL_SUTEGANA.has(char)) {
-    // Sutegana (small kana) require an independent, smaller shift.
     if (isPreview) {
-      // Unrotated preview: Shift slightly Right and Up
+      // Unrotated preview: Shift slightly Right (+0.15) and Up (-0.15)
       return { x: fontSizePx * 0.15, y: -fontSizePx * 0.15 };
     } else {
-      // Rotated generator: The previous {x: 0.15, y: -0.15} shifted it LEFT and UP.
-      // If it was getting slightly cut off, it's because it was hitting the left/top edge in the binary.
-      // We will adjust it to just shift purely UP (which is X in the rotated space) and NOT left/right (Y).
-      // Let's use x: 0.15 (move UP) and y: 0 (don't move left/right).
-      return { x: fontSizePx * 0.15, y: 0 };
+      // Rotated generator (-90 deg): Same logic, +Y for Right, +X for Up.
+      return { x: fontSizePx * 0.15, y: fontSizePx * 0.15 };
     }
   }
   
