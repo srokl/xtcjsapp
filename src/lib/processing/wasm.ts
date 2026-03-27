@@ -43,6 +43,9 @@ function ensureMemory(size: number) {
   }
 }
 
+// Offset to give AssemblyScript heap management room for metadata and internal allocations (like LUTs)
+const HEAP_OFFSET = 2 * 1024 * 1024; // 2MB
+
 export function runWasmFilters(imageData: ImageData, contrast: number, gamma: number, invert: boolean): void {
   if (!wasmInstance) throw new Error('Wasm not initialized');
   
@@ -50,12 +53,12 @@ export function runWasmFilters(imageData: ImageData, contrast: number, gamma: nu
   const inputSize = width * height * 4; // RGBA
   
   const heapBase = (wasmInstance.exports.__heap_base as WebAssembly.Global)?.value ?? 65536;
-  const inputPtr = heapBase;
+  const inputPtr = heapBase + HEAP_OFFSET;
   
   ensureMemory(inputPtr + inputSize);
   
   // Copy input
-  const memArray = new Uint8Array(wasmMemory.buffer);
+  const memArray = new Uint8Array(wasmMemory!.buffer);
   memArray.set(data, inputPtr);
   
   // Call applyFilters (f32, f32, bool)
@@ -74,13 +77,13 @@ export function runWasmDither(imageData: ImageData, algorithm: string, is2bit: b
   const scratchSize = width * height * 4; // F32
   
   const heapBase = (wasmInstance.exports.__heap_base as WebAssembly.Global)?.value ?? 65536;
-  const inputPtr = heapBase;
+  const inputPtr = heapBase + HEAP_OFFSET;
   const scratchPtr = inputPtr + inputSize;
   
   ensureMemory(scratchPtr + scratchSize);
   
   // Copy input
-  const memArray = new Uint8Array(wasmMemory.buffer);
+  const memArray = new Uint8Array(wasmMemory!.buffer);
   memArray.set(data, inputPtr);
   
   // Call Dither
@@ -137,13 +140,13 @@ export function runWasmPack(imageData: ImageData, is2bit: boolean): Uint8Array {
   }
 
   const heapBase = (wasmInstance.exports.__heap_base as WebAssembly.Global)?.value ?? 65536;
-  const inputPtr = heapBase;
+  const inputPtr = heapBase + HEAP_OFFSET;
   const outputPtr = inputPtr + inputSize;
   
   ensureMemory(outputPtr + outputSize);
 
   // Copy input
-  const memArray = new Uint8Array(wasmMemory.buffer);
+  const memArray = new Uint8Array(wasmMemory!.buffer);
   memArray.set(data, inputPtr);
   
   // Zero out output buffer
@@ -185,13 +188,13 @@ export function runWasmPipeline(
   }
 
   const heapBase = (wasmInstance.exports.__heap_base as WebAssembly.Global)?.value ?? 65536;
-  const inputPtr = heapBase;
+  const inputPtr = heapBase + HEAP_OFFSET;
   const scratchPtr = inputPtr + inputSize;
   const outputPtr = scratchPtr + scratchSize;
 
   ensureMemory(outputPtr + outputSize);
 
-  const memArray = new Uint8Array(wasmMemory.buffer);
+  const memArray = new Uint8Array(wasmMemory!.buffer);
   memArray.set(data, inputPtr);
 
   const exports = wasmInstance.exports as any;
@@ -242,12 +245,12 @@ export function runWasmResize(
   const outputSize = dw * dh * 4;
 
   const heapBase = (wasmInstance.exports.__heap_base as WebAssembly.Global)?.value ?? 65536;
-  const inputPtr = heapBase;
+  const inputPtr = heapBase + HEAP_OFFSET;
   const outputPtr = inputPtr + inputSize;
 
   ensureMemory(outputPtr + outputSize);
 
-  const memArray = new Uint8Array(wasmMemory.buffer);
+  const memArray = new Uint8Array(wasmMemory!.buffer);
   memArray.set(source.data, inputPtr);
 
   (wasmInstance.exports.resizeBox as CallableFunction)(sw, sh, inputPtr, dw, dh, outputPtr);

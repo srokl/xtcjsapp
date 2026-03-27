@@ -11,6 +11,7 @@ import { rotateCanvas, extractAndRotate, extractRegion, resizeWithPadding, resiz
 import { buildXtc, buildXtcFromBuffers, imageDataToXth, imageDataToXtg, wrapWasmData, buildXtcHeaderAndIndex, getXtcPageSize, type StreamPageInfo } from './xtc-format'
 import { compressXtczLz4 } from './processing/lz4-compress'
 import { initWasm, runWasmFilters, isWasmLoaded, runWasmPack, runWasmResize, runWasmPipeline } from './processing/wasm'
+import { runUnifiedXtg, runUnifiedXth } from './processing/unified-js'
 
 function getTargetDimensions(options: ConversionOptions) {
   return DEVICE_DIMENSIONS[options.device] || DEVICE_DIMENSIONS.X4;
@@ -72,6 +73,7 @@ function resizeHq(
   return resizeFill(canvas, targetWidth, targetHeight)
 }
 
+
 /**
  * Process a canvas (filter, dither) and encode it to binary
  * Highly optimized synchronous pipeline to maximize CPU throughput.
@@ -101,8 +103,19 @@ function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOptions,
       applyDithering(ctx, width, height, options.dithering, options.is2bit, true)
       preview = canvas.toDataURL('image/png')
     }
+  } else if (options.dithering === 'none' && !options.manhwa) {
+    // Unified High-Performance JS Pipeline (Single memory pass)
+    buffer = options.is2bit 
+      ? runUnifiedXth(imageData.data, width, height, options)
+      : runUnifiedXtg(imageData.data, width, height, options)
+    
+    if (generatePreview) {
+      applyUnifiedFilters(imageData.data, options)
+      ctx.putImageData(imageData, 0, 0)
+      preview = canvas.toDataURL('image/png')
+    }
   } else {
-    // Unified JS Pipeline: One getImageData, One loop, One putImageData (if preview)
+    // Standard JS Pipeline (Multi-pass fallback)
     applyUnifiedFilters(imageData.data, {
       contrast: options.contrast,
       gamma: options.gamma,
@@ -649,7 +662,7 @@ async function convertPdfToXtc(
           const scale = 2.0;
           const viewport = page.getViewport({ scale });
           const canvas = sharedCanvasPool.acquire(viewport.width, viewport.height);
-          await page.render({ canvasContext: canvas.getContext('2d')!, viewport, background: 'rgb(255,255,255)' }).promise;
+          await page.render({ canvasContext: canvas.getContext('2d')!, viewport, background: 'rgb(255,255,255)', canvas: canvas as any }).promise;
           const results = processCanvasAsImage(canvas, pageNum, options, pageImages.length < 10);
           sharedCanvasPool.release(canvas);
           return { pageNum, results };
@@ -677,7 +690,7 @@ async function convertPdfToXtc(
       for (let i = 1; i <= numPages; i++) {
         const page = await pdf.getPage(i); const scale = 2.0; const viewport = page.getViewport({ scale })
         const canvas = sharedCanvasPool.acquire(viewport.width, viewport.height)
-        await page.render({ canvasContext: canvas.getContext('2d')!, viewport, background: 'rgb(255,255,255)' }).promise
+        await page.render({ canvasContext: canvas.getContext('2d')!, viewport, background: 'rgb(255,255,255)', canvas: canvas as any }).promise
         const slices = await stitcher.append(canvas)
         sharedCanvasPool.release(canvas)
         for (const slice of slices) {
@@ -699,7 +712,7 @@ async function convertPdfToXtc(
             const scale = 2.0;
             const viewport = page.getViewport({ scale });
             const canvas = sharedCanvasPool.acquire(viewport.width, viewport.height);
-            await page.render({ canvasContext: canvas.getContext('2d')!, viewport, background: 'rgb(255,255,255)' }).promise;
+          await page.render({ canvasContext: canvas.getContext('2d')!, viewport, background: 'rgb(255,255,255)', canvas: canvas as any }).promise;
             const results = processCanvasAsImage(canvas, pageNum, options, pageImages.length < 10);
             sharedCanvasPool.release(canvas);
             return { pageNum, results };
@@ -754,7 +767,7 @@ async function convertPdfToXtc(
 }
 
 async function convertImageToXtc(file: File, options: ConversionOptions, onProgress: (p: number, pr: string | null) => void): Promise<ConversionResult> {
-  const result = await processImageAsBinary(file, 1, options)
+  const result = await processImageAsBinary(new Uint8Array(await file.arrayBuffer()), 1, options)
   if (result.results.length === 0) throw new Error('Failed')
   return { name: file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xth' : '.xtg'), data: result.results[0].buffer, size: result.results[0].buffer.byteLength, pageCount: 1, pageImages: [result.results[0].preview] }
 }
@@ -924,7 +937,7 @@ function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: number, 
 
 async function processImageAsBinary(imgData: Uint8Array, pageNum: number, options: ConversionOptions, generatePreview: boolean = true): Promise<{ results: { buffer: ArrayBuffer, preview: string }[] }> {
   try {
-    const blob = new Blob([imgData]);
+    const blob = new Blob([imgData as any]);
     const bitmap = await createImageBitmap(blob, {
       premultiplyAlpha: 'none',
       colorSpaceConversion: 'none'
@@ -937,6 +950,7 @@ async function processImageAsBinary(imgData: Uint8Array, pageNum: number, option
     sharedCanvasPool.release(canvas)
     return { results }
   } catch (e) {
+    console.error('Image processing failed:', e)
     return { results: [] }
   }
 }

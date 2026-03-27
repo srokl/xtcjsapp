@@ -15,7 +15,7 @@ export class ManhwaStitcher {
     this.targetHeight = dims.height
   }
 
-  async append(source: HTMLImageElement | HTMLCanvasElement): Promise<ProcessedPage[]> {
+  async append(source: HTMLImageElement | HTMLCanvasElement | ImageBitmap): Promise<ProcessedPage[]> {
     const pages: ProcessedPage[] = []
     
     // 1. Resize source to targetWidth

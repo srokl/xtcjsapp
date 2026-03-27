@@ -453,10 +453,18 @@ export function imageDataToXtg(imageData: ImageData): ArrayBuffer {
   for (let y = 0; y < h; y++) {
     const rowOffset = y * rowBytes;
     const dataOffset = y * w * 4;
-    for (let x = 0; x < w; x++) {
-      if (data[dataOffset + (x << 2)] >= 128) {
-        pixelData[rowOffset + (x >>> 3)] |= 1 << (7 - (x & 7));
-      }
+    for (let x = 0; x < w; x += 8) {
+      let b = 0;
+      const base = dataOffset + (x << 2);
+      if (data[base] >= 128) b |= 0x80;
+      if (x + 1 < w && data[base + 4] >= 128) b |= 0x40;
+      if (x + 2 < w && data[base + 8] >= 128) b |= 0x20;
+      if (x + 3 < w && data[base + 12] >= 128) b |= 0x10;
+      if (x + 4 < w && data[base + 16] >= 128) b |= 0x08;
+      if (x + 5 < w && data[base + 20] >= 128) b |= 0x04;
+      if (x + 6 < w && data[base + 24] >= 128) b |= 0x02;
+      if (x + 7 < w && data[base + 28] >= 128) b |= 0x01;
+      pixelData[rowOffset + (x >>> 3)] = b;
     }
   }
 
@@ -509,23 +517,34 @@ export function imageDataToXth(imageData: ImageData): ArrayBuffer {
   const p0 = new Uint8Array(planeSize);
   const p1 = new Uint8Array(planeSize);
 
-  for (let y = 0; y < h; y++) {
-    const byteInCol = y >>> 3;
-    const bitMask = 1 << (7 - (y & 7));
-    const dataOffset = y * w * 4;
-    
-    for (let x = 0; x < w; x++) {
-      const gray = data[dataOffset + (x << 2)];
+  // Planar logic: Vertical scan, Columns from Right to Left.
+  // Optimization: Process columns first to maximize output buffer cache locality.
+  for (let x = 0; x < w; x++) {
+    const colOffset = (w - 1 - x) * colBytes;
+    for (let y = 0; y < h; y += 8) {
+      let byte0 = 0;
+      let byte1 = 0;
       
-      let val;
-      if (gray >= 212) val = 0;      // White (00)
-      else if (gray >= 127) val = 1; // Light Gray (01)
-      else if (gray >= 42) val = 2;  // Dark Gray (10)
-      else val = 3;                  // Black (11)
-
-      const colOffset = (w - 1 - x) * colBytes + byteInCol;
-      if (val & 1) p0[colOffset] |= bitMask;
-      if (val & 2) p1[colOffset] |= bitMask;
+      const maxBatch = Math.min(8, h - y);
+      for (let bi = 0; bi < maxBatch; bi++) {
+        const py = y + bi;
+        const gray = data[(py * w + x) << 2];
+        
+        // Intensity mapping: White(00), Light Gray(01), Dark Gray(10), Black(11)
+        if (gray < 212) {
+          if (gray < 42) { // Black
+            byte0 |= (1 << (7 - bi));
+            byte1 |= (1 << (7 - bi));
+          } else if (gray < 127) { // Dark Gray
+            byte1 |= (1 << (7 - bi));
+          } else { // Light Gray
+            byte0 |= (1 << (7 - bi));
+          }
+        }
+      }
+      const byteIdx = colOffset + (y >>> 3);
+      p0[byteIdx] = byte0;
+      p1[byteIdx] = byte1;
     }
   }
 
