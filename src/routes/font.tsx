@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useState, useEffect, useRef } from 'react'
 import streamSaver from 'streamsaver'
-import { generateFontBinary, previewFontCharacter, type FontGenerationOptions } from '../lib/font-generator'
+import { generateFontBinary, previewFontCharacter, measureCharSize, type FontGenerationOptions } from '../lib/font-generator'
 
 export const Route = createFileRoute('/font')({
   component: FontPage,
@@ -154,7 +154,10 @@ function FontPage() {
                 />
               </label>
               <label style={{ flex: 1 }}>
-                <strong style={{ fontSize: '0.85rem' }}>Font Brightness/Weight</strong><br/>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '2px' }}>
+                  <strong style={{ fontSize: '0.85rem' }}>Font Brightness/Weight</strong>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--ink-light)' }}>{options.threshold}</span>
+                </div>
                 <input 
                   type="range" min="1" max="254" 
                   value={options.threshold} 
@@ -405,12 +408,12 @@ function FontPage() {
           <div style={{ marginTop: 'var(--space-xl)', fontSize: '0.85rem', color: 'var(--ink-light)', lineHeight: '1.6' }}>
             <div style={{ fontWeight: 'bold', marginBottom: 'var(--space-xs)', color: 'var(--ink)' }}>Estimated display parameters (220 PPI):</div>
             {(() => {
-              const fontSizePx = options.fontSize * (220 / 72);
-              const totalW = fontSizePx + options.charSpacing;
-              const totalH = fontSizePx + options.lineSpacing;
+              const box = measureCharSize(options);
+              const totalW = box.width;
+              const totalH = box.height;
               return (
                 <>
-                  <div>Single char size (with spacing): ~{Math.round(totalW)}x{Math.round(totalH)}px</div>
+                  <div>Single char size (with spacing): ~{totalW}x{totalH}px</div>
                   <div>Screen capacity: {Math.floor(800 / totalH)} lines, {Math.floor(480 / totalW)} chars per line</div>
                   <div>Max chars on screen: {Math.floor(800 / totalH) * Math.floor(480 / totalW)} characters</div>
                 </>
@@ -446,7 +449,7 @@ function FontPage() {
           <h3 style={{ color: '#ff4444', marginBottom: 'var(--space-sm)', fontSize: '1rem' }}>⚠️ Cutoff Characters in Preview</h3>
           <p style={{ fontSize: '0.85rem', marginBottom: 'var(--space-md)', color: 'var(--ink)' }}>
             The following {cutoffChars.length} characters in your <strong>preview text</strong> exceed the character bounding box and will be clipped. 
-            Try <strong>reducing font size</strong>, <strong>increasing line/char spacing</strong>, or <strong>adjusting X/Y offsets</strong>.
+            Try <strong>increasing line/char spacing</strong>.
           </p>
           <div style={{ 
             display: 'flex', 
