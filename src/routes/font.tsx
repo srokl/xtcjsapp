@@ -27,7 +27,8 @@ function FontPage() {
     yOffset: 0,
     xOffset: 0,
     smoothing: true,
-    hinting: true
+    hinting: true,
+    autoFit: false
   })
 
   const [previewText, setPreviewText] = useState('abcdefghijklmnopqrstuvwxyz\nABCDEFGHIJKLMNOPQRSTUVWXYZ\n0123456789\n`~!@#$%^&*()-_=+[{]}\\|;:\'",<.>/?\n永不妥协')
@@ -225,6 +226,14 @@ function FontPage() {
                 <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
                   <input 
                     type="checkbox" 
+                    checked={options.autoFit} 
+                    onChange={e => setOptions({ ...options, autoFit: e.target.checked })}
+                  />
+                  Auto Fit
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
+                  <input 
+                    type="checkbox" 
                     checked={options.vertical} 
                     onChange={e => setOptions({ ...options, vertical: e.target.checked })}
                   />
@@ -286,7 +295,7 @@ function FontPage() {
                     name="textPreset"
                     onChange={() => setPreviewText('月落乌啼霜满天，江枫渔火对愁眠。\n天地玄黄，宇宙洪荒。日月盈昃，辰宿列张。\n寒来暑往，秋收冬藏。闰余成岁，律吕调阳。')}
                   />
-                  Chinese (Classical)
+                  Tradi
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
                   <input 

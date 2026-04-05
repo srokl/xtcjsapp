@@ -13,6 +13,7 @@ export interface FontGenerationOptions {
   xOffset: number;
   smoothing: boolean;
   hinting: boolean;
+  autoFit: boolean;
 }
 
 const VERTICAL_SYMBOLS = new Set([
@@ -56,13 +57,8 @@ function isEnglishOrNumber(char: string): boolean {
   return /^[\x20-\x7E]+$/.test(char) && !isVerticalSymbol(char);
 }
 
-/**
- * Checks if a character's glyph will be cutoff by the bounding box.
- */
-function isCharCutoff(ctx: CanvasRenderingContext2D, char: string, box: { width: number, height: number }, options: FontGenerationOptions): boolean {
+function getCharMetrics(ctx: CanvasRenderingContext2D, char: string, box: { width: number, height: number }, options: FontGenerationOptions) {
   const metrics = ctx.measureText(char);
-  const halfW = box.width / 2;
-  const halfH = box.height / 2;
 
   // 1. Initial visual boundaries relative to the center anchor (unrotated)
   let left = -metrics.actualBoundingBoxLeft;
@@ -88,10 +84,6 @@ function isCharCutoff(ctx: CanvasRenderingContext2D, char: string, box: { width:
 
   if (isRotatedMinus90) {
      vOffset = getVerticalCharOffset(char, fontSizePx);
-  } else if (options.vertical && isVerticalSymbol(char)) {
-     // Some vertical symbols might need shifts, though currently none do.
-  } else if (!options.vertical && VERTICAL_PUNCTUATION_SHIFT.has(char)) {
-     // If we ever want horizontal punctuation shifts, we'd add them here.
   }
   
   left += vOffset.x;
@@ -99,36 +91,48 @@ function isCharCutoff(ctx: CanvasRenderingContext2D, char: string, box: { width:
   top += vOffset.y;
   bottom += vOffset.y;
 
-  // 3. Map the character's bounds to the generator's binary box.
-  // In `generateFontBinary`, `box.width` and `box.height` are the binary dimensions.
-  // If `isRotatedMinus90` is true, the generator calls `ctx.rotate(-Math.PI / 2)`.
-  // This means the context's X axis points UP, and Y axis points RIGHT relative to the binary box.
-  // If it's false (`ctx.rotate(0)`), the axes are standard (X=Right, Y=Down).
-  
   let finalLeft, finalRight, finalTop, finalBottom;
 
   if (isRotatedMinus90) {
-    // Rotation of -90 degrees maps: (x, y) -> (y, -x)
-    // So the character's unrotated Y bounds map to the binary box's X bounds.
-    // The character's unrotated X bounds map to the binary box's Y bounds (inverted).
     finalLeft = top;          
     finalRight = bottom;      
     finalTop = -right;        
     finalBottom = -left;      
   } else {
-    // No rotation. The character's X bounds map to the binary box's X bounds.
     finalLeft = left;
     finalRight = right;
     finalTop = top;
     finalBottom = bottom;
   }
 
-  // 4. Check if any edge + manual offset exceeds half-box dimensions
+  finalLeft += options.xOffset;
+  finalRight += options.xOffset;
+  finalTop += options.yOffset;
+  finalBottom += options.yOffset;
+
+  return { left: finalLeft, right: finalRight, top: finalTop, bottom: finalBottom, isRotatedMinus90, vOffset };
+}
+
+/**
+ * Checks if a character's glyph will be cutoff by the bounding box.
+ */
+function isCharCutoff(ctx: CanvasRenderingContext2D, char: string, box: { width: number, height: number }, options: FontGenerationOptions): boolean {
+  const m = getCharMetrics(ctx, char, box, options);
+  
+  if (options.autoFit) {
+    const charW = m.right - m.left;
+    const charH = m.bottom - m.top;
+    return charW > box.width || charH > box.height;
+  }
+  
+  const halfW = box.width / 2;
+  const halfH = box.height / 2;
+
   return (
-    finalLeft + options.xOffset < -halfW ||
-    finalRight + options.xOffset > halfW ||
-    finalTop + options.yOffset < -halfH ||
-    finalBottom + options.yOffset > halfH
+    m.left < -halfW ||
+    m.right > halfW ||
+    m.top < -halfH ||
+    m.bottom > halfH
   );
 }
 
@@ -252,13 +256,45 @@ export async function generateFontBinary(
       ctx.textBaseline = 'middle';
       ctx.textAlign = 'center';
       
-      if (isCharCutoff(ctx, charStr, box, options)) {
+      const exceedsBounds = isCharCutoff(ctx, charStr, box, options);
+      if (exceedsBounds) {
         cutoffChars.push(charStr);
       }
 
       ctx.save();
       
-      ctx.translate(box.width / 2 + options.xOffset, box.height / 2 + options.yOffset);
+      let tx = box.width / 2 + options.xOffset;
+      let ty = box.height / 2 + options.yOffset;
+
+      if (options.autoFit) {
+        const m = getCharMetrics(ctx, charStr, box, options);
+        const halfW = box.width / 2;
+        const halfH = box.height / 2;
+        const charW = m.right - m.left;
+        const charH = m.bottom - m.top;
+        
+        let shiftX = 0;
+        let shiftY = 0;
+
+        if (charW > box.width) {
+          shiftX = -(m.left + m.right) / 2;
+        } else {
+          if (m.left < -halfW) shiftX = -halfW - m.left;
+          if (m.right > halfW) shiftX = halfW - m.right;
+        }
+
+        if (charH > box.height) {
+          shiftY = -(m.top + m.bottom) / 2;
+        } else {
+          if (m.top < -halfH) shiftY = -halfH - m.top;
+          if (m.bottom > halfH) shiftY = halfH - m.bottom;
+        }
+        
+        tx += shiftX;
+        ty += shiftY;
+      }
+
+      ctx.translate(tx, ty);
       
       if (options.vertical) {
         if (options.verticalSymbols && isVerticalSymbol(charStr)) {
@@ -301,7 +337,7 @@ export async function generateFontBinary(
   }
   
   const name = binary.getSuggestedFileName(options.fontFamily, options.fontSize);
-  return { buffer: binary.fontbin.buffer, name, cutoffCount: cutoffChars.length, cutoffChars };
+  return { buffer: binary.fontbin.buffer as ArrayBuffer, name, cutoffCount: cutoffChars.length, cutoffChars };
 }
 
 export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, options: FontGenerationOptions, showBoundary: boolean = false): { count: number, chars: string[] } {
@@ -379,27 +415,64 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
         }
       }
 
-      const isCutoff = isCharCutoff(ctx, charStr, box, options);
-      if (isCutoff) cutoffChars.add(charStr);
+      const exceedsBounds = isCharCutoff(ctx, charStr, box, options);
+      if (exceedsBounds) {
+        cutoffChars.add(charStr);
+      }
 
       ctx.save();
 
-      // We must translate to the CENTER of the character box to use textBaseline='middle' and textAlign='center'
-      ctx.translate(currentX + (options.vertical ? charBoxH : charBoxW) / 2 + options.xOffset, currentY + (options.vertical ? charBoxW : charBoxH) / 2 + options.yOffset);
+      let scale = 1;
+      let tx, ty;
+      if (options.vertical) {
+        tx = currentX + charBoxH / 2 - options.yOffset;
+        ty = currentY + charBoxW / 2 + options.xOffset;
+      } else {
+        tx = currentX + charBoxW / 2 + options.xOffset;
+        ty = currentY + charBoxH / 2 + options.yOffset;
+      }
 
-      // The original toolkit rotates the *binary* output by -90 degrees, but the visual preview
-      // displays the text upright (Standard CJK vertical reading style).
-      // Therefore, we DO NOT rotate the context here in the preview, UNLESS it's a vertical symbol.
+      if (options.autoFit) {
+        const m = getCharMetrics(ctx, charStr, box, options);
+        const halfW = box.width / 2;
+        const halfH = box.height / 2;
+        const charW = m.right - m.left;
+        const charH = m.bottom - m.top;
+        
+        let shiftX = 0;
+        let shiftY = 0;
+
+        if (charW > box.width) {
+          shiftX = -(m.left + m.right) / 2;
+        } else {
+          if (m.left < -halfW) shiftX = -halfW - m.left;
+          if (m.right > halfW) shiftX = halfW - m.right;
+        }
+
+        if (charH > box.height) {
+          shiftY = -(m.top + m.bottom) / 2;
+        } else {
+          if (m.top < -halfH) shiftY = -halfH - m.top;
+          if (m.bottom > halfH) shiftY = halfH - m.bottom;
+        }
+        
+        if (options.vertical) {
+          tx += -shiftY;
+          ty += shiftX;
+        } else {
+          tx += shiftX;
+          ty += shiftY;
+        }
+      }
+
+      ctx.translate(tx, ty);
+
       if (options.vertical) {
         if (options.verticalSymbols && isVerticalSymbol(charStr)) {
-          // If the binary output has rotation 0 instead of -90 for symbols,
-          // then the visual preview should be rotated +90 relative to the upright text.
           ctx.rotate(Math.PI / 2);
         } else if (!options.verticalEnglishUpright && isEnglishOrNumber(charStr)) {
-          // If English is not set to remain upright, it reads sideways.
           ctx.rotate(Math.PI / 2);
         } else {
-          // For upright characters, we still need to shift punctuation correctly.
           const offset = getVerticalCharOffset(charStr, fontSizePx);
           if (offset.x !== 0 || offset.y !== 0) {
             ctx.translate(offset.x, offset.y);
@@ -411,9 +484,9 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
       ctx.restore();
 
       if (options.vertical) {
-        drawnBoxes.push({ x: currentX, y: currentY, w: charBoxH, h: charBoxW, isCutoff });
+        drawnBoxes.push({ x: currentX, y: currentY, w: charBoxH, h: charBoxW, isCutoff: exceedsBounds });
       } else {
-        drawnBoxes.push({ x: currentX, y: currentY, w: charBoxW, h: charBoxH, isCutoff });
+        drawnBoxes.push({ x: currentX, y: currentY, w: charBoxW, h: charBoxH, isCutoff: exceedsBounds });
       }
 
       // Advance cursor
