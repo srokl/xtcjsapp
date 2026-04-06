@@ -19,7 +19,8 @@ export interface FontGenerationOptions {
 const VERTICAL_SYMBOLS = new Set([
   '(', ')', '[', ']', '{', '}', '<', '>',
   '（', '）', '【', '】', '《', '》', '〈', '〉', '「', '」', '『', '』', '［', '］', '｛', '｝', '〔', '〕', '〖', '〗', '〘', '〙', '〚', '〛',
-  '-', '—', '–', '…', '⋯', '‥', '_', '~', '～', '〜', 'ー', '｜'
+  '-', '—', '–', '…', '⋯', '‥', '_', '~', '～', '〜', 'ー', '｜',
+  '：', '；', '=', '＝', '‰'
 ]);
 
 // Characters that need to be shifted to the top-right in vertical layout
@@ -529,4 +530,57 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
   });
 
   return { count: cutoffChars.size, chars: Array.from(cutoffChars) };
+}
+
+export function calculateMinimumPadding(text: string, options: FontGenerationOptions): { charSpacing: number, lineSpacing: number } {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d')!;
+  
+  const fontSizePx = options.fontSize * (220 / 72);
+  const fontString = `${options.fontStyle || 'normal'} ${options.fontWeight || 'normal'} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
+  ctx.font = fontString;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // To find the raw required padding, we evaluate metrics assuming 0 padding
+  // The un-padded box size is just `measureCharSize` with 0 padding variables.
+  const baseOptions = { ...options, charSpacing: 0, lineSpacing: 0 };
+  const baseBox = measureCharSize(baseOptions);
+  
+  let requiredWidth = 5; // Absolute minimum
+  let requiredHeight = 5;
+
+  // We test all unique characters visually to find the absolute max needed size boundaries
+  const uniqueChars = Array.from(new Set(text.replace(/\n|\r/g, '')));
+  
+  for (const charStr of uniqueChars) {
+     const m = getCharMetrics(ctx, charStr, baseBox, baseOptions);
+     let reqW = 0;
+     let reqH = 0;
+
+     if (options.autoFit) {
+       // Auto-fit correctly centers the raw ink outline, so box only needs to match width/height
+       reqW = m.right - m.left;
+       reqH = m.bottom - m.top;
+     } else {
+       // Rigid bounds require the bounding container to stretch far enough to cover both extremes from center
+       reqW = 2 * Math.max(Math.abs(m.left), Math.abs(m.right));
+       reqH = 2 * Math.max(Math.abs(m.top), Math.abs(m.bottom));
+     }
+
+     if (reqW > requiredWidth) requiredWidth = reqW;
+     if (reqH > requiredHeight) requiredHeight = reqH;
+  }
+
+  // Calculate the delta difference needed against the baseline font metrics
+  let charSpacing = Math.ceil(requiredWidth - baseBox.width);
+  let lineSpacing = Math.ceil(requiredHeight - baseBox.height);
+
+  if (options.vertical) {
+    // In vertical layout, Square Box Padding uses uniform constraints
+    const maxPad = Math.max(charSpacing, lineSpacing);
+    return { charSpacing: maxPad, lineSpacing: maxPad };
+  }
+
+  return { charSpacing, lineSpacing };
 }

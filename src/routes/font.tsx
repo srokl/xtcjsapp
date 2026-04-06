@@ -1,14 +1,14 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useState, useEffect, useRef } from 'react'
 import streamSaver from 'streamsaver'
-import { generateFontBinary, previewFontCharacter, measureCharSize, type FontGenerationOptions } from '../lib/font-generator'
+import { generateFontBinary, previewFontCharacter, measureCharSize, calculateMinimumPadding, type FontGenerationOptions } from '../lib/font-generator'
 
 export const Route = createFileRoute('/font')({
   component: FontPage,
 })
 
 const SYSTEM_FONTS = [
-  'Arial', 'Helvetica', 'Times New Roman', 'Courier New', 'Georgia', 
+  'Arial', 'Helvetica', 'Times New Roman', 'Courier New', 'Georgia',
   'Verdana', 'Comic Sans MS', 'Trebuchet MS', 'Impact', 'system-ui', 'serif', 'sans-serif', 'monospace'
 ]
 
@@ -41,7 +41,7 @@ function FontPage() {
   const [cutoffChars, setCutoffChars] = useState<string[]>([])
   const [generatedCutoffChars, setGeneratedCutoffChars] = useState<string[]>([])
   const [displayLimit, setDisplayLimit] = useState(500)
-  
+
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   const handleFontUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -78,7 +78,7 @@ function FontPage() {
       const { buffer, name, cutoffCount, cutoffChars: chars } = await generateFontBinary(options, (p) => {
         setProgress(p)
       })
-      
+
       if (cutoffCount > 0) {
         setGeneratedCutoffChars(chars)
         alert(`Warning: ${cutoffCount} characters were cutoff because they exceeded the character bounding box. Check the bottom of the page for the list.`)
@@ -108,14 +108,14 @@ function FontPage() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 'var(--space-xl)' }}>
         <div style={{ background: 'var(--paper-dark)', padding: 'var(--space-lg)', border: 'var(--border)' }}>
           <h3 style={{ marginBottom: 'var(--space-md)' }}>Font Settings</h3>
-          
+
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
             <div style={{ display: 'flex', gap: 'var(--space-md)', alignItems: 'flex-end' }}>
               <label style={{ flex: 1 }}>
-                <strong style={{ fontSize: '0.85rem' }}>Font Family</strong><br/>
-                <input 
-                  type="text" 
-                  value={options.fontFamily} 
+                <strong style={{ fontSize: '0.85rem' }}>Font Family</strong><br />
+                <input
+                  type="text"
+                  value={options.fontFamily}
                   onChange={e => setOptions({ ...options, fontFamily: e.target.value })}
                   list="fonts"
                   style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
@@ -125,7 +125,7 @@ function FontPage() {
                   {SYSTEM_FONTS.map(f => <option key={f} value={f} />)}
                 </datalist>
               </label>
-              
+
               <div style={{ flex: '0 0 auto' }}>
                 <label className="btn-preview" style={{ display: 'inline-block', padding: 'var(--space-sm)', cursor: 'pointer', margin: 0 }}>
                   Upload Font File
@@ -135,8 +135,8 @@ function FontPage() {
             </div>
 
             <label>
-              <strong style={{ fontSize: '0.85rem' }}>Preview Text</strong><br/>
-              <textarea 
+              <strong style={{ fontSize: '0.85rem' }}>Preview Text</strong><br />
+              <textarea
                 value={previewText}
                 onChange={e => setPreviewText(e.target.value)}
                 style={{ width: '100%', minHeight: '80px', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)', resize: 'vertical' }}
@@ -146,10 +146,10 @@ function FontPage() {
 
             <div style={{ display: 'flex', gap: 'var(--space-md)' }}>
               <label style={{ flex: 1 }}>
-                <strong style={{ fontSize: '0.85rem' }}>Font Size (Pt)</strong><br/>
-                <input 
+                <strong style={{ fontSize: '0.85rem' }}>Font Size (Pt)</strong><br />
+                <input
                   type="number" min="8" max="128" step="0.25"
-                  value={options.fontSize} 
+                  value={options.fontSize}
                   onChange={e => setOptions({ ...options, fontSize: parseFloat(e.target.value) || 24 })}
                   style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
                 />
@@ -159,9 +159,9 @@ function FontPage() {
                   <strong style={{ fontSize: '0.85rem' }}>Font Brightness/Weight</strong>
                   <span style={{ fontSize: '0.8rem', color: 'var(--ink-light)' }}>{options.threshold}</span>
                 </div>
-                <input 
-                  type="range" min="1" max="254" 
-                  value={options.threshold} 
+                <input
+                  type="range" min="1" max="254"
+                  value={options.threshold}
                   onChange={e => setOptions({ ...options, threshold: parseInt(e.target.value) || 128 })}
                   style={{ width: '100%', marginTop: 'var(--space-xs)' }}
                 />
@@ -171,10 +171,19 @@ function FontPage() {
             <div style={{ display: 'flex', gap: 'var(--space-md)' }}>
               {options.vertical ? (
                 <label style={{ flex: 1 }}>
-                  <strong style={{ fontSize: '0.85rem' }}>Square Box Padding (px)</strong><br/>
-                  <input 
-                    type="number" 
-                    value={options.lineSpacing} 
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <strong style={{ fontSize: '0.85rem' }}>Square Box Padding (px)</strong>
+                    <button
+                      type="button"
+                      onClick={() => setOptions({ ...options, ...calculateMinimumPadding(previewText, options) })}
+                      style={{ fontSize: '0.7rem', padding: '2px 6px', background: 'var(--paper-depth)', border: 'var(--border)', cursor: 'pointer' }}
+                    >
+                      Auto Min Padding
+                    </button>
+                  </div>
+                  <input
+                    type="number"
+                    value={options.lineSpacing}
                     onChange={e => setOptions({ ...options, lineSpacing: parseInt(e.target.value) || 0, charSpacing: parseInt(e.target.value) || 0 })}
                     style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
                   />
@@ -183,19 +192,28 @@ function FontPage() {
               ) : (
                 <>
                   <label style={{ flex: 1 }}>
-                    <strong style={{ fontSize: '0.85rem' }}>Height Padding (px)</strong><br/>
-                    <input 
-                      type="number" 
-                      value={options.lineSpacing} 
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <strong style={{ fontSize: '0.85rem' }}>Height Padding (px)</strong>
+                      <button
+                        type="button"
+                        onClick={() => setOptions({ ...options, ...calculateMinimumPadding(previewText, options) })}
+                        style={{ fontSize: '0.7rem', padding: '2px 6px', background: 'var(--paper-depth)', border: 'var(--border)', cursor: 'pointer' }}
+                      >
+                        Auto Min
+                      </button>
+                    </div>
+                    <input
+                      type="number"
+                      value={options.lineSpacing}
                       onChange={e => setOptions({ ...options, lineSpacing: parseInt(e.target.value) || 0 })}
                       style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
                     />
                   </label>
                   <label style={{ flex: 1 }}>
-                    <strong style={{ fontSize: '0.85rem' }}>Width Padding (px)</strong><br/>
-                    <input 
-                      type="number" 
-                      value={options.charSpacing} 
+                    <strong style={{ fontSize: '0.85rem' }}>Width Padding (px)</strong><br />
+                    <input
+                      type="number"
+                      value={options.charSpacing}
                       onChange={e => setOptions({ ...options, charSpacing: parseInt(e.target.value) || 0 })}
                       style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
                     />
@@ -208,42 +226,42 @@ function FontPage() {
               <strong style={{ fontSize: '0.85rem' }}>Render Mode</strong>
               <div style={{ display: 'flex', gap: 'var(--space-md)', flexWrap: 'wrap' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
-                  <input 
-                    type="checkbox" 
-                    checked={options.smoothing} 
+                  <input
+                    type="checkbox"
+                    checked={options.smoothing}
                     onChange={e => setOptions({ ...options, smoothing: e.target.checked })}
                   />
                   Font Smoothing
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
-                  <input 
-                    type="checkbox" 
-                    checked={options.hinting} 
+                  <input
+                    type="checkbox"
+                    checked={options.hinting}
                     onChange={e => setOptions({ ...options, hinting: e.target.checked })}
                   />
                   Stem Hinting
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
-                  <input 
-                    type="checkbox" 
-                    checked={options.autoFit} 
+                  <input
+                    type="checkbox"
+                    checked={options.autoFit}
                     onChange={e => setOptions({ ...options, autoFit: e.target.checked })}
                   />
                   Auto Fit
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
-                  <input 
-                    type="checkbox" 
-                    checked={options.vertical} 
+                  <input
+                    type="checkbox"
+                    checked={options.vertical}
                     onChange={e => setOptions({ ...options, vertical: e.target.checked })}
                   />
                   Vertical Font
                 </label>
                 {options.vertical && (
                   <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
-                    <input 
-                      type="checkbox" 
-                      checked={options.verticalSymbols} 
+                    <input
+                      type="checkbox"
+                      checked={options.verticalSymbols}
                       onChange={e => setOptions({ ...options, verticalSymbols: e.target.checked })}
                     />
                     Rotate Punctuation (-, (), ...)
@@ -251,9 +269,9 @@ function FontPage() {
                 )}
                 {options.vertical && (
                   <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
-                    <input 
-                      type="checkbox" 
-                      checked={options.verticalEnglishUpright} 
+                    <input
+                      type="checkbox"
+                      checked={options.verticalEnglishUpright}
                       onChange={e => setOptions({ ...options, verticalEnglishUpright: e.target.checked })}
                     />
                     Upright English
@@ -266,48 +284,48 @@ function FontPage() {
               <strong style={{ fontSize: '0.85rem' }}>Text Paragraph</strong>
               <div style={{ display: 'flex', gap: 'var(--space-md)', flexWrap: 'wrap' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
-                  <input 
-                    type="radio" 
+                  <input
+                    type="radio"
                     name="textPreset"
                     onChange={() => setPreviewText('月落乌啼霜满天，江枫渔火对愁眠。\n姑苏城外寒山寺，夜半钟声到客船。')}
                   />
                   Simplified Chinese
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
-                  <input 
-                    type="radio" 
+                  <input
+                    type="radio"
                     name="textPreset"
                     onChange={() => setPreviewText('あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん\nアイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン\nぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮ\n吾輩は猫である。名前はまだ無い。ー〜｜‥「」『』［］（）｛｝')}
                   />
                   Japanese (Full Kana + Symbols)
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
-                  <input 
-                    type="radio" 
+                  <input
+                    type="radio"
                     name="textPreset"
-                    onChange={() => setPreviewText('、。，．・：；？！ー〜｜‥「」『』［］（）｛｝〈〉《》【】〔〕〖〗〘〙〚〙\n+-*/=≠≈<>≤≥%‰&@#$£€¢¥^©®™')}
+                    onChange={() => setPreviewText('、。，．・：；？！ー〜｜‥：「」『』［］（）｛｝〈〉《》【】〔〕〖〗〘〙〚〙\n+-*/=≠≈<>≤≥%‰&@#$£€¢¥^©®™')}
                   />
                   CJK & Math Symbols
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
-                  <input 
-                    type="radio" 
+                  <input
+                    type="radio"
                     name="textPreset"
-                    onChange={() => setPreviewText('月落乌啼霜满天，江枫渔火对愁眠。\n天地玄黄，宇宙洪荒。日月盈昃，辰宿列张。\n寒来暑往，秋收冬藏。闰余成岁，律吕调阳。')}
+                    onChange={() => setPreviewText('月落烏啼霜滿天，江楓漁火對愁眠。\n天地玄黃，宇宙洪荒。日月盈昃，辰宿列張。\n寒來暑往，秋收冬藏。閏餘成歲，律呂調陽。')}
                   />
-                  Tradi
+                  Traditional Chinese
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
-                  <input 
-                    type="radio" 
+                  <input
+                    type="radio"
                     name="textPreset"
                     onChange={() => setPreviewText('El veloz murciélago hindú comía feliz cardillo y escabeche.\n¿Qué extraña aventura nos aguarda hoy?\n¡Mañana será otro día mejor! (1234567890)')}
                   />
                   Spanish / Latin
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
-                  <input 
-                    type="radio" 
+                  <input
+                    type="radio"
                     name="textPreset"
                     defaultChecked
                     onChange={() => setPreviewText('abcdefghijklmnopqrstuvwxyz\nABCDEFGHIJKLMNOPQRSTUVWXYZ\n0123456789\n`~!@#$%^&*()-_=+[{]}\\|;:\'",<.>/?\nQuick brown fox jumps over the lazy dog.')}
@@ -324,39 +342,39 @@ function FontPage() {
             <h3 style={{ margin: 0 }}>XTEink X4 Preview (480x800)</h3>
             <div style={{ display: 'flex', gap: 'var(--space-md)' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)', fontSize: '0.85rem' }}>
-                <input 
-                  type="checkbox" 
-                  checked={showBoundary} 
+                <input
+                  type="checkbox"
+                  checked={showBoundary}
                   onChange={e => setShowBoundary(e.target.checked)}
                 />
                 Letter Boundaries
               </label>
             </div>
           </div>
-          
+
           <div style={{ marginBottom: 'var(--space-md)', display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)', flexWrap: 'wrap' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)', flex: 1 }}>
                 <span style={{ fontSize: '0.85rem', fontWeight: 'bold', minWidth: '80px' }}>Zoom: {zoomScale.toFixed(2)}x</span>
-                <input 
-                  type="range" 
-                  min="0.1" 
-                  max="3" 
-                  step="0.01" 
+                <input
+                  type="range"
+                  min="0.1"
+                  max="3"
+                  step="0.01"
                   value={zoomScale}
                   onChange={(e) => setZoomScale(parseFloat(e.target.value))}
                   style={{ flex: 1 }}
                 />
               </label>
-              <button 
-                className="btn-preview" 
+              <button
+                className="btn-preview"
                 style={{ padding: 'var(--space-xs) var(--space-sm)', fontSize: '0.75rem', margin: 0 }}
                 onClick={() => setZoomScale(1)}
               >
                 1x
               </button>
-              <button 
-                className="btn-preview" 
+              <button
+                className="btn-preview"
                 style={{ padding: 'var(--space-xs) var(--space-sm)', fontSize: '0.75rem', margin: 0 }}
                 onClick={() => {
                   const container = document.getElementById('preview-container');
@@ -378,9 +396,9 @@ function FontPage() {
               </div>
             )}
           </div>
-          
-          <div id="preview-container" style={{ 
-            flex: '1 1 auto', 
+
+          <div id="preview-container" style={{
+            flex: '1 1 auto',
             width: '100%',
             height: '600px',
             maxHeight: '70vh',
@@ -399,9 +417,9 @@ function FontPage() {
               justifyContent: 'center',
               margin: 'auto'
             }}>
-              <div style={{ 
-                border: '2px solid var(--accent)', 
-                background: 'white', 
+              <div style={{
+                border: '2px solid var(--accent)',
+                background: 'white',
                 width: '480px',
                 height: '800px',
                 transform: `scale(${zoomScale})`,
@@ -441,9 +459,9 @@ function FontPage() {
                 <div style={{ fontSize: '0.8rem', marginTop: 'var(--space-xs)' }}>{Math.round(progress * 100)}%</div>
               </div>
             ) : (
-              <button 
-                onClick={handleGenerate} 
-                className="btn-download" 
+              <button
+                onClick={handleGenerate}
+                className="btn-download"
                 style={{ width: '100%', padding: 'var(--space-md)' }}
               >
                 Generate .bin Font File
@@ -457,14 +475,14 @@ function FontPage() {
         <div style={{ marginTop: 'var(--space-xl)', background: 'rgba(255, 68, 68, 0.05)', border: '1px solid rgba(255, 68, 68, 0.3)', borderRadius: '8px', padding: 'var(--space-lg)' }}>
           <h3 style={{ color: '#ff4444', marginBottom: 'var(--space-sm)', fontSize: '1rem' }}>⚠️ Cutoff Characters in Preview</h3>
           <p style={{ fontSize: '0.85rem', marginBottom: 'var(--space-md)', color: 'var(--ink)' }}>
-            The following {cutoffChars.length} characters in your <strong>preview text</strong> exceed the character bounding box and will be clipped. 
+            The following {cutoffChars.length} characters in your <strong>preview text</strong> exceed the character bounding box and will be clipped.
             Try <strong>increasing line/char spacing</strong>.
           </p>
-          <div style={{ 
-            display: 'flex', 
-            flexWrap: 'wrap', 
-            gap: 'var(--space-xs)', 
-            fontFamily: options.fontFamily, 
+          <div style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 'var(--space-xs)',
+            fontFamily: options.fontFamily,
             fontSize: '1.5rem',
             background: 'white',
             padding: 'var(--space-md)',
@@ -486,14 +504,14 @@ function FontPage() {
         <div style={{ marginTop: 'var(--space-xl)', background: 'rgba(255, 68, 68, 0.05)', border: '1px solid rgba(255, 68, 68, 0.3)', borderRadius: '8px', padding: 'var(--space-lg)' }}>
           <h3 style={{ color: '#ff4444', marginBottom: 'var(--space-sm)', fontSize: '1rem' }}>⚠️ Full Font Cutoff Report</h3>
           <p style={{ fontSize: '0.85rem', marginBottom: 'var(--space-md)', color: 'var(--ink)' }}>
-            During full font generation, <strong>{generatedCutoffChars.length}</strong> characters were found to exceed the {Math.round(options.fontSize * (220/72) + options.charSpacing)}x{Math.round(options.fontSize * (220/72) + options.lineSpacing)}px bounding box.
+            During full font generation, <strong>{generatedCutoffChars.length}</strong> characters were found to exceed the {Math.round(options.fontSize * (220 / 72) + options.charSpacing)}x{Math.round(options.fontSize * (220 / 72) + options.lineSpacing)}px bounding box.
             Showing first 500 symbols:
           </p>
-          <div style={{ 
-            display: 'flex', 
-            flexWrap: 'wrap', 
-            gap: 'var(--space-xs)', 
-            fontFamily: options.fontFamily, 
+          <div style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 'var(--space-xs)',
+            fontFamily: options.fontFamily,
             fontSize: '1.2rem',
             maxHeight: '400px',
             overflowY: 'auto',
@@ -512,7 +530,7 @@ function FontPage() {
           </div>
           {generatedCutoffChars.length > displayLimit && (
             <div style={{ marginTop: 'var(--space-md)', textAlign: 'center' }}>
-              <button 
+              <button
                 onClick={() => setDisplayLimit(prev => prev + 500)}
                 className="btn-preview"
                 style={{ padding: 'var(--space-sm) var(--space-lg)' }}
