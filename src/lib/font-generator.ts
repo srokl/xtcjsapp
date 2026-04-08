@@ -68,7 +68,9 @@ function getCharMetrics(ctx: CanvasRenderingContext2D, char: string, box: { widt
   let bottom = metrics.actualBoundingBoxDescent;
 
   // 2. Apply any punctuation/sutegana shifts in the visual space
-  const fontSizePx = options.fontSize * (220 / 72);
+  // Round to integer pixel boundaries to force Native OS font rasterizer onto integer grid, 
+  // preventing destructive fractional subpixel dropouts.
+  const fontSizePx = Math.round(options.fontSize * (220 / 72));
   let vOffset = { x: 0, y: 0 };
   
   // Determine if this character will be rotated -90 in the generator
@@ -144,7 +146,7 @@ export function measureCharSize(options: FontGenerationOptions): { width: number
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d')!;
   
-  const fontSizePx = options.fontSize * PT_TO_PX;
+  const fontSizePx = Math.round(options.fontSize * PT_TO_PX);
 
   // Use 'px' to match generation, avoiding CSS vs Device pixel ratio scaling issues
   const fontString = `${options.fontStyle} ${options.fontWeight} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
@@ -234,7 +236,7 @@ export async function generateFontBinary(
   // Apply smoothing option
   ctx.imageSmoothingEnabled = options.smoothing;
 
-  const fontSizePx = options.fontSize * PT_TO_PX;
+  const fontSizePx = Math.round(options.fontSize * PT_TO_PX);
   const fontString = `${options.fontStyle} ${options.fontWeight} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
   
   const cutoffChars: string[] = [];
@@ -246,9 +248,8 @@ export async function generateFontBinary(
     const end = Math.min(i + CHUNK_SIZE, binary.totalChar);
     
     for (let charCode = i; charCode < end; charCode++) {
-      // Clear canvas (black background)
-      ctx.fillStyle = 'black';
-      ctx.fillRect(0, 0, box.width, box.height);
+      // Clear canvas (transparent background to prevent RGB subpixel color fringing)
+      ctx.clearRect(0, 0, box.width, box.height);
       
       const charStr = String.fromCharCode(charCode);
       
@@ -264,8 +265,9 @@ export async function generateFontBinary(
 
       ctx.save();
       
-      let tx = box.width / 2 + options.xOffset;
-      let ty = box.height / 2 + options.yOffset;
+      // Force integer sub-pixel alignment mathematically
+      let tx = Math.round(box.width / 2 + options.xOffset);
+      let ty = Math.round(box.height / 2 + options.yOffset);
 
       if (options.autoFit) {
         const m = getCharMetrics(ctx, charStr, box, options);
@@ -291,8 +293,9 @@ export async function generateFontBinary(
           if (m.bottom > halfH) shiftY = halfH - m.bottom;
         }
         
-        tx += shiftX;
-        ty += shiftY;
+        // Snap shifting transformations
+        tx += Math.round(shiftX);
+        ty += Math.round(shiftY);
       }
 
       ctx.translate(tx, ty);
@@ -313,7 +316,11 @@ export async function generateFontBinary(
         }
       }
       
+      // Inject structural anti-dropout outline
+      ctx.lineWidth = 0.5;
+      ctx.strokeStyle = 'black';
       ctx.fillText(charStr, 0, 0);
+      ctx.strokeText(charStr, 0, 0);
       ctx.restore();
       
       const imageData = ctx.getImageData(0, 0, box.width, box.height);
@@ -322,10 +329,10 @@ export async function generateFontBinary(
       for (let y = 0; y < box.height; y++) {
         for (let x = 0; x < box.width; x++) {
           const idx = (y * box.width + x) * 4;
-          // Use red channel as luminosity approximation since it's white on black
-          const r = data[idx];
+          // We use the raw alpha channel scalar to map font opacity symmetrically
+          const alpha = data[idx + 3];
           
-          if (r >= options.threshold) {
+          if (alpha >= options.threshold) {
             binary.setPixel(charCode, x, y, true);
           }
         }
@@ -357,17 +364,16 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
 
   const ctx = canvas.getContext('2d')!;
   
-  // Clear canvas (white background for full screen simulation)
-  ctx.fillStyle = 'white';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  // Clear canvas to perfectly transparent to extract purely mathematical shape contours
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
   
   ctx.imageSmoothingEnabled = options.smoothing;
   
   // Font string uses 'px' not 'pt' to ensure 1:1 mapping on the canvas buffer without OS scaling interference
-  const fontSizePx = options.fontSize * PT_TO_PX;
+  const fontSizePx = Math.round(options.fontSize * PT_TO_PX);
   const fontString = `${options.fontStyle} ${options.fontWeight} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
   ctx.font = fontString;
-  ctx.fillStyle = 'black'; // Draw text in black on white for e-ink preview
+  ctx.fillStyle = 'black'; // text opacity will be mapped cleanly to alpha array
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'center';
 
@@ -426,11 +432,11 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
       let scale = 1;
       let tx, ty;
       if (options.vertical) {
-        tx = currentX + charBoxH / 2 - options.yOffset;
-        ty = currentY + charBoxW / 2 + options.xOffset;
+        tx = Math.round(currentX + charBoxH / 2 - options.yOffset);
+        ty = Math.round(currentY + charBoxW / 2 + options.xOffset);
       } else {
-        tx = currentX + charBoxW / 2 + options.xOffset;
-        ty = currentY + charBoxH / 2 + options.yOffset;
+        tx = Math.round(currentX + charBoxW / 2 + options.xOffset);
+        ty = Math.round(currentY + charBoxH / 2 + options.yOffset);
       }
 
       if (options.autoFit) {
@@ -458,11 +464,11 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
         }
         
         if (options.vertical) {
-          tx += -shiftY;
-          ty += shiftX;
+          tx += Math.round(-shiftY);
+          ty += Math.round(shiftX);
         } else {
-          tx += shiftX;
-          ty += shiftY;
+          tx += Math.round(shiftX);
+          ty += Math.round(shiftY);
         }
       }
 
@@ -481,7 +487,11 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
         }
       }
       
+      // Inject structural anti-dropout outline
+      ctx.lineWidth = 0.5;
+      ctx.strokeStyle = 'black';
       ctx.fillText(charStr, 0, 0);
+      ctx.strokeText(charStr, 0, 0);
       ctx.restore();
 
       if (options.vertical) {
@@ -504,12 +514,13 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
   const data = imageData.data;
   
   for (let i = 0; i < data.length; i += 4) {
-    const r = data[i]; // black text on white background -> r is luminosity
-    const val = (255 - r) >= options.threshold ? 0 : 255;
-    data[i] = val;
-    data[i+1] = val;
-    data[i+2] = val;
-    data[i+3] = 255;
+    const alpha = data[i+3]; 
+    const isSolid = alpha >= options.threshold;
+    if (isSolid) {
+      data[i] = 0; data[i+1] = 0; data[i+2] = 0; data[i+3] = 255;
+    } else {
+      data[i] = 255; data[i+1] = 255; data[i+2] = 255; data[i+3] = 255;
+    }
   }
   
   ctx.putImageData(imageData, 0, 0);
