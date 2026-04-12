@@ -1,3 +1,5 @@
+import opentype from 'opentype.js';
+
 export interface FontGenerationOptions {
   fontFamily: string;
   fontSize: number; // in Pt
@@ -11,9 +13,9 @@ export interface FontGenerationOptions {
   threshold: number;
   yOffset: number;
   xOffset: number;
-  smoothing: boolean;
-  hinting: boolean;
   autoFit: boolean;
+  oversample: number; // 1 = native, 2 = 2x supersample, 4 = 4x supersample
+  opentypeFont?: opentype.Font;
 }
 
 const VERTICAL_SYMBOLS = new Set([
@@ -59,18 +61,36 @@ function isEnglishOrNumber(char: string): boolean {
 }
 
 function getCharMetrics(ctx: CanvasRenderingContext2D, char: string, box: { width: number, height: number }, options: FontGenerationOptions) {
-  const metrics = ctx.measureText(char);
+  let left = 0, right = 0, top = 0, bottom = 0;
+  const fontSizePx = Math.round(options.fontSize * (220 / 72));
 
-  // 1. Initial visual boundaries relative to the center anchor (unrotated)
-  let left = -metrics.actualBoundingBoxLeft;
-  let right = metrics.actualBoundingBoxRight;
-  let top = -metrics.actualBoundingBoxAscent;
-  let bottom = metrics.actualBoundingBoxDescent;
+  if (options.opentypeFont) {
+    const glyph = options.opentypeFont.charToGlyph(char);
+    const scale = 1 / options.opentypeFont.unitsPerEm * fontSizePx;
+    
+    const adv = glyph.advanceWidth || options.opentypeFont.unitsPerEm;
+    const dyOffset = (options.opentypeFont.ascender + options.opentypeFont.descender) / 2;
+    
+    if (glyph.index === 0) {
+      left = 0; right = 0; top = 0; bottom = 0;
+    } else {
+      left = ((glyph.xMin || 0) - adv / 2) * scale;
+      right = ((glyph.xMax || 0) - adv / 2) * scale;
+      // Opentype Y coordinates go up, canvas Y goes down.
+      top = (-(glyph.yMax || 0) + dyOffset) * scale;
+      bottom = (-(glyph.yMin || 0) + dyOffset) * scale;
+    }
+  } else {
+    const metrics = ctx.measureText(char);
+    left = -metrics.actualBoundingBoxLeft;
+    right = metrics.actualBoundingBoxRight;
+    top = -metrics.actualBoundingBoxAscent;
+    bottom = metrics.actualBoundingBoxDescent;
+  }
 
   // 2. Apply any punctuation/sutegana shifts in the visual space
   // Round to integer pixel boundaries to force Native OS font rasterizer onto integer grid, 
   // preventing destructive fractional subpixel dropouts.
-  const fontSizePx = Math.round(options.fontSize * (220 / 72));
   let vOffset = { x: 0, y: 0 };
   
   // Determine if this character will be rotated -90 in the generator
@@ -143,23 +163,34 @@ const DEVICE_PPI = 220;
 const PT_TO_PX = DEVICE_PPI / 72;
 
 export function measureCharSize(options: FontGenerationOptions): { width: number, height: number } {
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d')!;
-  
   const fontSizePx = Math.round(options.fontSize * PT_TO_PX);
+  let w = 0, h = 0;
 
-  // Use 'px' to match generation, avoiding CSS vs Device pixel ratio scaling issues
-  const fontString = `${options.fontStyle} ${options.fontWeight} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
-  ctx.font = fontString;
-  
-  const metrics = ctx.measureText("坐");
-  
-  let w = Math.round(metrics.width);
-  let h = Math.round(metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent);
-  
-  if (isNaN(h) || h === 0) {
-    h = Math.round(metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent);
+  if (options.opentypeFont) {
+    const font = options.opentypeFont;
+    const scale = 1 / font.unitsPerEm * fontSizePx;
+    const glyph = font.charToGlyph("坐");
+    const advance = glyph.advanceWidth || font.unitsPerEm;
+    w = Math.round(advance * scale);
+    h = Math.round((font.ascender - font.descender) * scale);
+  } else {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d')!;
+    
+    // Use 'px' to match generation, avoiding CSS vs Device pixel ratio scaling issues
+    const fontString = `${options.fontStyle} ${options.fontWeight} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
+    ctx.font = fontString;
+    
+    const metrics = ctx.measureText("坐");
+    
+    w = Math.round(metrics.width);
+    h = Math.round(metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent);
+    
+    if (isNaN(h) || h === 0) {
+      h = Math.round(metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent);
+    }
   }
+
   if (h === 0) h = fontSizePx;
   if (w === 0) w = fontSizePx;
 
@@ -228,15 +259,20 @@ export async function generateFontBinary(
   const box = measureCharSize(options);
   const binary = new XTEinkFontBinary(box.width, box.height);
   
+  const S = options.oversample || 1; // Supersample factor
+  const sW = box.width * S;
+  const sH = box.height * S;
+  
   const canvas = document.createElement('canvas');
-  canvas.width = box.width;
-  canvas.height = box.height;
+  canvas.width = sW;
+  canvas.height = sH;
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
   
-  // Apply smoothing option
-  ctx.imageSmoothingEnabled = options.smoothing;
+  // Disable smoothing entirely for clean 1-bit output
+  ctx.imageSmoothingEnabled = false;
 
-  const fontSizePx = Math.round(options.fontSize * PT_TO_PX);
+  // Use the supersampled font size for rendering
+  const fontSizePx = Math.round(options.fontSize * PT_TO_PX * S);
   const fontString = `${options.fontStyle} ${options.fontWeight} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
   
   const cutoffChars: string[] = [];
@@ -249,7 +285,7 @@ export async function generateFontBinary(
     
     for (let charCode = i; charCode < end; charCode++) {
       // Clear canvas (transparent background to prevent RGB subpixel color fringing)
-      ctx.clearRect(0, 0, box.width, box.height);
+      ctx.clearRect(0, 0, sW, sH);
       
       const charStr = String.fromCharCode(charCode);
       
@@ -265,9 +301,9 @@ export async function generateFontBinary(
 
       ctx.save();
       
-      // Force integer sub-pixel alignment mathematically
-      let tx = Math.round(box.width / 2 + options.xOffset);
-      let ty = Math.round(box.height / 2 + options.yOffset);
+      // Force integer sub-pixel alignment mathematically (scaled)
+      let tx = Math.round(sW / 2 + options.xOffset * S);
+      let ty = Math.round(sH / 2 + options.yOffset * S);
 
       if (options.autoFit) {
         const m = getCharMetrics(ctx, charStr, box, options);
@@ -293,9 +329,9 @@ export async function generateFontBinary(
           if (m.bottom > halfH) shiftY = halfH - m.bottom;
         }
         
-        // Snap shifting transformations
-        tx += Math.round(shiftX);
-        ty += Math.round(shiftY);
+        // Snap shifting transformations (scaled)
+        tx += Math.round(shiftX * S);
+        ty += Math.round(shiftY * S);
       }
 
       ctx.translate(tx, ty);
@@ -316,24 +352,65 @@ export async function generateFontBinary(
         }
       }
       
-      // Inject structural anti-dropout outline
-      ctx.lineWidth = 0.5;
-      ctx.strokeStyle = 'black';
-      ctx.fillText(charStr, 0, 0);
-      ctx.strokeText(charStr, 0, 0);
+      // Draw glyph
+      if (options.opentypeFont) {
+        const glyph = options.opentypeFont.charToGlyph(charStr);
+        const scale = 1 / options.opentypeFont.unitsPerEm * fontSizePx;
+        const adv = (glyph.advanceWidth || options.opentypeFont.unitsPerEm) * scale;
+        
+        // Translate to the proper baseline for centering
+        const dx = -adv / 2;
+        const dy = (options.opentypeFont.ascender + options.opentypeFont.descender) * scale / 2;
+        
+        const path = options.opentypeFont.getPath(charStr, dx, dy, fontSizePx);
+        // By default opentype sets path.fill to 'black', but we expect white for the generator background
+        path.fill = 'white';
+        // Avoid applying manual stroke since we rely on mathematically perfect path fills
+        if (glyph.index !== 0) {
+          path.draw(ctx);
+        } else {
+          // Missing glyph: draw actual character via browser font fallback
+          ctx.lineWidth = 0.5;
+          ctx.strokeStyle = 'white';
+          ctx.fillText(charStr, 0, 0);
+          ctx.strokeText(charStr, 0, 0);
+        }
+      } else {
+        // Fallback injection for pure system fonts without opentype data
+        ctx.lineWidth = 0.5;
+        ctx.strokeStyle = 'white';
+        ctx.fillText(charStr, 0, 0);
+        ctx.strokeText(charStr, 0, 0);
+      }
+      
       ctx.restore();
       
-      const imageData = ctx.getImageData(0, 0, box.width, box.height);
+      // Read the supersampled canvas and downsample to target resolution
+      const imageData = ctx.getImageData(0, 0, sW, sH);
       const data = imageData.data;
       
       for (let y = 0; y < box.height; y++) {
         for (let x = 0; x < box.width; x++) {
-          const idx = (y * box.width + x) * 4;
-          // We use the raw alpha channel scalar to map font opacity symmetrically
-          const alpha = data[idx + 3];
-          
-          if (alpha >= options.threshold) {
-            binary.setPixel(charCode, x, y, true);
+          if (S === 1) {
+            // No supersampling: direct threshold on alpha
+            const idx = (y * sW + x) * 4;
+            const alpha = data[idx + 3];
+            if (alpha >= options.threshold) {
+              binary.setPixel(charCode, x, y, true);
+            }
+          } else {
+            // Supersample: average the SxS block of sub-pixels
+            let alphaSum = 0;
+            for (let sy = 0; sy < S; sy++) {
+              for (let sx = 0; sx < S; sx++) {
+                const idx = ((y * S + sy) * sW + (x * S + sx)) * 4;
+                alphaSum += data[idx + 3];
+              }
+            }
+            const avgAlpha = alphaSum / (S * S);
+            if (avgAlpha >= options.threshold) {
+              binary.setPixel(charCode, x, y, true);
+            }
           }
         }
       }
@@ -362,12 +439,17 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
   const charBoxW = box.width;
   const charBoxH = box.height;
 
-  const ctx = canvas.getContext('2d')!;
+  const finalCtx = canvas.getContext('2d')!;
+
+  const S = options.oversample || 1;
+  const osCanvas = document.createElement('canvas');
+  osCanvas.width = SCREEN_W * S;
+  osCanvas.height = SCREEN_H * S;
+  const ctx = osCanvas.getContext('2d', { willReadFrequently: true })!;
   
-  // Clear canvas to perfectly transparent to extract purely mathematical shape contours
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  
-  ctx.imageSmoothingEnabled = options.smoothing;
+  // Disable smoothing entirely for clean 1-bit output
+  ctx.imageSmoothingEnabled = false;
+  ctx.scale(S, S);
   
   // Font string uses 'px' not 'pt' to ensure 1:1 mapping on the canvas buffer without OS scaling interference
   const fontSizePx = Math.round(options.fontSize * PT_TO_PX);
@@ -487,11 +569,35 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
         }
       }
       
-      // Inject structural anti-dropout outline
-      ctx.lineWidth = 0.5;
-      ctx.strokeStyle = 'black';
-      ctx.fillText(charStr, 0, 0);
-      ctx.strokeText(charStr, 0, 0);
+      // Draw glyph
+      if (options.opentypeFont) {
+        const glyph = options.opentypeFont.charToGlyph(charStr);
+        const s = 1 / options.opentypeFont.unitsPerEm * fontSizePx;
+        const adv = (glyph.advanceWidth || options.opentypeFont.unitsPerEm) * s;
+        
+        const dx = -adv / 2;
+        const dy = (options.opentypeFont.ascender + options.opentypeFont.descender) * s / 2;
+
+        const path = options.opentypeFont.getPath(charStr, dx, dy, fontSizePx);
+        // By default opentype sets path.fill to 'black', we need it to be black for preview
+        path.fill = 'black';
+        if (glyph.index !== 0) {
+          path.draw(ctx);
+        } else {
+          // Missing glyph: draw actual character via browser font fallback
+          ctx.lineWidth = 0.5;
+          ctx.strokeStyle = 'black';
+          ctx.fillText(charStr, 0, 0);
+          ctx.strokeText(charStr, 0, 0);
+        }
+      } else {
+        // Fallback
+        ctx.lineWidth = 0.5;
+        ctx.strokeStyle = 'black';
+        ctx.fillText(charStr, 0, 0);
+        ctx.strokeText(charStr, 0, 0);
+      }
+      
       ctx.restore();
 
       if (options.vertical) {
@@ -509,34 +615,54 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
     }
   }
 
-  // Apply thresholding effect for accurate 1-bit preview
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const data = imageData.data;
+  // Apply thresholding effect for accurate 1-bit preview with supersampling
+  const osImageData = ctx.getImageData(0, 0, osCanvas.width, osCanvas.height);
+  const data = osImageData.data;
   
-  for (let i = 0; i < data.length; i += 4) {
-    const alpha = data[i+3]; 
-    const isSolid = alpha >= options.threshold;
-    if (isSolid) {
-      data[i] = 0; data[i+1] = 0; data[i+2] = 0; data[i+3] = 255;
-    } else {
-      data[i] = 255; data[i+1] = 255; data[i+2] = 255; data[i+3] = 255;
+  const finalImageData = finalCtx.createImageData(SCREEN_W, SCREEN_H);
+  const outData = finalImageData.data;
+  
+  for (let y = 0; y < SCREEN_H; y++) {
+    for (let x = 0; x < SCREEN_W; x++) {
+      let alphaSum = 0;
+      if (S === 1) {
+        const idx = (y * SCREEN_W + x) * 4;
+        alphaSum = data[idx + 3];
+      } else {
+        // Average the S x S block
+        for (let sy = 0; sy < S; sy++) {
+          for (let sx = 0; sx < S; sx++) {
+            const idx = ((y * S + sy) * osCanvas.width + (x * S + sx)) * 4;
+            alphaSum += data[idx + 3];
+          }
+        }
+        alphaSum = alphaSum / (S * S);
+      }
+      
+      const outIdx = (y * SCREEN_W + x) * 4;
+      const isSolid = alphaSum >= options.threshold;
+      if (isSolid) {
+        outData[outIdx] = 0; outData[outIdx+1] = 0; outData[outIdx+2] = 0; outData[outIdx+3] = 255;
+      } else {
+        outData[outIdx] = 255; outData[outIdx+1] = 255; outData[outIdx+2] = 255; outData[outIdx+3] = 255;
+      }
     }
   }
   
-  ctx.putImageData(imageData, 0, 0);
+  finalCtx.putImageData(finalImageData, 0, 0);
 
   // Draw boundary boxes and warnings
   drawnBoxes.forEach(b => {
     if (b.isCutoff) {
-      ctx.fillStyle = 'rgba(255, 0, 0, 0.15)';
-      ctx.fillRect(b.x, b.y, b.w, b.h);
-      ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
+      finalCtx.fillStyle = 'rgba(255, 0, 0, 0.15)';
+      finalCtx.fillRect(b.x, b.y, b.w, b.h);
+      finalCtx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
+      finalCtx.lineWidth = 1;
+      finalCtx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
     } else if (showBoundary) {
-      ctx.strokeStyle = 'rgba(0, 0, 255, 0.15)';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
+      finalCtx.strokeStyle = 'rgba(0, 0, 255, 0.15)';
+      finalCtx.lineWidth = 1;
+      finalCtx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
     }
   });
 

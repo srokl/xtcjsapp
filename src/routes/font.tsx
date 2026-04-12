@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useState, useEffect, useRef } from 'react'
 import streamSaver from 'streamsaver'
 import { generateFontBinary, previewFontCharacter, measureCharSize, calculateMinimumPadding, type FontGenerationOptions } from '../lib/font-generator'
+import opentype from 'opentype.js'
 
 export const Route = createFileRoute('/font')({
   component: FontPage,
@@ -26,9 +27,8 @@ function FontPage() {
     threshold: 128,
     yOffset: 0,
     xOffset: 0,
-    smoothing: true,
-    hinting: true,
-    autoFit: false
+    autoFit: false,
+    oversample: 1
   })
 
   const [previewText, setPreviewText] = useState('abcdefghijklmnopqrstuvwxyz\nABCDEFGHIJKLMNOPQRSTUVWXYZ\n0123456789\n`~!@#$%^&*()-_=+[{]}\\|;:\'",<.>/?\n永不妥协')
@@ -51,12 +51,16 @@ function FontPage() {
     try {
       const fontName = file.name.replace(/\.[^/.]+$/, "")
       const buffer = await file.arrayBuffer()
+      
+      const parsedFont = opentype.parse(buffer)
+      
       const font = new FontFace(fontName, buffer)
       await font.load()
       document.fonts.add(font)
       setCustomFontName(fontName)
-      setOptions({ ...options, fontFamily: fontName })
+      setOptions({ ...options, fontFamily: fontName, opentypeFont: parsedFont })
     } catch (err) {
+      console.error(err)
       alert("Failed to load font file. Please try another TTF/OTF/WOFF file.")
     }
   }
@@ -108,6 +112,15 @@ function FontPage() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 'var(--space-xl)' }}>
         <div style={{ background: 'var(--paper-dark)', padding: 'var(--space-lg)', border: 'var(--border)' }}>
           <h3 style={{ marginBottom: 'var(--space-md)' }}>Font Settings</h3>
+          {options.opentypeFont ? (
+            <div style={{ marginBottom: 'var(--space-sm)', fontSize: '0.8rem', color: 'var(--success)' }}>
+              ✓ Precision Path Rendering Active
+            </div>
+          ) : (
+            <div style={{ marginBottom: 'var(--space-sm)', fontSize: '0.8rem', color: 'var(--ink-light)' }}>
+              Using OS Browser Fallback Rendering (Upload a font file for precise mathematical edges)
+            </div>
+          )}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
             <div style={{ display: 'flex', gap: 'var(--space-md)', alignItems: 'flex-end' }}>
@@ -116,7 +129,15 @@ function FontPage() {
                 <input
                   type="text"
                   value={options.fontFamily}
-                  onChange={e => setOptions({ ...options, fontFamily: e.target.value })}
+                  onChange={e => {
+                    const newFamily = e.target.value;
+                    const isCustom = customFontName && newFamily === customFontName;
+                    setOptions({ 
+                      ...options, 
+                      fontFamily: newFamily,
+                      opentypeFont: isCustom ? options.opentypeFont : undefined
+                    });
+                  }}
                   list="fonts"
                   style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
                 />
@@ -228,26 +249,24 @@ function FontPage() {
                 <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
                   <input
                     type="checkbox"
-                    checked={options.smoothing}
-                    onChange={e => setOptions({ ...options, smoothing: e.target.checked })}
-                  />
-                  Font Smoothing
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
-                  <input
-                    type="checkbox"
-                    checked={options.hinting}
-                    onChange={e => setOptions({ ...options, hinting: e.target.checked })}
-                  />
-                  Stem Hinting
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
-                  <input
-                    type="checkbox"
                     checked={options.autoFit}
                     onChange={e => setOptions({ ...options, autoFit: e.target.checked })}
                   />
                   Auto Fit
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
+                  <span style={{ fontSize: '0.85rem' }}>Oversample:</span>
+                  <select
+                    value={options.oversample}
+                    onChange={e => setOptions({ ...options, oversample: parseInt(e.target.value) })}
+                    style={{ padding: '2px 4px', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
+                  >
+                    <option value={1}>1× (Fast)</option>
+                    <option value={2}>2× (Better)</option>
+                    <option value={4}>4× (Best)</option>
+                    <option value={8}>8× (Extreme)</option>
+                    <option value={16}>16× (Insane, Slow)</option>
+                  </select>
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
                   <input
