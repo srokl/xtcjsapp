@@ -75,7 +75,7 @@ function SortableChapterItem({
             min={1} 
             max={parsed.header.pageCount}
             value={entry.startPage} 
-            onChange={e => handleChapterChange(idx, 'startPage', parseInt(e.target.value) || 1)}
+            onChange={e => handleChapterChange(idx, 'startPage', e.target.value === '' ? '' as any : parseInt(e.target.value))}
             style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border-light)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
           />
         </div>
@@ -86,7 +86,7 @@ function SortableChapterItem({
             min={1} 
             max={parsed.header.pageCount}
             value={entry.endPage} 
-            onChange={e => handleChapterChange(idx, 'endPage', parseInt(e.target.value) || 1)}
+            onChange={e => handleChapterChange(idx, 'endPage', e.target.value === '' ? '' as any : parseInt(e.target.value))}
             style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border-light)', color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
           />
         </div>

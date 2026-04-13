@@ -10,7 +10,7 @@ export interface FontGenerationOptions {
   verticalEnglishUpright: boolean;
   charSpacing: number;
   lineSpacing: number;
-  threshold: number;
+  threshold: number; // Now maps to 100-900 scale
   yOffset: number;
   xOffset: number;
   autoFit: boolean;
@@ -273,7 +273,9 @@ export async function generateFontBinary(
 
   // Use the supersampled font size for rendering
   const fontSizePx = Math.round(options.fontSize * PT_TO_PX * S);
-  const fontString = `${options.fontStyle} ${options.fontWeight} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
+  const fontString = `${options.fontStyle} ${options.threshold} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
+  
+  const alphaThreshold = 255 - (options.threshold / 1000 * 255);
   
   const cutoffChars: string[] = [];
 
@@ -395,7 +397,7 @@ export async function generateFontBinary(
             // No supersampling: direct threshold on alpha
             const idx = (y * sW + x) * 4;
             const alpha = data[idx + 3];
-            if (alpha >= options.threshold) {
+            if (alpha >= alphaThreshold) {
               binary.setPixel(charCode, x, y, true);
             }
           } else {
@@ -408,7 +410,7 @@ export async function generateFontBinary(
               }
             }
             const avgAlpha = alphaSum / (S * S);
-            if (avgAlpha >= options.threshold) {
+            if (avgAlpha >= alphaThreshold) {
               binary.setPixel(charCode, x, y, true);
             }
           }
@@ -453,7 +455,7 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
   
   // Font string uses 'px' not 'pt' to ensure 1:1 mapping on the canvas buffer without OS scaling interference
   const fontSizePx = Math.round(options.fontSize * PT_TO_PX);
-  const fontString = `${options.fontStyle} ${options.fontWeight} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
+  const fontString = `${options.fontStyle} ${options.threshold} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
   ctx.font = fontString;
   ctx.fillStyle = 'black'; // text opacity will be mapped cleanly to alpha array
   ctx.textBaseline = 'middle';
@@ -619,6 +621,8 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
   const osImageData = ctx.getImageData(0, 0, osCanvas.width, osCanvas.height);
   const data = osImageData.data;
   
+  const alphaThreshold = 255 - (options.threshold / 1000 * 255);
+  
   const finalImageData = finalCtx.createImageData(SCREEN_W, SCREEN_H);
   const outData = finalImageData.data;
   
@@ -640,7 +644,7 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
       }
       
       const outIdx = (y * SCREEN_W + x) * 4;
-      const isSolid = alphaSum >= options.threshold;
+      const isSolid = alphaSum >= alphaThreshold;
       if (isSolid) {
         outData[outIdx] = 0; outData[outIdx+1] = 0; outData[outIdx+2] = 0; outData[outIdx+3] = 255;
       } else {

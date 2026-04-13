@@ -76,7 +76,7 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
                 max="10"
                 step="0.1"
                 value={options.videoFps}
-                onChange={(e) => onChange({ ...options, videoFps: parseFloat(e.target.value) || 1.0 })}
+                onChange={(e) => onChange({ ...options, videoFps: e.target.value === '' ? '' as any : parseFloat(e.target.value) })}
               />
               <span className="unit">FPS</span>
             </div>
@@ -340,7 +340,7 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
               max="20"
               step="0.5"
               value={options.horizontalMargin}
-              onChange={(e) => onChange({ ...options, horizontalMargin: parseFloat(e.target.value) || 0 })}
+              onChange={(e) => onChange({ ...options, horizontalMargin: e.target.value === '' ? '' as any : parseFloat(e.target.value) })}
               disabled={options.manhwa}
             />
             <span className="unit">%</span>
@@ -359,7 +359,7 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
               max="20"
               step="0.5"
               value={options.verticalMargin}
-              onChange={(e) => onChange({ ...options, verticalMargin: parseFloat(e.target.value) || 0 })}
+              onChange={(e) => onChange({ ...options, verticalMargin: e.target.value === '' ? '' as any : parseFloat(e.target.value) })}
               disabled={options.manhwa}
             />
             <span className="unit">%</span>

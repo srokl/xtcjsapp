@@ -504,7 +504,7 @@ export function MergePage() {
                     min={2}
                     max={totalPages || 100}
                     value={partsCount}
-                    onChange={(e) => setPartsCount(Math.max(2, parseInt(e.target.value) || 2))}
+                    onChange={(e) => setPartsCount(e.target.value === '' ? '' as any : parseInt(e.target.value))}
                   />
                 </div>
               )}

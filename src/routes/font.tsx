@@ -24,7 +24,7 @@ function FontPage() {
     verticalEnglishUpright: true,
     charSpacing: 0,
     lineSpacing: 0,
-    threshold: 128,
+    threshold: 400,
     yOffset: 0,
     xOffset: 0,
     autoFit: false,
@@ -171,19 +171,25 @@ function FontPage() {
                 <input
                   type="number" min="8" max="128" step="0.25"
                   value={options.fontSize}
-                  onChange={e => setOptions({ ...options, fontSize: parseFloat(e.target.value) || 24 })}
+                  onChange={e => setOptions({ ...options, fontSize: e.target.value === '' ? '' as any : parseFloat(e.target.value) })}
                   style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
                 />
               </label>
               <label style={{ flex: 1 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '2px' }}>
                   <strong style={{ fontSize: '0.85rem' }}>Font Brightness/Weight</strong>
-                  <span style={{ fontSize: '0.8rem', color: 'var(--ink-light)' }}>{options.threshold}</span>
+                  <input
+                    type="number"
+                    min="100" max="900" step="100"
+                    value={options.threshold}
+                    onChange={e => setOptions({ ...options, threshold: e.target.value === '' ? '' as any : parseInt(e.target.value) })}
+                    style={{ width: '60px', padding: '2px 4px', fontSize: '0.8rem', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
+                  />
                 </div>
                 <input
-                  type="range" min="1" max="254"
+                  type="range" min="100" max="900" step="100"
                   value={options.threshold}
-                  onChange={e => setOptions({ ...options, threshold: parseInt(e.target.value) || 128 })}
+                  onChange={e => setOptions({ ...options, threshold: parseInt(e.target.value) })}
                   style={{ width: '100%', marginTop: 'var(--space-xs)' }}
                 />
               </label>
@@ -204,8 +210,8 @@ function FontPage() {
                   </div>
                   <input
                     type="number"
-                    value={options.lineSpacing}
-                    onChange={e => setOptions({ ...options, lineSpacing: parseInt(e.target.value) || 0, charSpacing: parseInt(e.target.value) || 0 })}
+                    value={options.lineSpacing === options.charSpacing ? options.lineSpacing : ''}
+                    onChange={e => setOptions({ ...options, lineSpacing: e.target.value === '' ? '' as any : parseInt(e.target.value), charSpacing: e.target.value === '' ? '' as any : parseInt(e.target.value) })}
                     style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
                   />
                   <div style={{ fontSize: '0.7rem', color: 'var(--ink-light)', marginTop: '4px' }}>Expands the square grid equally.</div>
@@ -226,7 +232,7 @@ function FontPage() {
                     <input
                       type="number"
                       value={options.lineSpacing}
-                      onChange={e => setOptions({ ...options, lineSpacing: parseInt(e.target.value) || 0 })}
+                      onChange={e => setOptions({ ...options, lineSpacing: e.target.value === '' ? '' as any : parseInt(e.target.value) })}
                       style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
                     />
                   </label>
@@ -235,7 +241,7 @@ function FontPage() {
                     <input
                       type="number"
                       value={options.charSpacing}
-                      onChange={e => setOptions({ ...options, charSpacing: parseInt(e.target.value) || 0 })}
+                      onChange={e => setOptions({ ...options, charSpacing: e.target.value === '' ? '' as any : parseInt(e.target.value) })}
                       style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
                     />
                   </label>
