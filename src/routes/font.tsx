@@ -1,8 +1,8 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useState, useEffect, useRef } from 'react'
 import streamSaver from 'streamsaver'
-import { generateFontBinary, previewFontCharacter, measureCharSize, calculateMinimumPadding, type FontGenerationOptions } from '../lib/font-generator'
-import opentype from 'opentype.js'
+import { generateFontBinary, previewFontCharacter, initFreeTypeInstance, measureCharSize, calculateMinimumPadding, type FontGenerationOptions } from '../lib/font-generator'
+import type { FreetypeModule } from 'freetype-wasm/dist/freetype.js'
 
 export const Route = createFileRoute('/font')({
   component: FontPage,
@@ -28,12 +28,15 @@ function FontPage() {
     yOffset: 0,
     xOffset: 0,
     autoFit: false,
-    oversample: 1
+    oversample: 1,
+    hinting: 'Full',
+    forceAutohint: true
   })
 
   const [previewText, setPreviewText] = useState('abcdefghijklmnopqrstuvwxyz\nABCDEFGHIJKLMNOPQRSTUVWXYZ\n0123456789\n`~!@#$%^&*()-_=+[{]}\\|;:\'",<.>/?\n永不妥协')
   const [isGenerating, setIsGenerating] = useState(false)
   const [progress, setProgress] = useState(0)
+  const [progressInfo, setProgressInfo] = useState<{ current: number, total: number } | null>(null)
   const [showBoundary, setShowBoundary] = useState(false)
   const [customFontName, setCustomFontName] = useState<string | null>(null)
   const [zoomScale, setZoomScale] = useState(1)
@@ -43,6 +46,11 @@ function FontPage() {
   const [displayLimit, setDisplayLimit] = useState(500)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [ftModule, setFtModule] = useState<FreetypeModule | null>(null)
+
+  useEffect(() => {
+    initFreeTypeInstance().then(setFtModule)
+  }, [])
 
   const handleFontUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -52,13 +60,22 @@ function FontPage() {
       const fontName = file.name.replace(/\.[^/.]+$/, "")
       const buffer = await file.arrayBuffer()
       
-      const parsedFont = opentype.parse(buffer)
+      if (!ftModule) {
+        alert("FreeType not initialized yet. Please wait.")
+        return
+      }
+
+      const faces = ftModule.LoadFontFromBytes(new Uint8Array(buffer))
+      if (faces.length === 0) {
+        throw new Error("No faces found in font file")
+      }
+      const face = faces[0]
       
       const font = new FontFace(fontName, buffer)
       await font.load()
       document.fonts.add(font)
       setCustomFontName(fontName)
-      setOptions({ ...options, fontFamily: fontName, opentypeFont: parsedFont })
+      setOptions({ ...options, fontFamily: fontName, freetypeFace: face })
     } catch (err) {
       console.error(err)
       alert("Failed to load font file. Please try another TTF/OTF/WOFF file.")
@@ -79,8 +96,9 @@ function FontPage() {
     setGeneratedCutoffChars([])
 
     try {
-      const { buffer, name, cutoffCount, cutoffChars: chars } = await generateFontBinary(options, (p) => {
-        setProgress(p)
+      const { buffer, name, cutoffCount, cutoffChars: chars } = await generateFontBinary(options, (current, total) => {
+        setProgress(current / total)
+        setProgressInfo({ current, total })
       })
 
       if (cutoffCount > 0) {
@@ -112,13 +130,13 @@ function FontPage() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 'var(--space-xl)' }}>
         <div style={{ background: 'var(--paper-dark)', padding: 'var(--space-lg)', border: 'var(--border)' }}>
           <h3 style={{ marginBottom: 'var(--space-md)' }}>Font Settings</h3>
-          {options.opentypeFont ? (
+          {options.freetypeFace ? (
             <div style={{ marginBottom: 'var(--space-sm)', fontSize: '0.8rem', color: 'var(--success)' }}>
-              ✓ Precision Path Rendering Active
+              ✓ Native FreeType 1-Bit Hinting Active
             </div>
           ) : (
             <div style={{ marginBottom: 'var(--space-sm)', fontSize: '0.8rem', color: 'var(--ink-light)' }}>
-              Using OS Browser Fallback Rendering (Upload a font file for precise mathematical edges)
+              Using OS Browser Fallback Rendering (Upload a font file for native monochrome hinting)
             </div>
           )}
 
@@ -135,7 +153,7 @@ function FontPage() {
                     setOptions({ 
                       ...options, 
                       fontFamily: newFamily,
-                      opentypeFont: isCustom ? options.opentypeFont : undefined
+                      freetypeFace: isCustom ? options.freetypeFace : undefined
                     });
                   }}
                   list="fonts"
@@ -304,6 +322,38 @@ function FontPage() {
                 )}
               </div>
             </div>
+
+            {options.freetypeFace && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)', marginTop: 'var(--space-sm)', padding: 'var(--space-sm)', background: 'var(--paper-depth)', border: 'var(--border)' }}>
+                <strong style={{ fontSize: '0.85rem' }}>FreeType Native Options</strong>
+                <div style={{ display: 'flex', gap: 'var(--space-md)', flexWrap: 'wrap' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
+                    <span style={{ fontSize: '0.85rem' }}>Hinting:</span>
+                    <select
+                      value={options.hinting}
+                      onChange={e => setOptions({ ...options, hinting: e.target.value as any })}
+                      style={{ padding: '2px 4px', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
+                    >
+                      <option value="Full">Full (Mono)</option>
+                      <option value="Medium">Medium (Normal)</option>
+                      <option value="Slight">Slight (Light)</option>
+                      <option value="None">None (Raw Outline)</option>
+                    </select>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
+                    <input
+                      type="checkbox"
+                      checked={options.forceAutohint}
+                      onChange={e => setOptions({ ...options, forceAutohint: e.target.checked })}
+                    />
+                    Force Auto-hint
+                  </label>
+                </div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--ink-light)' }}>
+                  Mono hinting is best for e-ink. Auto-hint can improve fonts missing internal hints.
+                </div>
+              </div>
+            )}
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)', marginTop: 'var(--space-sm)' }}>
               <strong style={{ fontSize: '0.85rem' }}>Text Paragraph</strong>
@@ -481,7 +531,9 @@ function FontPage() {
                 <div style={{ width: '100%', height: '8px', background: 'var(--paper)', borderRadius: '4px', overflow: 'hidden' }}>
                   <div style={{ width: `${progress * 100}%`, height: '100%', background: 'var(--accent)', transition: 'width 0.1s' }}></div>
                 </div>
-                <div style={{ fontSize: '0.8rem', marginTop: 'var(--space-xs)' }}>{Math.round(progress * 100)}%</div>
+                <div style={{ fontSize: '0.8rem', marginTop: 'var(--space-xs)' }}>
+                  {progressInfo ? `${progressInfo.current} of ${progressInfo.total} (${Math.round(progress * 100)}%)` : `${Math.round(progress * 100)}%`}
+                </div>
               </div>
             ) : (
               <button

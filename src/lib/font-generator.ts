@@ -1,4 +1,15 @@
-import opentype from 'opentype.js';
+import InitFreetype, { FreetypeModule, FT_FaceRec, FT_GlyphSlotRec } from 'freetype-wasm/dist/freetype.js';
+
+let ftModule: FreetypeModule | null = null;
+
+export async function initFreeTypeInstance() {
+  if (!ftModule) {
+    ftModule = await InitFreetype({
+      locateFile: (path: string) => `/freetype.wasm`
+    });
+  }
+  return ftModule;
+}
 
 export interface FontGenerationOptions {
   fontFamily: string;
@@ -15,7 +26,9 @@ export interface FontGenerationOptions {
   xOffset: number;
   autoFit: boolean;
   oversample: number; // 1 = native, 2 = 2x supersample, 4 = 4x supersample
-  opentypeFont?: opentype.Font;
+  freetypeFace?: FT_FaceRec;
+  hinting?: 'None' | 'Slight' | 'Medium' | 'Full';
+  forceAutohint?: boolean;
 }
 
 const VERTICAL_SYMBOLS = new Set([
@@ -64,21 +77,31 @@ function getCharMetrics(ctx: CanvasRenderingContext2D, char: string, box: { widt
   let left = 0, right = 0, top = 0, bottom = 0;
   const fontSizePx = Math.round(options.fontSize * (220 / 72));
 
-  if (options.opentypeFont) {
-    const glyph = options.opentypeFont.charToGlyph(char);
-    const scale = 1 / options.opentypeFont.unitsPerEm * fontSizePx;
+  if (options.freetypeFace && ftModule) {
+    ftModule.SetFont(options.freetypeFace.family_name, options.freetypeFace.style_name);
+    const m = ftModule.SetPixelSize(0, fontSizePx);
     
-    const adv = glyph.advanceWidth || options.opentypeFont.unitsPerEm;
-    const dyOffset = (options.opentypeFont.ascender + options.opentypeFont.descender) / 2;
-    
-    if (glyph.index === 0) {
+    let loadFlags = ftModule.FT_LOAD_DEFAULT;
+    if (options.hinting === 'None') loadFlags |= ftModule.FT_LOAD_NO_HINTING;
+    else if (options.hinting === 'Slight') loadFlags |= ftModule.FT_LOAD_TARGET_LIGHT;
+    else if (options.hinting === 'Medium') loadFlags |= ftModule.FT_LOAD_TARGET_NORMAL;
+    else loadFlags |= ftModule.FT_LOAD_TARGET_MONO; // Full / Default for 1-bit
+
+    if (options.forceAutohint) loadFlags |= ftModule.FT_LOAD_FORCE_AUTOHINT;
+
+    const glyphs = ftModule.LoadGlyphs([char.charCodeAt(0)], loadFlags);
+    const glyph = glyphs.get(char.charCodeAt(0));
+    const adv = glyph ? (glyph.advance.x >> 6) : 0;
+    const dyOffset = (m.ascender + m.descender) >> 7; // ( (A+D)/64 ) / 2
+
+    if (!glyph || glyph.glyph_index === 0) {
       left = 0; right = 0; top = 0; bottom = 0;
     } else {
-      left = ((glyph.xMin || 0) - adv / 2) * scale;
-      right = ((glyph.xMax || 0) - adv / 2) * scale;
-      // Opentype Y coordinates go up, canvas Y goes down.
-      top = (-(glyph.yMax || 0) + dyOffset) * scale;
-      bottom = (-(glyph.yMin || 0) + dyOffset) * scale;
+      // Use bitmap boundaries relative to the centered pen
+      left = (glyph.bitmap_left - adv / 2);
+      right = left + glyph.bitmap.width;
+      top = -(glyph.bitmap_top - dyOffset);
+      bottom = top + glyph.bitmap.rows;
     }
   } else {
     const metrics = ctx.measureText(char);
@@ -166,13 +189,22 @@ export function measureCharSize(options: FontGenerationOptions): { width: number
   const fontSizePx = Math.round(options.fontSize * PT_TO_PX);
   let w = 0, h = 0;
 
-  if (options.opentypeFont) {
-    const font = options.opentypeFont;
-    const scale = 1 / font.unitsPerEm * fontSizePx;
-    const glyph = font.charToGlyph("坐");
-    const advance = glyph.advanceWidth || font.unitsPerEm;
-    w = Math.round(advance * scale);
-    h = Math.round((font.ascender - font.descender) * scale);
+  if (options.freetypeFace && ftModule) {
+    const face = options.freetypeFace;
+    ftModule.SetFont(face.family_name, face.style_name);
+    const m = ftModule.SetPixelSize(0, fontSizePx);
+    
+    // For "坐" or any character, we can load it to get its advance
+    const charCode = "坐".charCodeAt(0);
+    const glyphs = ftModule.LoadGlyphs([charCode], ftModule.FT_LOAD_DEFAULT);
+    const glyph = glyphs.get(charCode);
+    
+    if (glyph) {
+      w = Math.round(glyph.advance.x >> 6);
+    }
+    
+    // Scale vertical metrics from 26.6 to pixels
+    h = Math.round((m.ascender - m.descender) >> 6);
   } else {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d')!;
@@ -254,7 +286,7 @@ export class XTEinkFontBinary {
 
 export async function generateFontBinary(
   options: FontGenerationOptions,
-  onProgress: (progress: number) => void
+  onProgress: (current: number, total: number) => void
 ): Promise<{ buffer: ArrayBuffer, name: string, cutoffCount: number, cutoffChars: string[] }> {
   const box = measureCharSize(options);
   const binary = new XTEinkFontBinary(box.width, box.height);
@@ -282,19 +314,41 @@ export async function generateFontBinary(
   // We process chunks to avoid freezing the UI completely
   const CHUNK_SIZE = 1024;
   
+  // Hoist static canvas settings
+  ctx.font = fontString;
+  ctx.fillStyle = 'white';
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'center';
+  
+  // Reuse a single temporary canvas for glyph processing
+  const tempCanvas = document.createElement('canvas');
+  const tempCtx = tempCanvas.getContext('2d')!;
+  
+  let ftMetrics: any = null;
+  let baseLoadFlags = 0;
+  if (options.freetypeFace && ftModule) {
+    ftModule.SetFont(options.freetypeFace.family_name, options.freetypeFace.style_name);
+    ftMetrics = ftModule.SetPixelSize(0, fontSizePx);
+    
+    baseLoadFlags = ftModule.FT_LOAD_RENDER |
+      (options.hinting === 'None' ? ftModule.FT_LOAD_NO_HINTING :
+       options.hinting === 'Slight' ? ftModule.FT_LOAD_TARGET_LIGHT :
+       options.hinting === 'Medium' ? ftModule.FT_LOAD_TARGET_NORMAL :
+       ftModule.FT_LOAD_TARGET_MONO) |
+      (options.forceAutohint ? ftModule.FT_LOAD_FORCE_AUTOHINT : 0);
+  }
+
   for (let i = 0; i < binary.totalChar; i += CHUNK_SIZE) {
     const end = Math.min(i + CHUNK_SIZE, binary.totalChar);
     
+    // Batch load all glyphs for this chunk to minimize WASM bridge overhead
+    const chunkCodes: number[] = [];
+    for (let c = i; c < end; c++) chunkCodes.push(c);
+    const chunkGlyphs = (options.freetypeFace && ftModule) ? ftModule.LoadGlyphs(chunkCodes, baseLoadFlags) : null;
+
     for (let charCode = i; charCode < end; charCode++) {
-      // Clear canvas (transparent background to prevent RGB subpixel color fringing)
       ctx.clearRect(0, 0, sW, sH);
-      
       const charStr = String.fromCharCode(charCode);
-      
-      ctx.font = fontString;
-      ctx.fillStyle = 'white';
-      ctx.textBaseline = 'middle';
-      ctx.textAlign = 'center';
       
       const exceedsBounds = isCharCutoff(ctx, charStr, box, options);
       if (exceedsBounds) {
@@ -303,7 +357,6 @@ export async function generateFontBinary(
 
       ctx.save();
       
-      // Force integer sub-pixel alignment mathematically (scaled)
       let tx = Math.round(sW / 2 + options.xOffset * S);
       let ty = Math.round(sH / 2 + options.yOffset * S);
 
@@ -331,7 +384,6 @@ export async function generateFontBinary(
           if (m.bottom > halfH) shiftY = halfH - m.bottom;
         }
         
-        // Snap shifting transformations (scaled)
         tx += Math.round(shiftX * S);
         ty += Math.round(shiftY * S);
       }
@@ -344,41 +396,29 @@ export async function generateFontBinary(
         } else if (!options.verticalEnglishUpright && isEnglishOrNumber(charStr)) {
           ctx.rotate(0);
         } else {
-          ctx.rotate(-Math.PI / 2); // Rotate -90 degrees for vertical layout (Upright on e-reader)
-          
-          // Apply punctuation/sutegana shift AFTER rotation so we are working in the visual space
+          ctx.rotate(-Math.PI / 2);
           const offset = getVerticalCharOffset(charStr, fontSizePx);
-          if (offset.x !== 0 || offset.y !== 0) {
-            ctx.translate(offset.x, offset.y);
-          }
+          if (offset.x !== 0 || offset.y !== 0) ctx.translate(offset.x, offset.y);
         }
       }
       
-      // Draw glyph
-      if (options.opentypeFont) {
-        const glyph = options.opentypeFont.charToGlyph(charStr);
-        const scale = 1 / options.opentypeFont.unitsPerEm * fontSizePx;
-        const adv = (glyph.advanceWidth || options.opentypeFont.unitsPerEm) * scale;
-        
-        // Translate to the proper baseline for centering
-        const dx = -adv / 2;
-        const dy = (options.opentypeFont.ascender + options.opentypeFont.descender) * scale / 2;
-        
-        const path = options.opentypeFont.getPath(charStr, dx, dy, fontSizePx);
-        // By default opentype sets path.fill to 'black', but we expect white for the generator background
-        path.fill = 'white';
-        // Avoid applying manual stroke since we rely on mathematically perfect path fills
-        if (glyph.index !== 0) {
-          path.draw(ctx);
-        } else {
-          // Missing glyph: draw actual character via browser font fallback
-          ctx.lineWidth = 0.5;
-          ctx.strokeStyle = 'white';
-          ctx.fillText(charStr, 0, 0);
-          ctx.strokeText(charStr, 0, 0);
+      const glyph = chunkGlyphs ? chunkGlyphs.get(charCode) : null;
+      if (glyph && glyph.glyph_index !== 0) {
+        const bitmap = glyph.bitmap;
+        if (bitmap.imagedata) {
+          const adv = (glyph.advance.x >> 6);
+          const dyOffset = (ftMetrics.ascender + ftMetrics.descender) >> 7;
+
+          tempCanvas.width = bitmap.width;
+          tempCanvas.height = bitmap.rows;
+          tempCtx.putImageData(bitmap.imagedata, 0, 0);
+          
+          const dx = Math.round(glyph.bitmap_left - adv / 2);
+          const dy = Math.round(-(glyph.bitmap_top - dyOffset));
+          ctx.drawImage(tempCanvas, dx, dy);
         }
       } else {
-        // Fallback injection for pure system fonts without opentype data
+        // Fallback for missing glyphs
         ctx.lineWidth = 0.5;
         ctx.strokeStyle = 'white';
         ctx.fillText(charStr, 0, 0);
@@ -420,7 +460,7 @@ export async function generateFontBinary(
     
     // Yield to event loop and report progress
     await new Promise(resolve => setTimeout(resolve, 0));
-    onProgress(end / binary.totalChar);
+    onProgress(end, binary.totalChar);
   }
   
   const name = binary.getSuggestedFileName(options.fontFamily, options.fontSize);
@@ -572,21 +612,39 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
       }
       
       // Draw glyph
-      if (options.opentypeFont) {
-        const glyph = options.opentypeFont.charToGlyph(charStr);
-        const s = 1 / options.opentypeFont.unitsPerEm * fontSizePx;
-        const adv = (glyph.advanceWidth || options.opentypeFont.unitsPerEm) * s;
+      if (options.freetypeFace && ftModule) {
+        ftModule.SetFont(options.freetypeFace.family_name, options.freetypeFace.style_name);
+        const m = ftModule.SetPixelSize(0, fontSizePx);
         
-        const dx = -adv / 2;
-        const dy = (options.opentypeFont.ascender + options.opentypeFont.descender) * s / 2;
+        const previewLoadFlags = ftModule.FT_LOAD_RENDER |
+          (options.hinting === 'None' ? ftModule.FT_LOAD_NO_HINTING :
+           options.hinting === 'Slight' ? ftModule.FT_LOAD_TARGET_LIGHT :
+           options.hinting === 'Medium' ? ftModule.FT_LOAD_TARGET_NORMAL :
+           ftModule.FT_LOAD_TARGET_MONO) |
+          (options.forceAutohint ? ftModule.FT_LOAD_FORCE_AUTOHINT : 0);
 
-        const path = options.opentypeFont.getPath(charStr, dx, dy, fontSizePx);
-        // By default opentype sets path.fill to 'black', we need it to be black for preview
-        path.fill = 'black';
-        if (glyph.index !== 0) {
-          path.draw(ctx);
+        const charCode = charStr.charCodeAt(0);
+        const glyphs = ftModule.LoadGlyphs([charCode], previewLoadFlags);
+        const glyph = glyphs.get(charCode);
+
+        if (glyph && glyph.glyph_index !== 0) {
+          const bitmap = glyph.bitmap;
+          if (bitmap.imagedata) {
+            const adv = (glyph.advance.x >> 6);
+            const dyOffset = (m.ascender + m.descender) >> 7;
+
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = bitmap.width;
+            tempCanvas.height = bitmap.rows;
+            const tempCtx = tempCanvas.getContext('2d')!;
+            tempCtx.putImageData(bitmap.imagedata, 0, 0);
+            
+            const dx = Math.round(glyph.bitmap_left - adv / 2);
+            const dy = Math.round(-(glyph.bitmap_top - dyOffset));
+            ctx.drawImage(tempCanvas, dx, dy);
+          }
         } else {
-          // Missing glyph: draw actual character via browser font fallback
+          // Fallback
           ctx.lineWidth = 0.5;
           ctx.strokeStyle = 'black';
           ctx.fillText(charStr, 0, 0);
