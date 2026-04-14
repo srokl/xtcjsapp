@@ -1,12 +1,55 @@
 import InitFreetype, { FreetypeModule, FT_FaceRec, FT_GlyphSlotRec } from 'freetype-wasm/dist/freetype.js';
+import opentype from 'opentype.js';
+
+/**
+ * Subsets a font buffer to only include the specified characters.
+ * This is used to reduce the memory footprint for large CJK fonts before passing them to FreeType.
+ */
+export function subsetFontBuffer(buffer: ArrayBuffer, characters: string): ArrayBuffer {
+  try {
+    const font = opentype.parse(buffer);
+    const glyphs: opentype.Glyph[] = [];
+    
+    // Always include the .notdef glyph (index 0)
+    glyphs.push(font.glyphs.get(0));
+    
+    // Create a unique set of characters to subset
+    const uniqueChars = Array.from(new Set(characters));
+    
+    for (const char of uniqueChars) {
+      const glyph = font.charToGlyph(char);
+      // Only add if it's not the .notdef glyph (to avoid duplicates)
+      if (glyph && glyph.index !== 0) {
+        glyphs.push(glyph);
+      }
+    }
+    
+    const subsetFont = new opentype.Font({
+      familyName: font.names.fontFamily?.en || 'SubsetFont',
+      styleName: font.names.fontSubfamily?.en || 'Regular',
+      unitsPerEm: font.unitsPerEm,
+      ascender: font.ascender,
+      descender: font.descender,
+      glyphs: glyphs
+    });
+    
+    return subsetFont.toArrayBuffer();
+  } catch (err) {
+    console.error('Failed to subset font:', err);
+    return buffer; // Fallback to original buffer if subsetting fails
+  }
+}
 
 let ftModule: FreetypeModule | null = null;
 
 export async function initFreeTypeInstance() {
   if (!ftModule) {
     ftModule = await InitFreetype({
-      locateFile: (path: string) => `/freetype.wasm`
-    });
+      locateFile: (path: string) => `/freetype.wasm`,
+      // 512MB to handle exceptionally large Japanese fonts and complex glyph parsing
+      INITIAL_MEMORY: 512 * 1024 * 1024,
+      printStatus: true
+    } as any);
   }
   return ftModule;
 }
@@ -29,6 +72,7 @@ export interface FontGenerationOptions {
   freetypeFace?: FT_FaceRec;
   hinting?: 'None' | 'Slight' | 'Medium' | 'Full';
   forceAutohint?: boolean;
+  characters: string;
 }
 
 const VERTICAL_SYMBOLS = new Set([

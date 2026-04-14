@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useState, useEffect, useRef } from 'react'
 import streamSaver from 'streamsaver'
-import { generateFontBinary, previewFontCharacter, initFreeTypeInstance, measureCharSize, calculateMinimumPadding, type FontGenerationOptions } from '../lib/font-generator'
+import { generateFontBinary, previewFontCharacter, initFreeTypeInstance, measureCharSize, calculateMinimumPadding, type FontGenerationOptions, subsetFontBuffer } from '../lib/font-generator'
 import type { FreetypeModule } from 'freetype-wasm/dist/freetype.js'
 
 export const Route = createFileRoute('/font')({
@@ -30,7 +30,8 @@ function FontPage() {
     autoFit: false,
     oversample: 1,
     hinting: 'Full',
-    forceAutohint: true
+    forceAutohint: true,
+    characters: 'abcdefghijklmnopqrstuvwxyz\nABCDEFGHIJKLMNOPQRSTUVWXYZ\n0123456789\n`~!@#$%^&*()-_=+[{]}\\|;:\'",<.>/?\n永不妥协'
   })
 
   const [previewText, setPreviewText] = useState('abcdefghijklmnopqrstuvwxyz\nABCDEFGHIJKLMNOPQRSTUVWXYZ\n0123456789\n`~!@#$%^&*()-_=+[{]}\\|;:\'",<.>/?\n永不妥协')
@@ -49,7 +50,12 @@ function FontPage() {
   const [ftModule, setFtModule] = useState<FreetypeModule | null>(null)
 
   useEffect(() => {
-    initFreeTypeInstance().then(setFtModule)
+    initFreeTypeInstance().then(module => {
+      setFtModule(module);
+      if (module && (module as any).HEAPU8) {
+        console.log(`[FreeType] Initialized. WASM Heap Size: ${(module as any).HEAPU8.buffer.byteLength / 1024 / 1024} MB`);
+      }
+    })
   }, [])
 
   const handleFontUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -58,11 +64,29 @@ function FontPage() {
 
     try {
       const fontName = file.name.replace(/\.[^/.]+$/, "")
-      const buffer = await file.arrayBuffer()
+      let buffer = await file.arrayBuffer()
       
       if (!ftModule) {
         alert("FreeType not initialized yet. Please wait.")
         return
+      }
+
+      // If the font is large, subset it to avoid WASM OOM.
+      // 5MB is a safe threshold; Japanese fonts are often 10-20MB.
+      if (buffer.byteLength > 5 * 1024 * 1024) {
+        console.log(`[Font] Large font detected (${(buffer.byteLength / 1024 / 1024).toFixed(2)} MB). Subsetting...`);
+        // We subset to the characters user wants to generate + common English chars + current preview
+        const subsetChars = options.characters + previewText + "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!@#$%^&*()_+-=[]{}|;':\",./<>? ";
+        buffer = subsetFontBuffer(buffer, subsetChars);
+        console.log(`[Font] Subset complete. New size: ${(buffer.byteLength / 1024 / 1024).toFixed(2)} MB`);
+      }
+
+      if (customFontName) {
+        try {
+          ftModule.UnloadFont(customFontName);
+        } catch (e) {
+          console.warn("Failed to unload previous font:", e);
+        }
       }
 
       const faces = ftModule.LoadFontFromBytes(new Uint8Array(buffer))
