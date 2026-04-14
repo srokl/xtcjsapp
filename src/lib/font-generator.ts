@@ -42,6 +42,14 @@ export function subsetFontBuffer(buffer: ArrayBuffer, characters: string): Array
 
 let ftModule: FreetypeModule | null = null;
 
+/**
+ * Display Specifications for 4.26 inch e-ink (800x480)
+ * Pixel Pitch: 0.116mm x 0.116mm
+ * DPI = 25.4 / 0.116 = 218.9655
+ */
+export const DISPLAY_DPI = 218.9655;
+export const PX_PER_PT = DISPLAY_DPI / 72;
+
 export async function initFreeTypeInstance() {
   if (!ftModule) {
     ftModule = await InitFreetype({
@@ -119,7 +127,7 @@ function isEnglishOrNumber(char: string): boolean {
 
 function getCharMetrics(ctx: CanvasRenderingContext2D, char: string, box: { width: number, height: number }, options: FontGenerationOptions) {
   let left = 0, right = 0, top = 0, bottom = 0;
-  const fontSizePx = Math.round(options.fontSize * (220 / 72));
+  const fontSizePx = Math.round(options.fontSize * PX_PER_PT);
 
   if (options.freetypeFace && ftModule) {
     ftModule.SetFont(options.freetypeFace.family_name, options.freetypeFace.style_name);
@@ -226,11 +234,9 @@ function isCharCutoff(ctx: CanvasRenderingContext2D, char: string, box: { width:
   );
 }
 
-const DEVICE_PPI = 220;
-const PT_TO_PX = DEVICE_PPI / 72;
 
 export function measureCharSize(options: FontGenerationOptions): { width: number, height: number } {
-  const fontSizePx = Math.round(options.fontSize * PT_TO_PX);
+  const fontSizePx = Math.round(options.fontSize * PX_PER_PT);
   let w = 0, h = 0;
 
   if (options.freetypeFace && ftModule) {
@@ -348,7 +354,7 @@ export async function generateFontBinary(
   ctx.imageSmoothingEnabled = false;
 
   // Use the supersampled font size for rendering
-  const fontSizePx = Math.round(options.fontSize * PT_TO_PX * S);
+  const fontSizePx = Math.round(options.fontSize * PX_PER_PT * S);
   const fontString = `${options.fontStyle} ${options.threshold} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
   
   const alphaThreshold = 255 - (options.threshold / 1000 * 255);
@@ -538,7 +544,7 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
   ctx.scale(S, S);
   
   // Font string uses 'px' not 'pt' to ensure 1:1 mapping on the canvas buffer without OS scaling interference
-  const fontSizePx = Math.round(options.fontSize * PT_TO_PX);
+  const fontSizePx = Math.round(options.fontSize * PX_PER_PT);
   const fontString = `${options.fontStyle} ${options.threshold} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
   ctx.font = fontString;
   ctx.fillStyle = 'black'; // text opacity will be mapped cleanly to alpha array
