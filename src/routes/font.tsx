@@ -71,6 +71,8 @@ function FontPage() {
         return
       }
 
+      const originalBuffer = buffer;
+
       // If the font is large, subset it to avoid WASM OOM.
       // 5MB is a safe threshold; Japanese fonts are often 10-20MB.
       if (buffer.byteLength > 5 * 1024 * 1024) {
@@ -99,7 +101,8 @@ function FontPage() {
       await font.load()
       document.fonts.add(font)
       setCustomFontName(fontName)
-      setOptions({ ...options, fontFamily: fontName, freetypeFace: face })
+      
+      setOptions({ ...options, fontFamily: fontName, freetypeFace: face, renderer: 'canvas-fallback' })
     } catch (err) {
       console.error(err)
       alert("Failed to load font file. Please try another TTF/OTF/WOFF file.")
@@ -349,8 +352,22 @@ function FontPage() {
 
             {options.freetypeFace && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)', marginTop: 'var(--space-sm)', padding: 'var(--space-sm)', background: 'var(--paper-depth)', border: 'var(--border)' }}>
-                <strong style={{ fontSize: '0.85rem' }}>FreeType Native Options</strong>
+                <strong style={{ fontSize: '0.85rem' }}>Renderer Options</strong>
                 <div style={{ display: 'flex', gap: 'var(--space-md)', flexWrap: 'wrap' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
+                    <span style={{ fontSize: '0.85rem' }}>Engine:</span>
+                    <select
+                      value={options.renderer || 'canvas-fallback'}
+                      onChange={e => setOptions({ ...options, renderer: e.target.value as any })}
+                      style={{ padding: '2px 4px', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
+                    >
+                      {ftModule && <option value="freetype">FreeType WASM</option>}
+                      <option value="canvas-fallback">Browser Canvas fallback</option>
+                    </select>
+                  </label>
+                  
+                  {options.renderer === 'freetype' && (
+                    <>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
                     <span style={{ fontSize: '0.85rem' }}>Hinting:</span>
                     <select
@@ -372,10 +389,14 @@ function FontPage() {
                     />
                     Force Auto-hint
                   </label>
+                  </>
+                  )}
                 </div>
-                <div style={{ fontSize: '0.7rem', color: 'var(--ink-light)' }}>
-                  Mono hinting is best for e-ink. Auto-hint can improve fonts missing internal hints.
-                </div>
+                {options.renderer === 'freetype' && (
+                  <div style={{ fontSize: '0.7rem', color: 'var(--ink-light)' }}>
+                    Mono hinting is best for e-ink. Auto-hint can improve fonts missing internal hints.
+                  </div>
+                )}
               </div>
             )}
 

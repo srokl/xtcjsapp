@@ -78,6 +78,7 @@ export interface FontGenerationOptions {
   autoFit: boolean;
   oversample: number; // 1 = native, 2 = 2x supersample, 4 = 4x supersample
   freetypeFace?: FT_FaceRec;
+  renderer?: 'freetype' | 'canvas-fallback';
   hinting?: 'None' | 'Slight' | 'Medium' | 'Full';
   forceAutohint?: boolean;
   characters: string;
@@ -661,7 +662,6 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
         }
       }
       
-      // Draw glyph
       if (options.freetypeFace && ftModule) {
         ftModule.SetFont(options.freetypeFace.family_name, options.freetypeFace.style_name);
         const m = ftModule.SetPixelSize(0, fontSizePx);
