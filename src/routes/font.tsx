@@ -97,12 +97,12 @@ function FontPage() {
       }
       const face = faces[0]
       
-      const font = new FontFace(fontName, buffer)
+      const font = new FontFace(fontName, originalBuffer)
       await font.load()
       document.fonts.add(font)
       setCustomFontName(fontName)
       
-      setOptions({ ...options, fontFamily: fontName, freetypeFace: face, renderer: 'canvas-fallback' })
+      setOptions({ ...options, fontFamily: fontName, freetypeFace: face, renderer: 'canvas-fallback', customFontBuffer: originalBuffer })
     } catch (err) {
       console.error(err)
       alert("Failed to load font file. Please try another TTF/OTF/WOFF file.")
@@ -209,6 +209,8 @@ function FontPage() {
                 placeholder="Type text to preview..."
               />
             </label>
+
+
 
             <div style={{ display: 'flex', gap: 'var(--space-md)' }}>
               <label style={{ flex: 1 }}>

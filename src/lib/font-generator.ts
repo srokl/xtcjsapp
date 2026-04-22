@@ -5,7 +5,7 @@ import opentype from 'opentype.js';
  * Subsets a font buffer to only include the specified characters.
  * This is used to reduce the memory footprint for large CJK fonts before passing them to FreeType.
  */
-export function subsetFontBuffer(buffer: ArrayBuffer, characters: string): ArrayBuffer {
+export function subsetFontBuffer(buffer: ArrayBuffer, characters: string, nameSuffix: string = ''): ArrayBuffer {
   try {
     const font = opentype.parse(buffer);
     const glyphs: opentype.Glyph[] = [];
@@ -24,8 +24,9 @@ export function subsetFontBuffer(buffer: ArrayBuffer, characters: string): Array
       }
     }
     
+    const baseName = font.names.fontFamily?.en || 'SubsetFont';
     const subsetFont = new opentype.Font({
-      familyName: font.names.fontFamily?.en || 'SubsetFont',
+      familyName: nameSuffix ? `${baseName}_${nameSuffix}` : baseName,
       styleName: font.names.fontSubfamily?.en || 'Regular',
       unitsPerEm: font.unitsPerEm,
       ascender: font.ascender,
@@ -82,6 +83,7 @@ export interface FontGenerationOptions {
   hinting?: 'None' | 'Slight' | 'Medium' | 'Full';
   forceAutohint?: boolean;
   characters: string;
+  customFontBuffer?: ArrayBuffer;
 }
 
 const VERTICAL_SYMBOLS = new Set([
@@ -126,24 +128,28 @@ function isEnglishOrNumber(char: string): boolean {
   return /^[\x20-\x7E]+$/.test(char) && !isVerticalSymbol(char);
 }
 
-function getCharMetrics(ctx: CanvasRenderingContext2D, char: string, box: { width: number, height: number }, options: FontGenerationOptions) {
+function getCharMetrics(ctx: CanvasRenderingContext2D, char: string, box: { width: number, height: number }, options: FontGenerationOptions, preloadedGlyph?: FT_GlyphSlotRec | null) {
   let left = 0, right = 0, top = 0, bottom = 0;
   const fontSizePx = Math.round(options.fontSize * PX_PER_PT);
 
-  if (options.freetypeFace && ftModule) {
+  if (options.renderer === 'freetype' && options.freetypeFace && ftModule) {
     ftModule.SetFont(options.freetypeFace.family_name, options.freetypeFace.style_name);
     const m = ftModule.SetPixelSize(0, fontSizePx);
     
-    let loadFlags = ftModule.FT_LOAD_DEFAULT;
-    if (options.hinting === 'None') loadFlags |= ftModule.FT_LOAD_NO_HINTING;
-    else if (options.hinting === 'Slight') loadFlags |= ftModule.FT_LOAD_TARGET_LIGHT;
-    else if (options.hinting === 'Medium') loadFlags |= ftModule.FT_LOAD_TARGET_NORMAL;
-    else loadFlags |= ftModule.FT_LOAD_TARGET_MONO; // Full / Default for 1-bit
+    let glyph = preloadedGlyph;
+    if (glyph === undefined) {
+      let loadFlags = ftModule.FT_LOAD_DEFAULT;
+      if (options.hinting === 'None') loadFlags |= ftModule.FT_LOAD_NO_HINTING;
+      else if (options.hinting === 'Slight') loadFlags |= ftModule.FT_LOAD_TARGET_LIGHT;
+      else if (options.hinting === 'Medium') loadFlags |= ftModule.FT_LOAD_TARGET_NORMAL;
+      else loadFlags |= ftModule.FT_LOAD_TARGET_MONO; // Full / Default for 1-bit
 
-    if (options.forceAutohint) loadFlags |= ftModule.FT_LOAD_FORCE_AUTOHINT;
+      if (options.forceAutohint) loadFlags |= ftModule.FT_LOAD_FORCE_AUTOHINT;
 
-    const glyphs = ftModule.LoadGlyphs([char.charCodeAt(0)], loadFlags);
-    const glyph = glyphs.get(char.charCodeAt(0));
+      const glyphs = ftModule.LoadGlyphs([char.charCodeAt(0)], loadFlags);
+      glyph = glyphs.get(char.charCodeAt(0));
+    }
+    
     const adv = glyph ? (glyph.advance.x >> 6) : 0;
     const dyOffset = (m.ascender + m.descender) >> 7; // ( (A+D)/64 ) / 2
 
@@ -215,8 +221,8 @@ function getCharMetrics(ctx: CanvasRenderingContext2D, char: string, box: { widt
 /**
  * Checks if a character's glyph will be cutoff by the bounding box.
  */
-function isCharCutoff(ctx: CanvasRenderingContext2D, char: string, box: { width: number, height: number }, options: FontGenerationOptions): boolean {
-  const m = getCharMetrics(ctx, char, box, options);
+function isCharCutoff(ctx: CanvasRenderingContext2D, char: string, box: { width: number, height: number }, options: FontGenerationOptions, preloadedGlyph?: FT_GlyphSlotRec | null): boolean {
+  const m = getCharMetrics(ctx, char, box, options, preloadedGlyph);
   
   if (options.autoFit) {
     const charW = m.right - m.left;
@@ -240,7 +246,7 @@ export function measureCharSize(options: FontGenerationOptions): { width: number
   const fontSizePx = Math.round(options.fontSize * PX_PER_PT);
   let w = 0, h = 0;
 
-  if (options.freetypeFace && ftModule) {
+  if (options.renderer === 'freetype' && options.freetypeFace && ftModule) {
     const face = options.freetypeFace;
     ftModule.SetFont(face.family_name, face.style_name);
     const m = ftModule.SetPixelSize(0, fontSizePx);
@@ -255,7 +261,12 @@ export function measureCharSize(options: FontGenerationOptions): { width: number
     }
     
     // Scale vertical metrics from 26.6 to pixels
-    h = Math.round((m.ascender - m.descender) >> 6);
+    if (m) {
+      h = Math.round((m.ascender - m.descender) >> 6);
+    } else {
+      // Fallback if font is not set correctly
+      h = fontSizePx;
+    }
   } else {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d')!;
@@ -346,38 +357,24 @@ export async function generateFontBinary(
   const sW = box.width * S;
   const sH = box.height * S;
   
-  const canvas = document.createElement('canvas');
-  canvas.width = sW;
-  canvas.height = sH;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-  
-  // Disable smoothing entirely for clean 1-bit output
-  ctx.imageSmoothingEnabled = false;
-
   // Use the supersampled font size for rendering
   const fontSizePx = Math.round(options.fontSize * PX_PER_PT * S);
-  const fontString = `${options.fontStyle} ${options.threshold} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
+  const fontString = `${options.fontStyle} ${options.fontWeight} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
   
   const alphaThreshold = 255 - (options.threshold / 1000 * 255);
   
   const cutoffChars: string[] = [];
 
-  // We process chunks to avoid freezing the UI completely
-  const CHUNK_SIZE = 1024;
-  
-  // Hoist static canvas settings
-  ctx.font = fontString;
-  ctx.fillStyle = 'white';
-  ctx.textBaseline = 'middle';
-  ctx.textAlign = 'center';
-  
-  // Reuse a single temporary canvas for glyph processing
+  // Fix 4: preallocate tempCanvas
   const tempCanvas = document.createElement('canvas');
-  const tempCtx = tempCanvas.getContext('2d')!;
+  const tempSize = Math.max(100, fontSizePx * 3);
+  tempCanvas.width = tempSize;
+  tempCanvas.height = tempSize;
+  const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true })!;
   
   let ftMetrics: any = null;
   let baseLoadFlags = 0;
-  if (options.freetypeFace && ftModule) {
+  if (options.renderer === 'freetype' && options.freetypeFace && ftModule) {
     ftModule.SetFont(options.freetypeFace.family_name, options.freetypeFace.style_name);
     ftMetrics = ftModule.SetPixelSize(0, fontSizePx);
     
@@ -389,30 +386,78 @@ export async function generateFontBinary(
       (options.forceAutohint ? ftModule.FT_LOAD_FORCE_AUTOHINT : 0);
   }
 
+  // Fix 1: Batch architecture - 1024 glyphs in one canvas
+  const CHUNK_SIZE = 1024;
+  const maxCanvasSize = 4096;
+  const TILE_COLS = Math.max(1, Math.floor(maxCanvasSize / sW));
+  const batchCols = Math.min(TILE_COLS, CHUNK_SIZE);
+  const batchRows = Math.ceil(CHUNK_SIZE / batchCols);
+  
+  const batchCanvas = document.createElement('canvas');
+  batchCanvas.width = batchCols * sW;
+  batchCanvas.height = batchRows * sH;
+  const ctx = batchCanvas.getContext('2d', { willReadFrequently: true })!;
+  ctx.imageSmoothingEnabled = false;
+  ctx.font = fontString;
+  ctx.fillStyle = 'white';
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'center';
+
   for (let i = 0; i < binary.totalChar; i += CHUNK_SIZE) {
     const end = Math.min(i + CHUNK_SIZE, binary.totalChar);
+    const count = end - i;
     
-    // Batch load all glyphs for this chunk to minimize WASM bridge overhead
+    // Chunked FreeType Subsetting to avoid OOM
+    let activeFace = options.freetypeFace;
+    let tempSubsetBuffer: ArrayBuffer | null = null;
+    let tempSubsetFace: FT_FaceRec | null = null;
+
+    if (options.renderer === 'freetype' && options.customFontBuffer && ftModule) {
+      let chunkChars = "";
+      for (let c = i; c < end; c++) chunkChars += String.fromCharCode(c);
+      
+      // Use a unique suffix for each chunk to avoid name collisions and accidental unloads of the main font
+      tempSubsetBuffer = subsetFontBuffer(options.customFontBuffer, chunkChars, `chunk_${i}`);
+      const faces = ftModule.LoadFontFromBytes(new Uint8Array(tempSubsetBuffer));
+      if (faces.length > 0) {
+        tempSubsetFace = faces[0];
+        activeFace = tempSubsetFace;
+        ftModule.SetFont(activeFace.family_name, activeFace.style_name);
+        ftMetrics = ftModule.SetPixelSize(0, fontSizePx);
+      }
+    }
+
     const chunkCodes: number[] = [];
     for (let c = i; c < end; c++) chunkCodes.push(c);
-    const chunkGlyphs = (options.freetypeFace && ftModule) ? ftModule.LoadGlyphs(chunkCodes, baseLoadFlags) : null;
+    const chunkGlyphs = (options.renderer === 'freetype' && activeFace && ftModule) ? ftModule.LoadGlyphs(chunkCodes, baseLoadFlags) : null;
 
-    for (let charCode = i; charCode < end; charCode++) {
-      ctx.clearRect(0, 0, sW, sH);
+    ctx.clearRect(0, 0, batchCanvas.width, batchCanvas.height);
+
+    for (let j = 0; j < count; j++) {
+      const charCode = i + j;
       const charStr = String.fromCharCode(charCode);
-      
-      const exceedsBounds = isCharCutoff(ctx, charStr, box, options);
+      const glyph = chunkGlyphs ? chunkGlyphs.get(charCode) : null;
+
+      // Restored Canvas fallback support!
+
+      // Fix 2: Passes loaded glyph to isCharCutoff
+      const exceedsBounds = isCharCutoff(ctx, charStr, box, options, glyph);
       if (exceedsBounds) {
         cutoffChars.push(charStr);
       }
 
+      const col = j % batchCols;
+      const row = Math.floor(j / batchCols);
+      const baseX = col * sW;
+      const baseY = row * sH;
+
       ctx.save();
       
-      let tx = Math.round(sW / 2 + options.xOffset * S);
-      let ty = Math.round(sH / 2 + options.yOffset * S);
+      let tx = Math.round(baseX + sW / 2 + options.xOffset * S);
+      let ty = Math.round(baseY + sH / 2 + options.yOffset * S);
 
       if (options.autoFit) {
-        const m = getCharMetrics(ctx, charStr, box, options);
+        const m = getCharMetrics(ctx, charStr, box, options, glyph);
         const halfW = box.width / 2;
         const halfH = box.height / 2;
         const charW = m.right - m.left;
@@ -453,23 +498,19 @@ export async function generateFontBinary(
         }
       }
       
-      const glyph = chunkGlyphs ? chunkGlyphs.get(charCode) : null;
       if (glyph && glyph.glyph_index !== 0) {
         const bitmap = glyph.bitmap;
         if (bitmap.imagedata) {
           const adv = (glyph.advance.x >> 6);
           const dyOffset = (ftMetrics.ascender + ftMetrics.descender) >> 7;
 
-          tempCanvas.width = bitmap.width;
-          tempCanvas.height = bitmap.rows;
           tempCtx.putImageData(bitmap.imagedata, 0, 0);
           
           const dx = Math.round(glyph.bitmap_left - adv / 2);
           const dy = Math.round(-(glyph.bitmap_top - dyOffset));
-          ctx.drawImage(tempCanvas, dx, dy);
+          ctx.drawImage(tempCanvas, 0, 0, bitmap.width, bitmap.rows, dx, dy, bitmap.width, bitmap.rows);
         }
       } else {
-        // Fallback for missing glyphs
         ctx.lineWidth = 0.5;
         ctx.strokeStyle = 'white';
         ctx.fillText(charStr, 0, 0);
@@ -477,38 +518,69 @@ export async function generateFontBinary(
       }
       
       ctx.restore();
+    }
+    
+    // Batch getImageData
+    const batchData = ctx.getImageData(0, 0, batchCols * sW, batchRows * sH).data;
+    const stride = batchCols * sW * 4;
+
+    // Fix 3: Direct byte writes
+    for (let j = 0; j < count; j++) {
+      const charCode = i + j;
+      const glyph = chunkGlyphs ? chunkGlyphs.get(charCode) : null;
+      // Removed the early skip so it extracts Canvas fallback text!
       
-      // Read the supersampled canvas and downsample to target resolution
-      const imageData = ctx.getImageData(0, 0, sW, sH);
-      const data = imageData.data;
-      
+      const col = j % batchCols;
+      const row = Math.floor(j / batchCols);
+      const baseX = col * sW;
+      const baseY = row * sH;
+      const baseByteOffset = charCode * binary.charByte;
+
       for (let y = 0; y < box.height; y++) {
-        for (let x = 0; x < box.width; x++) {
-          if (S === 1) {
-            // No supersampling: direct threshold on alpha
-            const idx = (y * sW + x) * 4;
-            const alpha = data[idx + 3];
-            if (alpha >= alphaThreshold) {
-              binary.setPixel(charCode, x, y, true);
-            }
-          } else {
-            // Supersample: average the SxS block of sub-pixels
-            let alphaSum = 0;
-            for (let sy = 0; sy < S; sy++) {
-              for (let sx = 0; sx < S; sx++) {
-                const idx = ((y * S + sy) * sW + (x * S + sx)) * 4;
-                alphaSum += data[idx + 3];
+        const outRowOffset = baseByteOffset + y * binary.widthByte;
+        for (let x8 = 0; x8 < binary.widthByte; x8++) {
+          let byteVal = 0;
+          for (let bit = 0; bit < 8; bit++) {
+            const x = x8 * 8 + bit;
+            if (x >= box.width) break;
+
+            let isSolid = false;
+            if (S === 1) {
+              const bY = baseY + y;
+              const bX = baseX + x;
+              const idx = bY * stride + bX * 4;
+              if (batchData[idx + 3] >= alphaThreshold) isSolid = true;
+            } else {
+              let alphaSum = 0;
+              for (let sy = 0; sy < S; sy++) {
+                for (let sx = 0; sx < S; sx++) {
+                  const bY = baseY + y * S + sy;
+                  const bX = baseX + x * S + sx;
+                  const idx = bY * stride + bX * 4;
+                  alphaSum += batchData[idx + 3];
+                }
               }
+              if (alphaSum / (S * S) >= alphaThreshold) isSolid = true;
             }
-            const avgAlpha = alphaSum / (S * S);
-            if (avgAlpha >= alphaThreshold) {
-              binary.setPixel(charCode, x, y, true);
+
+            if (isSolid) {
+              byteVal |= (0x80 >>> bit);
             }
           }
+          binary.fontbin[outRowOffset + x8] = byteVal;
         }
       }
     }
     
+    // Cleanup chunked FreeType memory
+    if (tempSubsetFace && ftModule) {
+      try {
+        ftModule.UnloadFont(tempSubsetFace.family_name);
+      } catch (e) {
+        console.warn("Failed to unload temp subset font:", e);
+      }
+    }
+
     // Yield to event loop and report progress
     await new Promise(resolve => setTimeout(resolve, 0));
     onProgress(end, binary.totalChar);
@@ -546,7 +618,7 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
   
   // Font string uses 'px' not 'pt' to ensure 1:1 mapping on the canvas buffer without OS scaling interference
   const fontSizePx = Math.round(options.fontSize * PX_PER_PT);
-  const fontString = `${options.fontStyle} ${options.threshold} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
+  const fontString = `${options.fontStyle} ${options.fontWeight} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
   ctx.font = fontString;
   ctx.fillStyle = 'black'; // text opacity will be mapped cleanly to alpha array
   ctx.textBaseline = 'middle';
@@ -662,7 +734,7 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
         }
       }
       
-      if (options.freetypeFace && ftModule) {
+      if (options.renderer === 'freetype' && options.freetypeFace && ftModule) {
         ftModule.SetFont(options.freetypeFace.family_name, options.freetypeFace.style_name);
         const m = ftModule.SetPixelSize(0, fontSizePx);
         
