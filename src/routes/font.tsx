@@ -31,6 +31,7 @@ function FontPage() {
     oversample: 1,
     hinting: 'Full',
     forceAutohint: true,
+    renderer: 'freetype',
     characters: 'abcdefghijklmnopqrstuvwxyz\nABCDEFGHIJKLMNOPQRSTUVWXYZ\n0123456789\n`~!@#$%^&*()-_=+[{]}\\|;:\'",<.>/?\n永不妥协'
   })
 
@@ -102,7 +103,7 @@ function FontPage() {
       document.fonts.add(font)
       setCustomFontName(fontName)
       
-      setOptions({ ...options, fontFamily: fontName, freetypeFace: face, renderer: 'canvas-fallback', customFontBuffer: originalBuffer })
+      setOptions({ ...options, fontFamily: fontName, freetypeFace: face, renderer: 'freetype', customFontBuffer: originalBuffer })
     } catch (err) {
       console.error(err)
       alert("Failed to load font file. Please try another TTF/OTF/WOFF file.")
@@ -359,11 +360,11 @@ function FontPage() {
                   <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
                     <span style={{ fontSize: '0.85rem' }}>Engine:</span>
                     <select
-                      value={options.renderer || 'canvas-fallback'}
+                      value={options.renderer || 'freetype'}
                       onChange={e => setOptions({ ...options, renderer: e.target.value as any })}
                       style={{ padding: '2px 4px', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
                     >
-                      {ftModule && <option value="freetype">FreeType WASM</option>}
+                      {ftModule && <option value="freetype">FreeType WASM (Best but slow)</option>}
                       <option value="canvas-fallback">Browser Canvas fallback</option>
                     </select>
                   </label>

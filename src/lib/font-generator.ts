@@ -453,6 +453,11 @@ export async function generateFontBinary(
 
       ctx.save();
       
+      // Add clipping to prevent bleeding between tiles
+      ctx.beginPath();
+      ctx.rect(baseX, baseY, sW, sH);
+      ctx.clip();
+      
       let tx = Math.round(baseX + sW / 2 + options.xOffset * S);
       let ty = Math.round(baseY + sH / 2 + options.yOffset * S);
 
