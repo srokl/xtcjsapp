@@ -1,73 +1,120 @@
 // AssemblyScript for high-performance image processing
 
 // Optimized XTC Packing (1-bit)
+// Input is already grayscale (R=G=B) from applyFilters, so we only read R channel.
 export function packXtc(width: i32, height: i32, srcPtr: usize, dstPtr: usize): void {
   let rowBytes = (width + 7) >>> 3;
+  let fullBytes = width >>> 3;
+  let remainder = width & 7;
   
   for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      // RGBA input (stride 4)
-      let pixelIdx = (y * width + x) * 4;
-      let r = load<u8>(srcPtr + pixelIdx);
-      let g = load<u8>(srcPtr + pixelIdx + 1);
-      let b = load<u8>(srcPtr + pixelIdx + 2);
-      
-      // Simple luminosity
-      let gray = <u8>((<u32>r * 77 + <u32>g * 150 + <u32>b * 29) >> 8);
-      
-      // Check if pixel is white (>= 128)
-      if (gray >= 128) {
-        let byteIdx = y * rowBytes + (x >>> 3);
-        let bitIdx = 7 - (x & 7);
-        let current = load<u8>(dstPtr + byteIdx);
-        let maskI32 = 1 << bitIdx;
-        let mask = <u8>maskI32;
-        store<u8>(dstPtr + byteIdx, current | mask);
+    let rowBase = <usize>(y * width) << 2;
+    let dstRow = dstPtr + <usize>(y * rowBytes);
+    
+    // Fast path: batch 8 pixels into one byte
+    for (let col = 0; col < fullBytes; col++) {
+      let base = srcPtr + rowBase + (<usize>col << 5); // col * 8 * 4
+      let packed: u8 = 0;
+      if (load<u8>(base)      >= 128) packed |= 0x80;
+      if (load<u8>(base + 4)  >= 128) packed |= 0x40;
+      if (load<u8>(base + 8)  >= 128) packed |= 0x20;
+      if (load<u8>(base + 12) >= 128) packed |= 0x10;
+      if (load<u8>(base + 16) >= 128) packed |= 0x08;
+      if (load<u8>(base + 20) >= 128) packed |= 0x04;
+      if (load<u8>(base + 24) >= 128) packed |= 0x02;
+      if (load<u8>(base + 28) >= 128) packed |= 0x01;
+      store<u8>(dstRow + col, packed);
+    }
+    
+    // Slow path: remaining pixels
+    if (remainder > 0) {
+      let base = srcPtr + rowBase + (<usize>fullBytes << 5);
+      let packed: u8 = 0;
+      for (let bi = 0; bi < remainder; bi++) {
+        if (load<u8>(base + (<usize>bi << 2)) >= 128) {
+          let maskI32 = 1 << (7 - bi);
+          packed |= <u8>maskI32;
+        }
       }
+      store<u8>(dstRow + fullBytes, packed);
     }
   }
 }
 
 // Optimized XTH Packing (2-bit)
+// Input is already grayscale (R=G=B) from applyFilters, so we only read R channel.
 export function packXth(width: i32, height: i32, srcPtr: usize, dstPtr: usize): void {
   // Vertical scan, Right-to-Left columns
   let colBytes = (height + 7) >>> 3;
   let planeSize = colBytes * width;
+  let fullGroups = height >>> 3;
+  let remainder = height & 7;
+  let w4 = <usize>width << 2;
   
   let p0Start = dstPtr;
-  let p1Start = dstPtr + planeSize;
+  let p1Start = dstPtr + <usize>planeSize;
   
   for (let x = 0; x < width; x++) {
     let targetCol = width - 1 - x;
-    let colOffset = targetCol * colBytes;
+    let colOffset = <usize>(targetCol * colBytes);
+    let xBase = <usize>x << 2;
     
-    for (let y = 0; y < height; y++) {
-      // RGBA input
-      let pixelIdx = (y * width + x) * 4;
-      let r = load<u8>(srcPtr + pixelIdx);
-      let g = load<u8>(srcPtr + pixelIdx + 1);
-      let b = load<u8>(srcPtr + pixelIdx + 2);
+    // Fast path: full 8-row groups
+    for (let g = 0; g < fullGroups; g++) {
+      let y = g << 3;
+      let byte0: u8 = 0;
+      let byte1: u8 = 0;
+      let ptr = srcPtr + <usize>y * w4 + xBase;
       
-      let gray = <u8>((<u32>r * 77 + <u32>g * 150 + <u32>b * 29) >> 8);
-      
-      let val: u8 = 3; // Black
-      if (gray >= 212) val = 0;      // White
-      else if (gray >= 127) val = 1; // Light
-      else if (gray >= 42) val = 2;  // Dark
-      
-      let byteIdx = colOffset + (y >>> 3);
-      let bitIdx = 7 - (y & 7);
-      let maskI32 = 1 << bitIdx;
-      let mask = <u8>maskI32;
-      
-      if (val & 1) {
-        let p0 = load<u8>(p0Start + byteIdx);
-        store<u8>(p0Start + byteIdx, p0 | mask);
+      for (let bi = 0; bi < 8; bi++) {
+        let gray = load<u8>(ptr);
+        
+        if (gray < 212) {
+          let maskI32 = 1 << (7 - bi);
+          let mask = <u8>maskI32;
+          if (gray < 42) {
+            byte0 |= mask;
+            byte1 |= mask;
+          } else if (gray < 127) {
+            byte1 |= mask;
+          } else {
+            byte0 |= mask;
+          }
+        }
+        ptr += w4;
       }
-      if (val & 2) {
-        let p1 = load<u8>(p1Start + byteIdx);
-        store<u8>(p1Start + byteIdx, p1 | mask);
+      let byteIdx = colOffset + <usize>g;
+      store<u8>(p0Start + byteIdx, byte0);
+      store<u8>(p1Start + byteIdx, byte1);
+    }
+    
+    // Slow path: remaining rows
+    if (remainder > 0) {
+      let y = fullGroups << 3;
+      let byte0: u8 = 0;
+      let byte1: u8 = 0;
+      let ptr = srcPtr + <usize>y * w4 + xBase;
+      
+      for (let bi = 0; bi < remainder; bi++) {
+        let gray = load<u8>(ptr);
+        
+        if (gray < 212) {
+          let maskI32 = 1 << (7 - bi);
+          let mask = <u8>maskI32;
+          if (gray < 42) {
+            byte0 |= mask;
+            byte1 |= mask;
+          } else if (gray < 127) {
+            byte1 |= mask;
+          } else {
+            byte0 |= mask;
+          }
+        }
+        ptr += w4;
       }
+      let byteIdx = colOffset + <usize>fullGroups;
+      store<u8>(p0Start + byteIdx, byte0);
+      store<u8>(p1Start + byteIdx, byte1);
     }
   }
 }

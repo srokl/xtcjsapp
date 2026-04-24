@@ -101,7 +101,7 @@ function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOptions,
       runWasmFilters(imageData, options.contrast, options.gamma, options.invert)
       ctx.putImageData(imageData, 0, 0)
       applyDithering(ctx, width, height, options.dithering, options.is2bit, true)
-      preview = canvas.toDataURL('image/png')
+      preview = canvas.toDataURL('image/jpeg', 0.6)
     }
   } else if (options.dithering === 'none' && !options.manhwa) {
     // Unified High-Performance JS Pipeline (Single memory pass)
@@ -112,7 +112,7 @@ function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOptions,
     if (generatePreview) {
       applyUnifiedFilters(imageData.data, options)
       ctx.putImageData(imageData, 0, 0)
-      preview = canvas.toDataURL('image/png')
+      preview = canvas.toDataURL('image/jpeg', 0.6)
     }
   } else {
     // Standard JS Pipeline (Multi-pass fallback)
@@ -126,7 +126,7 @@ function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOptions,
     
     if (generatePreview) {
       ctx.putImageData(imageData, 0, 0)
-      preview = canvas.toDataURL('image/png')
+      preview = canvas.toDataURL('image/jpeg', 0.6)
     }
     
     buffer = options.is2bit ? imageDataToXth(imageData) : imageDataToXtg(imageData)
@@ -329,7 +329,7 @@ export async function convertCbzToXtc(
       return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages, size: totalSize }
     } else {
       // High-Performance Parallel Path
-      const pageBlobs: Blob[] = []; const pageInfos: StreamPageInfo[] = []
+      const pageBuffers: ArrayBuffer[] = []; const pageInfos: StreamPageInfo[] = []
       let stitcher: ManhwaStitcher | null = options.manhwa ? new ManhwaStitcher(options) : null
       
       if (stitcher) {
@@ -346,7 +346,7 @@ export async function convertCbzToXtc(
           bitmap.close()
           for (const slice of slices) {
             const res = processAndEncode(slice.canvas, options, pageImages.length < 10)
-            pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
+            pageBuffers.push(res.buffer); pageInfos.push({ width: dims.width, height: dims.height })
             if (pageImages.length < 10) pageImages.push(res.preview)
           }
           mappingCtx.addOriginalPage(i + 1, slices.length)
@@ -369,7 +369,7 @@ export async function convertCbzToXtc(
 
           for (const item of batchResults) {
             for (const res of item.result.results) {
-              pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
+              pageBuffers.push(res.buffer); pageInfos.push({ width: dims.width, height: dims.height })
               if (pageImages.length < 10) pageImages.push(res.preview)
             }
             mappingCtx.addOriginalPage(item.globalIdx + 1, item.result.results.length)
@@ -381,7 +381,7 @@ export async function convertCbzToXtc(
       if (stitcher) {
         for (const p of stitcher.finish()) {
           const res = await processAndEncode(p.canvas, options, pageImages.length < 10)
-          pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
+          pageBuffers.push(res.buffer); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
           if (pageImages.length < 10) pageImages.push(res.preview)
         }
       }
@@ -404,13 +404,11 @@ export async function convertCbzToXtc(
         const fileStream = streamSaver.createWriteStream(outputFileName, { size: totalSize })
         const writer = fileStream.getWriter()
         await writer.write(headerAndIndex)
-        for (const blob of pageBlobs) await writer.write(new Uint8Array(await blob.arrayBuffer()))
+        for (const buf of pageBuffers) await writer.write(new Uint8Array(buf))
         await writer.close()
         return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages, size: totalSize }
       } else {
-        const allBuffers: ArrayBuffer[] = []
-        for (const blob of pageBlobs) allBuffers.push(await blob.arrayBuffer())
-        let xtcData = await buildXtcFromBuffers(allBuffers, { metadata, is2bit: options.is2bit })
+        let xtcData = await buildXtcFromBuffers(pageBuffers, { metadata, is2bit: options.is2bit })
         if (options.compressXtcz) xtcData = compressXtczLz4(xtcData)
         return { name: outputFileName, data: xtcData, size: xtcData.byteLength, pageCount: pageInfos.length, pageImages }
       }

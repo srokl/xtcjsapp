@@ -449,29 +449,36 @@ export function imageDataToXtg(imageData: ImageData): ArrayBuffer {
 
   const rowBytes = (w + 7) >>> 3;
   const pixelData = new Uint8Array(rowBytes * h);
+  const fullBytes = w >>> 3;      // Number of complete 8-pixel groups per row
+  const remainder = w & 7;        // Leftover pixels in the last partial byte
 
   for (let y = 0; y < h; y++) {
     const rowOffset = y * rowBytes;
     const dataOffset = y * w * 4;
-    for (let x = 0; x < w; x += 8) {
-      let b = 0;
-      const base = dataOffset + (x << 2);
-      if (data[base] >= 128) b |= 0x80;
-      if (x + 1 < w && data[base + 4] >= 128) b |= 0x40;
-      if (x + 2 < w && data[base + 8] >= 128) b |= 0x20;
-      if (x + 3 < w && data[base + 12] >= 128) b |= 0x10;
-      if (x + 4 < w && data[base + 16] >= 128) b |= 0x08;
-      if (x + 5 < w && data[base + 20] >= 128) b |= 0x04;
-      if (x + 6 < w && data[base + 24] >= 128) b |= 0x02;
-      if (x + 7 < w && data[base + 28] >= 128) b |= 0x01;
-      pixelData[rowOffset + (x >>> 3)] = b;
-    }
-  }
 
-  // Create MD5-like digest (simplified)
-  const md5digest = new Uint8Array(8);
-  for (let i = 0; i < Math.min(8, pixelData.length); i++) {
-    md5digest[i] = pixelData[i];
+    // Fast path: full 8-pixel groups (no bounds checks needed)
+    for (let col = 0; col < fullBytes; col++) {
+      const base = dataOffset + (col << 5); // col * 8 * 4
+      pixelData[rowOffset + col] =
+        ((data[base]      & 0x80)) |         // bit 7
+        ((data[base + 4]  & 0x80) >>> 1) |   // bit 6
+        ((data[base + 8]  & 0x80) >>> 2) |   // bit 5
+        ((data[base + 12] & 0x80) >>> 3) |   // bit 4
+        ((data[base + 16] & 0x80) >>> 4) |   // bit 3
+        ((data[base + 20] & 0x80) >>> 5) |   // bit 2
+        ((data[base + 24] & 0x80) >>> 6) |   // bit 1
+        ((data[base + 28] & 0x80) >>> 7);    // bit 0
+    }
+
+    // Slow path: handle remaining pixels (0-7) in the last byte
+    if (remainder > 0) {
+      let b = 0;
+      const base = dataOffset + (fullBytes << 5);
+      for (let bi = 0; bi < remainder; bi++) {
+        if (data[base + (bi << 2)] >= 128) b |= (0x80 >>> bi);
+      }
+      pixelData[rowOffset + fullBytes] = b;
+    }
   }
 
   const headerSize = 22;
@@ -487,7 +494,7 @@ export function imageDataToXtg(imageData: ImageData): ArrayBuffer {
   view.setUint8(8, 0);
   view.setUint8(9, 0);
   view.setUint32(10, pixelData.length, true);
-  uint8.set(md5digest, 14);
+  uint8.set(pixelData.subarray(0, 8), 14); // Digest shim
 
   uint8.set(pixelData, headerSize);
 
@@ -517,32 +524,55 @@ export function imageDataToXth(imageData: ImageData): ArrayBuffer {
   const p0 = new Uint8Array(planeSize);
   const p1 = new Uint8Array(planeSize);
 
+  const fullGroups = h >>> 3;  // Number of complete 8-pixel vertical groups
+  const remainder = h & 7;    // Leftover rows
+  const w4 = w << 2;          // Row stride in RGBA bytes
+
   // Planar logic: Vertical scan, Columns from Right to Left.
-  // Optimization: Process columns first to maximize output buffer cache locality.
   for (let x = 0; x < w; x++) {
     const colOffset = (w - 1 - x) * colBytes;
-    for (let y = 0; y < h; y += 8) {
+    const xBase = x << 2;
+
+    // Fast path: full 8-row groups (no bounds check needed)
+    for (let g = 0; g < fullGroups; g++) {
+      const y = g << 3;
       let byte0 = 0;
       let byte1 = 0;
-      
-      const maxBatch = Math.min(8, h - y);
-      for (let bi = 0; bi < maxBatch; bi++) {
-        const py = y + bi;
-        const gray = data[(py * w + x) << 2];
-        
-        // Intensity mapping: White(00), Light Gray(01), Dark Gray(10), Black(11)
+      let ptr = y * w4 + xBase;
+
+      for (let bi = 0; bi < 8; bi++) {
+        const gray = data[ptr];
         if (gray < 212) {
-          if (gray < 42) { // Black
-            byte0 |= (1 << (7 - bi));
-            byte1 |= (1 << (7 - bi));
-          } else if (gray < 127) { // Dark Gray
-            byte1 |= (1 << (7 - bi));
-          } else { // Light Gray
-            byte0 |= (1 << (7 - bi));
-          }
+          const mask = 0x80 >>> bi;
+          if (gray < 42) { byte0 |= mask; byte1 |= mask; }
+          else if (gray < 127) { byte1 |= mask; }
+          else { byte0 |= mask; }
         }
+        ptr += w4;
       }
-      const byteIdx = colOffset + (y >>> 3);
+      const byteIdx = colOffset + g;
+      p0[byteIdx] = byte0;
+      p1[byteIdx] = byte1;
+    }
+
+    // Slow path: remaining rows
+    if (remainder > 0) {
+      const y = fullGroups << 3;
+      let byte0 = 0;
+      let byte1 = 0;
+      let ptr = y * w4 + xBase;
+
+      for (let bi = 0; bi < remainder; bi++) {
+        const gray = data[ptr];
+        if (gray < 212) {
+          const mask = 0x80 >>> bi;
+          if (gray < 42) { byte0 |= mask; byte1 |= mask; }
+          else if (gray < 127) { byte1 |= mask; }
+          else { byte0 |= mask; }
+        }
+        ptr += w4;
+      }
+      const byteIdx = colOffset + fullGroups;
       p0[byteIdx] = byte0;
       p1[byteIdx] = byte1;
     }

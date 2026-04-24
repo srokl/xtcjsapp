@@ -361,7 +361,10 @@ export async function generateFontBinary(
   const fontSizePx = Math.round(options.fontSize * PX_PER_PT * S);
   const fontString = `${options.fontStyle} ${options.fontWeight} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
   
-  const alphaThreshold = 255 - (options.threshold / 1000 * 255);
+  const alphaThreshold = Math.round(255 - (options.threshold / 1000 * 255));
+  // Pre-compute scaled threshold for S>1: compare alphaSum >= scaledThreshold instead of alphaSum/(S*S) >= threshold
+  const S2 = S * S;
+  const scaledThreshold = alphaThreshold * S2;
   
   const cutoffChars: string[] = [];
 
@@ -375,9 +378,7 @@ export async function generateFontBinary(
   let ftMetrics: any = null;
   let baseLoadFlags = 0;
   if (options.renderer === 'freetype' && options.freetypeFace && ftModule) {
-    ftModule.SetFont(options.freetypeFace.family_name, options.freetypeFace.style_name);
-    ftMetrics = ftModule.SetPixelSize(0, fontSizePx);
-    
+    // SetFont/SetPixelSize deferred to per-chunk (each chunk loads a subset face)
     baseLoadFlags = ftModule.FT_LOAD_RENDER |
       (options.hinting === 'None' ? ftModule.FT_LOAD_NO_HINTING :
        options.hinting === 'Slight' ? ftModule.FT_LOAD_TARGET_LIGHT :
@@ -413,8 +414,7 @@ export async function generateFontBinary(
     let tempSubsetFace: FT_FaceRec | null = null;
 
     if (options.renderer === 'freetype' && options.customFontBuffer && ftModule) {
-      let chunkChars = "";
-      for (let c = i; c < end; c++) chunkChars += String.fromCharCode(c);
+      const chunkChars = Array.from({ length: end - i }, (_, k) => String.fromCharCode(i + k)).join('');
       
       // Use a unique suffix for each chunk to avoid name collisions and accidental unloads of the main font
       tempSubsetBuffer = subsetFontBuffer(options.customFontBuffer, chunkChars, `chunk_${i}`);
@@ -528,51 +528,85 @@ export async function generateFontBinary(
     // Batch getImageData
     const batchData = ctx.getImageData(0, 0, batchCols * sW, batchRows * sH).data;
     const stride = batchCols * sW * 4;
+    const fullBytes = Math.floor(box.width / 8);
+    const remainderBits = box.width & 7;
 
-    // Fix 3: Direct byte writes
-    for (let j = 0; j < count; j++) {
-      const charCode = i + j;
-      const glyph = chunkGlyphs ? chunkGlyphs.get(charCode) : null;
-      // Removed the early skip so it extracts Canvas fallback text!
-      
-      const col = j % batchCols;
-      const row = Math.floor(j / batchCols);
-      const baseX = col * sW;
-      const baseY = row * sH;
-      const baseByteOffset = charCode * binary.charByte;
+    // Optimized extraction: byte-at-a-time packing with hoisted S branch
+    if (S === 1) {
+      // === Native resolution fast path (no supersampling) ===
+      for (let j = 0; j < count; j++) {
+        const charCode = i + j;
+        const col = j % batchCols;
+        const row = Math.floor(j / batchCols);
+        const baseX = col * sW;
+        const baseY = row * sH;
+        const baseByteOffset = charCode * binary.charByte;
 
-      for (let y = 0; y < box.height; y++) {
-        const outRowOffset = baseByteOffset + y * binary.widthByte;
-        for (let x8 = 0; x8 < binary.widthByte; x8++) {
-          let byteVal = 0;
-          for (let bit = 0; bit < 8; bit++) {
-            const x = x8 * 8 + bit;
-            if (x >= box.width) break;
+        for (let y = 0; y < box.height; y++) {
+          const outRowOffset = baseByteOffset + y * binary.widthByte;
+          const rowIdx = (baseY + y) * stride + baseX * 4;
 
-            let isSolid = false;
-            if (S === 1) {
-              const bY = baseY + y;
-              const bX = baseX + x;
-              const idx = bY * stride + bX * 4;
-              if (batchData[idx + 3] >= alphaThreshold) isSolid = true;
-            } else {
+          // Full 8-pixel bytes (no bounds check)
+          for (let x8 = 0; x8 < fullBytes; x8++) {
+            const base = rowIdx + (x8 << 5); // x8 * 8 * 4
+            binary.fontbin[outRowOffset + x8] =
+              ((batchData[base + 3]  >= alphaThreshold ? 0x80 : 0)) |
+              ((batchData[base + 7]  >= alphaThreshold ? 0x40 : 0)) |
+              ((batchData[base + 11] >= alphaThreshold ? 0x20 : 0)) |
+              ((batchData[base + 15] >= alphaThreshold ? 0x10 : 0)) |
+              ((batchData[base + 19] >= alphaThreshold ? 0x08 : 0)) |
+              ((batchData[base + 23] >= alphaThreshold ? 0x04 : 0)) |
+              ((batchData[base + 27] >= alphaThreshold ? 0x02 : 0)) |
+              ((batchData[base + 31] >= alphaThreshold ? 0x01 : 0));
+          }
+
+          // Remaining bits
+          if (remainderBits > 0) {
+            let byteVal = 0;
+            const base = rowIdx + (fullBytes << 5);
+            for (let bit = 0; bit < remainderBits; bit++) {
+              if (batchData[base + (bit << 2) + 3] >= alphaThreshold) {
+                byteVal |= (0x80 >>> bit);
+              }
+            }
+            binary.fontbin[outRowOffset + fullBytes] = byteVal;
+          }
+        }
+      }
+    } else {
+      // === Supersampled path (S > 1) with integer threshold ===
+      for (let j = 0; j < count; j++) {
+        const charCode = i + j;
+        const col = j % batchCols;
+        const row = Math.floor(j / batchCols);
+        const baseX = col * sW;
+        const baseY = row * sH;
+        const baseByteOffset = charCode * binary.charByte;
+
+        for (let y = 0; y < box.height; y++) {
+          const outRowOffset = baseByteOffset + y * binary.widthByte;
+          for (let x8 = 0; x8 < binary.widthByte; x8++) {
+            let byteVal = 0;
+            for (let bit = 0; bit < 8; bit++) {
+              const x = (x8 << 3) + bit;
+              if (x >= box.width) break;
+
               let alphaSum = 0;
+              const syBase = baseY + y * S;
+              const sxBase = baseX + x * S;
               for (let sy = 0; sy < S; sy++) {
+                const rowStart = (syBase + sy) * stride + sxBase * 4;
                 for (let sx = 0; sx < S; sx++) {
-                  const bY = baseY + y * S + sy;
-                  const bX = baseX + x * S + sx;
-                  const idx = bY * stride + bX * 4;
-                  alphaSum += batchData[idx + 3];
+                  alphaSum += batchData[rowStart + (sx << 2) + 3];
                 }
               }
-              if (alphaSum / (S * S) >= alphaThreshold) isSolid = true;
+              // Integer comparison: alphaSum >= alphaThreshold * S * S
+              if (alphaSum >= scaledThreshold) {
+                byteVal |= (0x80 >>> bit);
+              }
             }
-
-            if (isSolid) {
-              byteVal |= (0x80 >>> bit);
-            }
+            binary.fontbin[outRowOffset + x8] = byteVal;
           }
-          binary.fontbin[outRowOffset + x8] = byteVal;
         }
       }
     }
@@ -641,6 +675,37 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
   const drawnBoxes: {x: number, y: number, w: number, h: number, isCutoff: boolean}[] = [];
   const cutoffChars = new Set<string>();
 
+  // Pre-allocate reusable temp canvas for FreeType bitmap blitting (avoids DOM allocation per char)
+  const previewTempCanvas = document.createElement('canvas');
+  const previewTempSize = Math.max(100, fontSizePx * 3);
+  previewTempCanvas.width = previewTempSize;
+  previewTempCanvas.height = previewTempSize;
+  const previewTempCtx = previewTempCanvas.getContext('2d', { willReadFrequently: true })!;
+
+  // Batch-preload all preview glyphs from FreeType to avoid double LoadGlyphs per character
+  let previewGlyphMap: Map<number, any> | null = null;
+  if (options.renderer === 'freetype' && options.freetypeFace && ftModule) {
+    ftModule.SetFont(options.freetypeFace.family_name, options.freetypeFace.style_name);
+    ftModule.SetPixelSize(0, fontSizePx);
+    
+    const previewLoadFlags = ftModule.FT_LOAD_RENDER |
+      (options.hinting === 'None' ? ftModule.FT_LOAD_NO_HINTING :
+       options.hinting === 'Slight' ? ftModule.FT_LOAD_TARGET_LIGHT :
+       options.hinting === 'Medium' ? ftModule.FT_LOAD_TARGET_NORMAL :
+       ftModule.FT_LOAD_TARGET_MONO) |
+      (options.forceAutohint ? ftModule.FT_LOAD_FORCE_AUTOHINT : 0);
+
+    const allCodes: number[] = [];
+    for (const line of lines) {
+      for (let i = 0; i < line.length; i++) {
+        allCodes.push(line.charCodeAt(i));
+      }
+    }
+    // Deduplicate
+    const uniqueCodes = Array.from(new Set(allCodes));
+    previewGlyphMap = ftModule.LoadGlyphs(uniqueCodes, previewLoadFlags);
+  }
+
   for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
     const line = lines[lineIdx];
     
@@ -674,7 +739,8 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
         }
       }
 
-      const exceedsBounds = isCharCutoff(ctx, charStr, box, options);
+      const preloadedGlyph = previewGlyphMap ? previewGlyphMap.get(charStr.charCodeAt(0)) : null;
+      const exceedsBounds = isCharCutoff(ctx, charStr, box, options, preloadedGlyph);
       if (exceedsBounds) {
         cutoffChars.add(charStr);
       }
@@ -739,20 +805,11 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
         }
       }
       
-      if (options.renderer === 'freetype' && options.freetypeFace && ftModule) {
+      if (previewGlyphMap && options.freetypeFace && ftModule) {
         ftModule.SetFont(options.freetypeFace.family_name, options.freetypeFace.style_name);
         const m = ftModule.SetPixelSize(0, fontSizePx);
-        
-        const previewLoadFlags = ftModule.FT_LOAD_RENDER |
-          (options.hinting === 'None' ? ftModule.FT_LOAD_NO_HINTING :
-           options.hinting === 'Slight' ? ftModule.FT_LOAD_TARGET_LIGHT :
-           options.hinting === 'Medium' ? ftModule.FT_LOAD_TARGET_NORMAL :
-           ftModule.FT_LOAD_TARGET_MONO) |
-          (options.forceAutohint ? ftModule.FT_LOAD_FORCE_AUTOHINT : 0);
 
-        const charCode = charStr.charCodeAt(0);
-        const glyphs = ftModule.LoadGlyphs([charCode], previewLoadFlags);
-        const glyph = glyphs.get(charCode);
+        const glyph = previewGlyphMap.get(charStr.charCodeAt(0));
 
         if (glyph && glyph.glyph_index !== 0) {
           const bitmap = glyph.bitmap;
@@ -760,15 +817,16 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
             const adv = (glyph.advance.x >> 6);
             const dyOffset = (m.ascender + m.descender) >> 7;
 
-            const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = bitmap.width;
-            tempCanvas.height = bitmap.rows;
-            const tempCtx = tempCanvas.getContext('2d')!;
-            tempCtx.putImageData(bitmap.imagedata, 0, 0);
+            // Reuse pre-allocated temp canvas (resize only if needed)
+            if (previewTempCanvas.width < bitmap.width || previewTempCanvas.height < bitmap.rows) {
+              previewTempCanvas.width = bitmap.width;
+              previewTempCanvas.height = bitmap.rows;
+            }
+            previewTempCtx.putImageData(bitmap.imagedata, 0, 0);
             
             const dx = Math.round(glyph.bitmap_left - adv / 2);
             const dy = Math.round(-(glyph.bitmap_top - dyOffset));
-            ctx.drawImage(tempCanvas, dx, dy);
+            ctx.drawImage(previewTempCanvas, 0, 0, bitmap.width, bitmap.rows, dx, dy, bitmap.width, bitmap.rows);
           }
         } else {
           // Fallback
@@ -806,30 +864,33 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
   const osImageData = ctx.getImageData(0, 0, osCanvas.width, osCanvas.height);
   const data = osImageData.data;
   
-  const alphaThreshold = 255 - (options.threshold / 1000 * 255);
+  const prevAlphaThreshold = Math.round(255 - (options.threshold / 1000 * 255));
+  const prevS2 = S * S;
+  const prevScaledThreshold = prevAlphaThreshold * prevS2;
   
   const finalImageData = finalCtx.createImageData(SCREEN_W, SCREEN_H);
   const outData = finalImageData.data;
+  const osWidth = osCanvas.width;
   
   for (let y = 0; y < SCREEN_H; y++) {
     for (let x = 0; x < SCREEN_W; x++) {
-      let alphaSum = 0;
+      let isSolid: boolean;
       if (S === 1) {
         const idx = (y * SCREEN_W + x) * 4;
-        alphaSum = data[idx + 3];
+        isSolid = data[idx + 3] >= prevAlphaThreshold;
       } else {
-        // Average the S x S block
+        // Integer threshold: alphaSum >= threshold * S * S
+        let alphaSum = 0;
         for (let sy = 0; sy < S; sy++) {
+          const rowStart = ((y * S + sy) * osWidth) * 4 + (x * S) * 4;
           for (let sx = 0; sx < S; sx++) {
-            const idx = ((y * S + sy) * osCanvas.width + (x * S + sx)) * 4;
-            alphaSum += data[idx + 3];
+            alphaSum += data[rowStart + (sx << 2) + 3];
           }
         }
-        alphaSum = alphaSum / (S * S);
+        isSolid = alphaSum >= prevScaledThreshold;
       }
       
       const outIdx = (y * SCREEN_W + x) * 4;
-      const isSolid = alphaSum >= alphaThreshold;
       if (isSolid) {
         outData[outIdx] = 0; outData[outIdx+1] = 0; outData[outIdx+2] = 0; outData[outIdx+3] = 255;
       } else {
