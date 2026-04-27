@@ -1,7 +1,0 @@
-feat: add TOC chapter names from filenames in image-to-XTC pack
-
-When packing multiple images into a single XTC/XTCH container, each
-image's filename (without extension) is now used as the chapter title
-in the table of contents. The TOC metadata with page ranges is passed
-to both buildXtcFromBuffers and buildXtcHeaderAndIndex, so the packed
-file has navigable chapters on the e-reader.
