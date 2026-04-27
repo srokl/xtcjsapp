@@ -59,6 +59,60 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
               2-bit (High Quality XTCH)
             </label>
           </div>
+
+          <div className="option checkbox-option">
+            <label htmlFor="packToXtc">
+              <input
+                type="checkbox"
+                id="packToXtc"
+                checked={options.packToXtc}
+                onChange={(e) => onChange({ ...options, packToXtc: e.target.checked })}
+              />
+              Pack all images into single {options.is2bit ? '.xtch' : '.xtc'}
+            </label>
+          </div>
+
+          {options.packToXtc && (
+            <>
+              <div className="option checkbox-option">
+                <label htmlFor="useWasm">
+                  <input
+                    type="checkbox"
+                    id="useWasm"
+                    checked={options.useWasm}
+                    onChange={(e) => onChange({ ...options, useWasm: e.target.checked })}
+                  />
+                  Use WebAssembly (Faster Encoding)
+                </label>
+              </div>
+
+              <div className={`option checkbox-option${options.compressXtcz ? ' disabled' : ''}`}>
+                <label htmlFor="streamedDownload">
+                  <input
+                    type="checkbox"
+                    id="streamedDownload"
+                    checked={options.streamedDownload}
+                    disabled={options.compressXtcz}
+                    onChange={(e) => onChange({ ...options, streamedDownload: e.target.checked })}
+                  />
+                  Streamed Downloading (Memory Constrained)
+                </label>
+              </div>
+
+              <div className={`option checkbox-option${options.streamedDownload ? ' disabled' : ''}`}>
+                <label htmlFor="compressXtcz">
+                  <input
+                    type="checkbox"
+                    id="compressXtcz"
+                    checked={options.compressXtcz}
+                    disabled={options.streamedDownload}
+                    onChange={(e) => onChange({ ...options, compressXtcz: e.target.checked })}
+                  />
+                  Compress to .xtcz (Experimental LZ4)
+                </label>
+              </div>
+            </>
+          )}
         </>
       ) : isVideoMode ? (
         <>

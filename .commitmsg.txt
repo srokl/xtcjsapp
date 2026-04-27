@@ -1,0 +1,16 @@
+feat: add pack-to-XTC/XTCH option for image converter
+
+Add ability to combine multiple uploaded images into a single XTC or
+XTCH container file from the image converter page.
+
+Changes:
+- Add packToXtc boolean to ConversionOptions type
+- Add convertImagesToXtcPack() function in converter.ts that processes
+  multiple image files and assembles them into a multi-page XTC binary
+- Add "Pack all images into single .xtc/.xtch" checkbox in image mode
+  Options panel, with conditional sub-options (WASM, streamed download,
+  XTCZ compression) that appear when pack mode is enabled
+- Add early-return batch path in ConverterPage that bypasses per-file
+  loop when packToXtc is active, calling the new batch function with
+  all selected files at once
+- Output filename uses format: {firstFileName}_{N}pages.xtc/.xtch

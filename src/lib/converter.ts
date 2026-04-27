@@ -770,6 +770,60 @@ async function convertImageToXtc(file: File, options: ConversionOptions, onProgr
   return { name: file.name.replace(/\.[^/.]+$/, options.is2bit ? '.xth' : '.xtg'), data: result.results[0].buffer, size: result.results[0].buffer.byteLength, pageCount: 1, pageImages: [result.results[0].preview] }
 }
 
+/**
+ * Pack multiple image files into a single XTC/XTCH container.
+ * Each image becomes one page in the output file.
+ */
+export async function convertImagesToXtcPack(
+  files: File[],
+  options: ConversionOptions,
+  onProgress: (progress: number, previewUrl: string | null) => void
+): Promise<ConversionResult> {
+  if (options.useWasm) try { await initWasm() } catch (e) { console.error("Wasm init failed", e) }
+
+  const pageBuffers: ArrayBuffer[] = []
+  const pageInfos: StreamPageInfo[] = []
+  const pageImages: string[] = []
+  const dims = getTargetDimensions(options)
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i]
+    onProgress(i / files.length, null)
+
+    const result = await processImageAsBinary(new Uint8Array(await file.arrayBuffer()), i + 1, options, pageImages.length < 10)
+    for (const res of result.results) {
+      pageBuffers.push(res.buffer)
+      pageInfos.push({ width: dims.width, height: dims.height })
+      if (pageImages.length < 10) pageImages.push(res.preview)
+    }
+  }
+
+  onProgress(1, null)
+
+  // Determine output filename from first file
+  const baseName = files[0].name.replace(/\.[^/.]+$/, '')
+  const suffix = files.length > 1 ? `_${files.length}pages` : ''
+  const ext = options.compressXtcz ? '.xtcz' : (options.is2bit ? '.xtch' : '.xtc')
+  const outputFileName = `${baseName}${suffix}${ext}`
+
+  if (options.streamedDownload) {
+    const headerAndIndex = buildXtcHeaderAndIndex(pageInfos, { is2bit: options.is2bit })
+    let totalSize = headerAndIndex.byteLength
+    for (const info of pageInfos) totalSize += getXtcPageSize(info.width, info.height, options.is2bit)
+    const fileStream = streamSaver.createWriteStream(outputFileName, { size: totalSize })
+    const writer = fileStream.getWriter()
+    await writer.write(headerAndIndex)
+    for (const buf of pageBuffers) await writer.write(new Uint8Array(buf))
+    await writer.close()
+    return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages, size: totalSize }
+  } else {
+    let xtcData = await buildXtcFromBuffers(pageBuffers, { is2bit: options.is2bit })
+    if (options.compressXtcz) xtcData = compressXtczLz4(xtcData)
+    return { name: outputFileName, data: xtcData, size: xtcData.byteLength, pageCount: pageBuffers.length, pageImages }
+  }
+}
+
+
 async function convertVideoToXtc(file: File, options: ConversionOptions, onProgress: (p: number, pr: string | null) => void): Promise<ConversionResult> {
   const frames = await extractFramesFromVideo(file, options.videoFps || 1.0)
   const pageBuffers: ArrayBuffer[] = []; const pageInfos: StreamPageInfo[] = []; const pageImages: string[] = []

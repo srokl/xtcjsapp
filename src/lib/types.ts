@@ -20,6 +20,7 @@ export interface ConversionOptions {
   useWasm: boolean
   streamedDownload: boolean
   compressXtcz: boolean
+  packToXtc: boolean
 }
 
 export interface ConversionResult {

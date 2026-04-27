@@ -5,7 +5,7 @@ import { Options } from './Options'
 import { Progress } from './Progress'
 import { Results } from './Results'
 import { Viewer } from './Viewer'
-import { convertToXtc, type ConversionOptions } from '../lib/converter'
+import { convertToXtc, convertImagesToXtcPack, type ConversionOptions } from '../lib/converter'
 import { recordConversion } from '../lib/api'
 import { consumePendingFiles } from '../lib/file-transfer'
 import { useStoredResults, type StoredResult } from '../hooks/useStoredResults'
@@ -89,6 +89,7 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
     useWasm: true,
     streamedDownload: false,
     compressXtcz: false,
+    packToXtc: false,
   })
 
   const handleFiles = useCallback((files: File[]) => {
@@ -108,6 +109,30 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
     setProgress(0)
     setProgressText('Processing...')
     setPreviewUrl(null)
+
+    // Pack-to-XTC mode: combine all images into a single XTC/XTCH file
+    if (fileType === 'image' && options.packToXtc && selectedFiles.length > 0) {
+      setProgressText(`Packing ${selectedFiles.length} images...`)
+      try {
+        const result = await convertImagesToXtcPack(selectedFiles, options, (pageProgress, preview) => {
+          setProgress(pageProgress)
+          if (preview) setPreviewUrl(preview)
+        })
+        await addResult(result)
+        recordConversion('cbz').catch(() => {})
+      } catch (err) {
+        console.error(`[Converter] Error packing images:`, err)
+        await addResult({
+          name: `packed${options.is2bit ? '.xtch' : '.xtc'}`,
+          error: err instanceof Error ? err.message : 'Unknown error',
+        })
+      }
+      setProgress(1)
+      setProgressText('Complete')
+      setPreviewUrl(null)
+      setIsConverting(false)
+      return
+    }
 
     let totalPageAccumulator = 0
     let lastBaseName = ''
