@@ -786,19 +786,36 @@ export async function convertImagesToXtcPack(
   const pageImages: string[] = []
   const dims = getTargetDimensions(options)
 
+  // Track which page index each file starts at (for TOC)
+  const fileTocEntries: { name: string, startPage: number }[] = []
+  let currentPage = 1
+
   for (let i = 0; i < files.length; i++) {
     const file = files[i]
     onProgress(i / files.length, null)
+
+    fileTocEntries.push({ name: file.name.replace(/\.[^/.]+$/, ''), startPage: currentPage })
 
     const result = await processImageAsBinary(new Uint8Array(await file.arrayBuffer()), i + 1, options, pageImages.length < 10)
     for (const res of result.results) {
       pageBuffers.push(res.buffer)
       pageInfos.push({ width: dims.width, height: dims.height })
       if (pageImages.length < 10) pageImages.push(res.preview)
+      currentPage++
     }
   }
 
   onProgress(1, null)
+
+  // Build metadata with TOC entries from filenames
+  const metadata: BookMetadata = {
+    title: files[0].name.replace(/\.[^/.]+$/, ''),
+    toc: fileTocEntries.map((entry, idx) => ({
+      title: entry.name,
+      startPage: entry.startPage,
+      endPage: idx < fileTocEntries.length - 1 ? fileTocEntries[idx + 1].startPage - 1 : pageBuffers.length,
+    })),
+  }
 
   // Determine output filename from first file
   const baseName = files[0].name.replace(/\.[^/.]+$/, '')
@@ -807,7 +824,7 @@ export async function convertImagesToXtcPack(
   const outputFileName = `${baseName}${suffix}${ext}`
 
   if (options.streamedDownload) {
-    const headerAndIndex = buildXtcHeaderAndIndex(pageInfos, { is2bit: options.is2bit })
+    const headerAndIndex = buildXtcHeaderAndIndex(pageInfos, { is2bit: options.is2bit, metadata })
     let totalSize = headerAndIndex.byteLength
     for (const info of pageInfos) totalSize += getXtcPageSize(info.width, info.height, options.is2bit)
     const fileStream = streamSaver.createWriteStream(outputFileName, { size: totalSize })
@@ -817,7 +834,7 @@ export async function convertImagesToXtcPack(
     await writer.close()
     return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages, size: totalSize }
   } else {
-    let xtcData = await buildXtcFromBuffers(pageBuffers, { is2bit: options.is2bit })
+    let xtcData = await buildXtcFromBuffers(pageBuffers, { is2bit: options.is2bit, metadata })
     if (options.compressXtcz) xtcData = compressXtczLz4(xtcData)
     return { name: outputFileName, data: xtcData, size: xtcData.byteLength, pageCount: pageBuffers.length, pageImages }
   }
