@@ -12,3 +12,4 @@ LICENSE
 .idea
 coverage*
 *.log
+.commitmsg.txt

@@ -16,6 +16,7 @@ import { Route as MergeRouteImport } from './routes/merge'
 import { Route as ImageRouteImport } from './routes/image'
 import { Route as FontRouteImport } from './routes/font'
 import { Route as Feature4RouteImport } from './routes/feature4'
+import { Route as EpubRouteImport } from './routes/epub'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as IndexRouteImport } from './routes/index'
 
@@ -54,6 +55,11 @@ const Feature4Route = Feature4RouteImport.update({
   path: '/feature4',
   getParentRoute: () => rootRouteImport,
 } as any)
+const EpubRoute = EpubRouteImport.update({
+  id: '/epub',
+  path: '/epub',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AboutRoute = AboutRouteImport.update({
   id: '/about',
   path: '/about',
@@ -68,6 +74,7 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/epub': typeof EpubRoute
   '/feature4': typeof Feature4Route
   '/font': typeof FontRoute
   '/image': typeof ImageRoute
@@ -79,6 +86,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/epub': typeof EpubRoute
   '/feature4': typeof Feature4Route
   '/font': typeof FontRoute
   '/image': typeof ImageRoute
@@ -91,6 +99,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/epub': typeof EpubRoute
   '/feature4': typeof Feature4Route
   '/font': typeof FontRoute
   '/image': typeof ImageRoute
@@ -104,6 +113,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/about'
+    | '/epub'
     | '/feature4'
     | '/font'
     | '/image'
@@ -115,6 +125,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/about'
+    | '/epub'
     | '/feature4'
     | '/font'
     | '/image'
@@ -126,6 +137,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/about'
+    | '/epub'
     | '/feature4'
     | '/font'
     | '/image'
@@ -138,6 +150,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AboutRoute: typeof AboutRoute
+  EpubRoute: typeof EpubRoute
   Feature4Route: typeof Feature4Route
   FontRoute: typeof FontRoute
   ImageRoute: typeof ImageRoute
@@ -198,6 +211,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof Feature4RouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/epub': {
+      id: '/epub'
+      path: '/epub'
+      fullPath: '/epub'
+      preLoaderRoute: typeof EpubRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/about': {
       id: '/about'
       path: '/about'
@@ -218,6 +238,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AboutRoute: AboutRoute,
+  EpubRoute: EpubRoute,
   Feature4Route: Feature4Route,
   FontRoute: FontRoute,
   ImageRoute: ImageRoute,
