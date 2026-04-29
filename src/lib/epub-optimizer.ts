@@ -66,6 +66,26 @@ function findCoverImage(opfContent: string, opfPath: string): string | null {
 }
 
 /**
+ * Ensures the OPF <metadata> section contains a <meta name="cover" content="COVER_ID"/> tag.
+ * Required by some older XTEink firmware that ignores properties="cover-image".
+ */
+function ensureCoverMeta(opfContent: string): string {
+  let coverIdMatch = opfContent.match(/<item[^>]+id="([^"]+)"[^>]+properties="[^"]*cover-image[^"]*"/i)
+  if (!coverIdMatch) {
+    coverIdMatch = opfContent.match(/<item[^>]*id="([^"]+)"[^>]*href="[^"]*cover[^"]*"[^>]*media-type="image\//i)
+  }
+  const coverId = coverIdMatch ? coverIdMatch[1] : null
+
+  if (!coverId) return opfContent
+  if (opfContent.includes('name="cover"')) return opfContent
+  
+  const idx = opfContent.indexOf('</metadata>')
+  if (idx === -1) return opfContent
+  
+  return opfContent.substring(0, idx) + `    <meta name="cover" content="${coverId}"/>\n  </metadata>` + opfContent.substring(idx + 11)
+}
+
+/**
  * Convert a single image to 1-bit XTG.
  * Images wider than the X4 content width (440px) are scaled down to fit.
  * Small inline images (icons, dashes) are kept at original dimensions.
@@ -237,7 +257,15 @@ export async function optimizeEpubImages(
     for (let i = 0; i < otherEntries.length; i++) {
       const entry = otherEntries[i]
       if (entry.getData) {
-        const data = await entry.getData(new Uint8ArrayWriter())
+        let data = await entry.getData(new Uint8ArrayWriter())
+        
+        // If this is the OPF file, ensure it has the cover meta tag
+        if (entry.filename.endsWith('.opf')) {
+          let opfText = new TextDecoder().decode(data)
+          opfText = ensureCoverMeta(opfText)
+          data = new TextEncoder().encode(opfText)
+        }
+
         await zipWriter.add(entry.filename, new Uint8ArrayReader(data), {
           extendedTimestamp: false,
         })
