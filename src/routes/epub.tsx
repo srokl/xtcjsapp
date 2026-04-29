@@ -23,7 +23,7 @@ function EpubPage() {
   }>>([])
 
   const [options, setOptions] = useState<EpubOptimizeOptions>({
-    dithering: 'Zhou-Fang',
+    dithering: 'zhoufang',
     contrast: 0,
     gamma: 1.0,
     invert: false,
