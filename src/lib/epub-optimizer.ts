@@ -14,7 +14,7 @@
 
 import { ZipReader, BlobReader, BlobWriter, ZipWriter, Uint8ArrayWriter, TextReader, Uint8ArrayReader } from '@zip.js/zip.js'
 import { imageDataToXtg } from './xtc-format'
-import { encodeGrayscaleJpeg } from './grayscale-jpeg'
+
 import { toGrayscale, applyContrast, applyGamma, applyInvert } from './processing/image'
 import { applyDitheringToData } from './processing/dithering'
 import { sharedCanvasPool } from './processing/canvas'
@@ -63,26 +63,6 @@ function findCoverImage(opfContent: string, opfPath: string): string | null {
   }
 
   return null
-}
-
-/**
- * Ensures the OPF <metadata> section contains a <meta name="cover" content="COVER_ID"/> tag.
- * Required by some older XTEink firmware that ignores properties="cover-image".
- */
-function ensureCoverMeta(opfContent: string): string {
-  let coverIdMatch = opfContent.match(/<item[^>]+id="([^"]+)"[^>]+properties="[^"]*cover-image[^"]*"/i)
-  if (!coverIdMatch) {
-    coverIdMatch = opfContent.match(/<item[^>]*id="([^"]+)"[^>]*href="[^"]*cover[^"]*"[^>]*media-type="image\//i)
-  }
-  const coverId = coverIdMatch ? coverIdMatch[1] : null
-
-  if (!coverId) return opfContent
-  if (opfContent.includes('name="cover"')) return opfContent
-  
-  const idx = opfContent.indexOf('</metadata>')
-  if (idx === -1) return opfContent
-  
-  return opfContent.substring(0, idx) + `    <meta name="cover" content="${coverId}"/>\n  </metadata>` + opfContent.substring(idx + 11)
 }
 
 /**
@@ -155,21 +135,27 @@ async function convertCoverToGrayscaleJpeg(
   ctx.drawImage(bitmap, 0, 0, targetW, targetH)
   bitmap.close()
 
-  // Extract grayscale pixel data (1 byte per pixel)
+  // Apply grayscale to the canvas
   const imgData = ctx.getImageData(0, 0, targetW, targetH)
-  const rgba = imgData.data
-  const grayPixels = new Uint8Array(targetW * targetH)
-  for (let i = 0; i < grayPixels.length; i++) {
-    const r = rgba[i * 4]
-    const g = rgba[i * 4 + 1]
-    const b = rgba[i * 4 + 2]
-    grayPixels[i] = Math.round(0.299 * r + 0.587 * g + 0.114 * b)
+  const d = imgData.data
+  for (let i = 0; i < d.length; i += 4) {
+    const gray = Math.round(d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114)
+    d[i] = d[i + 1] = d[i + 2] = gray
+    d[i + 3] = 255
+  }
+  ctx.putImageData(imgData, 0, 0)
+
+  // Use native browser JPEG encoder for high quality baseline JPEG
+  // This produces a much better image than our minimal custom encoder
+  const outBlob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/jpeg', 0.9))
+  sharedCanvasPool.release(canvas)
+  
+  if (!outBlob) {
+    throw new Error('Failed to encode cover image')
   }
 
-  sharedCanvasPool.release(canvas)
-
-  // Encode as true 1-component grayscale JPEG with 30% quality
-  return encodeGrayscaleJpeg(grayPixels, targetW, targetH, 30)
+  const ab = await outBlob.arrayBuffer()
+  return new Uint8Array(ab)
 }
 
 /**
@@ -257,15 +243,7 @@ export async function optimizeEpubImages(
     for (let i = 0; i < otherEntries.length; i++) {
       const entry = otherEntries[i]
       if (entry.getData) {
-        let data = await entry.getData(new Uint8ArrayWriter())
-        
-        // If this is the OPF file, ensure it has the cover meta tag
-        if (entry.filename.endsWith('.opf')) {
-          let opfText = new TextDecoder().decode(data)
-          opfText = ensureCoverMeta(opfText)
-          data = new TextEncoder().encode(opfText)
-        }
-
+        const data = await entry.getData(new Uint8ArrayWriter())
         await zipWriter.add(entry.filename, new Uint8ArrayReader(data), {
           extendedTimestamp: false,
         })
