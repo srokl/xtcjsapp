@@ -126,9 +126,8 @@ async function convertCoverToGrayscaleJpeg(
   const blob = new Blob([imageData])
   const bitmap = await createImageBitmap(blob)
 
-  // Cover size
-  const targetW = 800
-  const targetH = Math.round(bitmap.height * (800 / bitmap.width))
+  const targetW = 598
+  const targetH = 900
 
   const canvas = sharedCanvasPool.acquire(targetW, targetH)
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!
