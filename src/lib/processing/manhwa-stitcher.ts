@@ -1,6 +1,6 @@
 import { applyDithering } from './dithering'
 import { toGrayscale, applyContrast, isSolidColor, applyGamma, applyInvert } from './image'
-import { extractRegion, TARGET_WIDTH, TARGET_HEIGHT, DEVICE_DIMENSIONS } from './canvas'
+import { extractRegion, TARGET_WIDTH, TARGET_HEIGHT, DEVICE_DIMENSIONS, resizeFill } from './canvas'
 import type { ConversionOptions, ProcessedPage } from '../types'
 
 export class ManhwaStitcher {
@@ -18,16 +18,19 @@ export class ManhwaStitcher {
   async append(source: HTMLImageElement | HTMLCanvasElement | ImageBitmap): Promise<ProcessedPage[]> {
     const pages: ProcessedPage[] = []
     
-    // 1. Resize source to targetWidth
     const scale = this.targetWidth / source.width
     const newHeight = Math.floor(source.height * scale)
-    const tempCanvas = document.createElement('canvas')
-    tempCanvas.width = this.targetWidth
-    tempCanvas.height = newHeight
-    const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true })!
     
-    // Draw and apply pre-processing
-    tempCtx.drawImage(source, 0, 0, source.width, source.height, 0, 0, this.targetWidth, newHeight)
+    let tempCanvas = document.createElement('canvas')
+    tempCanvas.width = source.width
+    tempCanvas.height = source.height
+    tempCanvas.getContext('2d', { willReadFrequently: true })!.drawImage(source, 0, 0)
+    
+    if (source.width !== this.targetWidth || source.height !== newHeight) {
+      tempCanvas = await resizeFill(tempCanvas, this.targetWidth, newHeight, !this.options.useWasm)
+    }
+    
+    const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true })!
     
     if (this.options.contrast > 0) {
        applyContrast(tempCtx, this.targetWidth, newHeight, this.options.contrast)

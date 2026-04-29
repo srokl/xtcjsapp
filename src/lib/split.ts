@@ -6,7 +6,7 @@ import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { buildXtc, buildXtcFromBuffers } from './xtc-format'
 import { parseXtcFile } from './xtc-reader'
 import { buildCbz, splitPdf, type OutputFormat, detectFileType } from './merge'
-import { TARGET_WIDTH, TARGET_HEIGHT } from './processing/canvas'
+import { TARGET_WIDTH, TARGET_HEIGHT, resizeWithPadding } from './processing/canvas'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
@@ -233,10 +233,10 @@ async function splitCbzFile(
     } else {
       // Convert to XTC
       const canvases = await blobsToCanvases(rangeImages.map(i => i.blob))
-      const pages = canvases.map((canvas, i) => ({
+      const pages = await Promise.all(canvases.map(async (canvas, i) => ({
         name: `${String(i).padStart(5, '0')}.png`,
-        canvas: resizeCanvasForXtc(canvas, dimensions.width, dimensions.height),
-      }))
+        canvas: await resizeWithPadding(canvas, 255, dimensions.width, dimensions.height, true),
+      })))
       const pageImages = pages.map(p => p.canvas.toDataURL('image/png'))
       const data = await buildXtc(pages)
 
@@ -357,10 +357,10 @@ async function splitPdfFile(
         pageCount: rangeCanvases.length,
       })
     } else {
-      const pages = rangeCanvases.map((canvas, i) => ({
+      const pages = await Promise.all(rangeCanvases.map(async (canvas, i) => ({
         name: `${String(i).padStart(5, '0')}.png`,
-        canvas: resizeCanvasForXtc(canvas, dimensions.width, dimensions.height),
-      }))
+        canvas: await resizeWithPadding(canvas, 255, dimensions.width, dimensions.height, true),
+      })))
       const pageImages = pages.map(p => p.canvas.toDataURL('image/png'))
       const data = await buildXtc(pages)
 
@@ -590,28 +590,6 @@ function blobToCanvas(blob: Blob): Promise<HTMLCanvasElement> {
   })
 }
 
-function resizeCanvasForXtc(
-  canvas: HTMLCanvasElement,
-  targetWidth = TARGET_WIDTH,
-  targetHeight = TARGET_HEIGHT
-): HTMLCanvasElement {
-  const result = document.createElement('canvas')
-  result.width = targetWidth
-  result.height = targetHeight
-  const ctx = result.getContext('2d')!
-
-  ctx.fillStyle = 'rgb(255, 255, 255)'
-  ctx.fillRect(0, 0, targetWidth, targetHeight)
-
-  const scale = Math.min(targetWidth / canvas.width, targetHeight / canvas.height)
-  const newWidth = Math.floor(canvas.width * scale)
-  const newHeight = Math.floor(canvas.height * scale)
-  const x = Math.floor((targetWidth - newWidth) / 2)
-  const y = Math.floor((targetHeight - newHeight) / 2)
-
-  ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, x, y, newWidth, newHeight)
-  return result
-}
 
 function dataURLtoBlob(dataURL: string): Blob {
   const parts = dataURL.split(',')

@@ -14,6 +14,7 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@squoosh-kit/resize": "^0.2.4",
     "@tanstack/react-router": "^1.158.1",
     "@zip.js/zip.js": "^2.8.21",
     "axios": "^1.13.4",

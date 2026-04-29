@@ -17,7 +17,7 @@ import { imageDataToXtg } from './xtc-format'
 
 import { toGrayscale, applyContrast, applyGamma, applyInvert } from './processing/image'
 import { applyDitheringToData } from './processing/dithering'
-import { sharedCanvasPool } from './processing/canvas'
+import { sharedCanvasPool, resizeFill } from './processing/canvas'
 
 const IMAGE_EXTENSIONS = /\.(jpe?g|png|gif|bmp|webp|tiff?)$/i
 
@@ -90,10 +90,17 @@ async function convertImageToXtg(
     targetH = Math.round(srcH * scale)
   }
 
-  const canvas = sharedCanvasPool.acquire(targetW, targetH)
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })!
-  ctx.drawImage(bitmap, 0, 0, targetW, targetH)
+  let canvas = sharedCanvasPool.acquire(srcW, srcH)
+  let ctx = canvas.getContext('2d', { willReadFrequently: true })!
+  ctx.drawImage(bitmap, 0, 0)
   bitmap.close()
+
+  if (targetW !== srcW || targetH !== srcH) {
+    const resizedCanvas = await resizeFill(canvas, targetW, targetH, true)
+    sharedCanvasPool.release(canvas)
+    canvas = resizedCanvas
+    ctx = canvas.getContext('2d', { willReadFrequently: true })!
+  }
 
   // Apply filters using ctx-based API
   toGrayscale(ctx, targetW, targetH)
@@ -129,10 +136,19 @@ async function convertCoverToGrayscaleJpeg(
   const targetW = 598
   const targetH = 900
 
-  const canvas = sharedCanvasPool.acquire(targetW, targetH)
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })!
-  ctx.drawImage(bitmap, 0, 0, targetW, targetH)
+  const srcW = bitmap.width
+  const srcH = bitmap.height
+  let canvas = sharedCanvasPool.acquire(srcW, srcH)
+  let ctx = canvas.getContext('2d', { willReadFrequently: true })!
+  ctx.drawImage(bitmap, 0, 0)
   bitmap.close()
+
+  if (targetW !== srcW || targetH !== srcH) {
+    const resizedCanvas = await resizeFill(canvas, targetW, targetH, true)
+    sharedCanvasPool.release(canvas)
+    canvas = resizedCanvas
+    ctx = canvas.getContext('2d', { willReadFrequently: true })!
+  }
 
   // Apply grayscale to the canvas
   const imgData = ctx.getImageData(0, 0, targetW, targetH)

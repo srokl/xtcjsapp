@@ -86,7 +86,7 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
     videoFps: 1.0,
     device: 'X4',
     sourceType: fileType,
-    useWasm: true,
+    useWasm: false,
     streamedDownload: false,
     compressXtcz: false,
     packToXtc: false,
@@ -119,7 +119,7 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
           if (preview) setPreviewUrl(preview)
         })
         await addResult(result)
-        recordConversion('cbz').catch(() => {})
+        recordConversion('cbz').catch(() => { })
       } catch (err) {
         console.error(`[Converter] Error packing images:`, err)
         await addResult({
@@ -139,11 +139,11 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
 
     for (let i = 0; i < selectedFiles.length; i++) {
       const file = selectedFiles[i]
-      
+
       // Detect if this is a continuation part
       const baseNameMatch = file.name.match(/^(.*?)[_\s]+part\s*\d+/i) || file.name.match(/^(.*?)\s+Part\s*\d+/i)
       const currentBaseName = baseNameMatch ? baseNameMatch[1] : file.name
-      
+
       if (currentBaseName !== lastBaseName) {
         totalPageAccumulator = 0
         lastBaseName = currentBaseName
@@ -176,7 +176,7 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
         // Store result immediately - progressive display
         await addResult(result)
 
-        recordConversion(fileType === 'image' || fileType === 'video' ? 'cbz' : fileType).catch(() => {})
+        recordConversion(fileType === 'image' || fileType === 'video' ? 'cbz' : fileType).catch(() => { })
       } catch (err) {
         console.error(`[Converter] Error converting ${file.name}:`, err)
         // Store error result

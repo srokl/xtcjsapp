@@ -33,7 +33,7 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
           <div className="section-header">
             <h2>Image Options</h2>
           </div>
-          
+
           <div className="option">
             <label htmlFor="imageMode">Scaling Mode</label>
             <select
@@ -82,7 +82,7 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
                     checked={options.useWasm}
                     onChange={(e) => onChange({ ...options, useWasm: e.target.checked })}
                   />
-                  Use WebAssembly (Faster Encoding)
+                  Use WebAssembly (Alternative)
                 </label>
               </div>
 

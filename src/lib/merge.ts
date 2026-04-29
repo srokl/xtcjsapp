@@ -6,7 +6,7 @@ import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { PDFDocument } from 'pdf-lib'
 import { buildXtc, buildXtcFromBuffers } from './xtc-format'
 import { extractXtcPages, extractXtcRawPages, parseXtcFile } from './xtc-reader'
-import { TARGET_WIDTH, TARGET_HEIGHT } from './processing/canvas'
+import { TARGET_WIDTH, TARGET_HEIGHT, resizeWithPadding } from './processing/canvas'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
@@ -304,10 +304,10 @@ export async function mergePdfFiles(
       pageCount: allCanvases.length,
     }
   } else {
-    const pages = allCanvases.map((canvas, i) => ({
+    const pages = await Promise.all(allCanvases.map(async (canvas, i) => ({
       name: `${String(i).padStart(5, '0')}.png`,
-      canvas: resizeCanvasForXtc(canvas, dimensions.width, dimensions.height),
-    }))
+      canvas: await resizeWithPadding(canvas, 255, dimensions.width, dimensions.height, true),
+    })))
 
     const pageImages = pages.map(p => p.canvas.toDataURL('image/png'))
     const data = await buildXtc(pages)
@@ -563,7 +563,7 @@ async function imageBlobsToCanvases(
 
   for (let i = 0; i < blobs.length; i++) {
     const canvas = await blobToCanvas(blobs[i])
-    const resized = resizeCanvasForXtc(canvas, dimensions.width, dimensions.height)
+    const resized = await resizeWithPadding(canvas, 255, dimensions.width, dimensions.height, true)
     canvases.push(resized)
 
     onProgress(i + 1, blobs.length, resized.toDataURL('image/png'))
@@ -599,36 +599,6 @@ function blobToCanvas(blob: Blob): Promise<HTMLCanvasElement> {
   })
 }
 
-/**
- * Resize canvas for XTC format
- */
-function resizeCanvasForXtc(
-  canvas: HTMLCanvasElement,
-  targetWidth = TARGET_WIDTH,
-  targetHeight = TARGET_HEIGHT
-): HTMLCanvasElement {
-  const result = document.createElement('canvas')
-  result.width = targetWidth
-  result.height = targetHeight
-  const ctx = result.getContext('2d')!
-
-  // Fill with white
-  ctx.fillStyle = 'rgb(255, 255, 255)'
-  ctx.fillRect(0, 0, targetWidth, targetHeight)
-
-  // Calculate scale to fit
-  const scale = Math.min(targetWidth / canvas.width, targetHeight / canvas.height)
-  const newWidth = Math.floor(canvas.width * scale)
-  const newHeight = Math.floor(canvas.height * scale)
-
-  // Center the image
-  const x = Math.floor((targetWidth - newWidth) / 2)
-  const y = Math.floor((targetHeight - newHeight) / 2)
-
-  ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, x, y, newWidth, newHeight)
-
-  return result
-}
 
 /**
  * Convert data URL to Blob

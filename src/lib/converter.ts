@@ -52,12 +52,12 @@ async function getImageDimensions(blob: Blob): Promise<{ width: number; height: 
 /**
  * Resize a canvas with high-quality Box Filter
  */
-function resizeHq(
+export async function resizeHq(
   canvas: HTMLCanvasElement, 
   targetWidth: number, 
   targetHeight: number, 
   options: ConversionOptions
-): HTMLCanvasElement {
+): Promise<HTMLCanvasElement> {
   if (options.useWasm && isWasmLoaded() && !options.is2bit && (canvas.width !== targetWidth || canvas.height !== targetHeight)) {
     try {
       const ctx = canvas.getContext('2d', { willReadFrequently: true })!
@@ -70,7 +70,7 @@ function resizeHq(
       console.warn("Wasm resize failed, fallback to Canvas", e)
     }
   }
-  return resizeFill(canvas, targetWidth, targetHeight)
+  return await resizeFill(canvas, targetWidth, targetHeight, !options.useWasm)
 }
 
 
@@ -661,7 +661,7 @@ async function convertPdfToXtc(
           const viewport = page.getViewport({ scale });
           const canvas = sharedCanvasPool.acquire(viewport.width, viewport.height);
           await page.render({ canvasContext: canvas.getContext('2d')!, viewport, background: 'rgb(255,255,255)', canvas: canvas as any }).promise;
-          const results = processCanvasAsImage(canvas, pageNum, options, pageImages.length < 10);
+          const results = await processCanvasAsImage(canvas, pageNum, options, pageImages.length < 10);
           sharedCanvasPool.release(canvas);
           return { pageNum, results };
         })());
@@ -711,7 +711,7 @@ async function convertPdfToXtc(
             const viewport = page.getViewport({ scale });
             const canvas = sharedCanvasPool.acquire(viewport.width, viewport.height);
           await page.render({ canvasContext: canvas.getContext('2d')!, viewport, background: 'rgb(255,255,255)', canvas: canvas as any }).promise;
-            const results = processCanvasAsImage(canvas, pageNum, options, pageImages.length < 10);
+            const results = await processCanvasAsImage(canvas, pageNum, options, pageImages.length < 10);
             sharedCanvasPool.release(canvas);
             return { pageNum, results };
           })());
@@ -849,17 +849,17 @@ async function convertVideoToXtc(file: File, options: ConversionOptions, onProgr
   const CONCURRENCY = 6;
   for (let i = 0; i < frames.length; i += CONCURRENCY) {
     const batch = frames.slice(i, i + CONCURRENCY);
-    const results = batch.map((frameCanvas, batchIdx) => {
+    const results = await Promise.all(batch.map(async (frameCanvas, batchIdx) => {
       let canvas = frameCanvas; const angle = getOrientationAngle(options.orientation)
       if (angle !== 0 && (angle === 180 || canvas.width >= canvas.height)) canvas = rotateCanvas(canvas, angle)
-      const finalCanvas = resizeWithPadding(canvas, 0, dims.width, dims.height)
+      const finalCanvas = await resizeWithPadding(canvas, 0, dims.width, dims.height, !options.useWasm)
       const res = processAndEncode(finalCanvas, options, pageImages.length < 10)
       
       // Cleanup intermediate frames if they are copies
       if (canvas !== frameCanvas) sharedCanvasPool.release(canvas)
       sharedCanvasPool.release(finalCanvas)
       return res;
-    });
+    }));
 
     for (const res of results) {
       pageBuffers.push(res.buffer); pageInfos.push({ width: dims.width, height: dims.height })
@@ -901,7 +901,7 @@ async function extractFramesFromVideo(file: File, fps: number): Promise<HTMLCanv
   })
 }
 
-function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: number, options: ConversionOptions, generatePreview: boolean = true): { buffer: ArrayBuffer, preview: string }[] {
+async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: number, options: ConversionOptions, generatePreview: boolean = true): Promise<{ buffer: ArrayBuffer, preview: string }[]> {
   const dims = getTargetDimensions(options); const results: { buffer: ArrayBuffer, preview: string }[] = []; const padColor = options.padBlack ? 0 : 255
   const crop = getAxisCropRect(sourceCanvas.width, sourceCanvas.height, options)
   const croppedCanvas = sharedCanvasPool.acquire(crop.width, crop.height)
@@ -909,12 +909,12 @@ function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: number, 
 
   if (options.sidewaysOverviews) {
     const rotated = rotateCanvas(croppedCanvas, 90)
-    const resized = resizeWithPadding(rotated, padColor, dims.width, dims.height)
+    const resized = await resizeWithPadding(rotated, padColor, dims.width, dims.height, !options.useWasm)
     results.push(processAndEncode(resized, options, generatePreview))
     sharedCanvasPool.release(rotated); sharedCanvasPool.release(resized)
   }
   if (options.includeOverviews) {
-    const resized = resizeWithPadding(croppedCanvas, padColor, dims.width, dims.height)
+    const resized = await resizeWithPadding(croppedCanvas, padColor, dims.width, dims.height, !options.useWasm)
     results.push(processAndEncode(resized, options, generatePreview))
     sharedCanvasPool.release(resized)
   }
@@ -930,10 +930,10 @@ function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: number, 
     }
     
     let final: HTMLCanvasElement
-    if (options.imageMode === 'fill') final = resizeHq(proc, dims.width, dims.height, options)
-    else if (options.imageMode === 'cover') final = resizeCover(proc, dims.width, dims.height)
-    else if (options.imageMode === 'crop') final = resizeCrop(proc, dims.width, dims.height)
-    else final = resizeWithPadding(proc, padColor, dims.width, dims.height)
+    if (options.imageMode === 'fill') final = await resizeHq(proc, dims.width, dims.height, options)
+    else if (options.imageMode === 'cover') final = await resizeCover(proc, dims.width, dims.height, !options.useWasm)
+    else if (options.imageMode === 'crop') final = resizeCrop(proc, dims.width, dims.height) // resizeCrop is synchronous
+    else final = await resizeWithPadding(proc, padColor, dims.width, dims.height, !options.useWasm)
     
     results.push(processAndEncode(final, options, generatePreview))
     if (rotated) sharedCanvasPool.release(rotated)
@@ -944,12 +944,12 @@ function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: number, 
 
   if (options.manhwa) {
     const scale = dims.width / crop.width; const newHeight = Math.floor(crop.height * scale)
-    const resized = resizeHq(croppedCanvas, dims.width, newHeight, options)
+    const resized = await resizeHq(croppedCanvas, dims.width, newHeight, options)
     const sliceStep = dims.height - Math.floor(dims.height * (options.manhwaOverlap / 100))
     for (let y = 0; y < newHeight; ) {
       let h = Math.min(dims.height, newHeight - y); if (h < dims.height && newHeight > dims.height) { y = newHeight - dims.height; h = dims.height }
       const region = extractRegion(resized, 0, y, dims.width, h)
-      const padded = resizeWithPadding(region, padColor, dims.width, dims.height)
+      const padded = await resizeWithPadding(region, padColor, dims.width, dims.height, !options.useWasm)
       results.push(processAndEncode(padded, options, generatePreview))
       sharedCanvasPool.release(region); sharedCanvasPool.release(padded)
       if (y + h >= newHeight) break; y += sliceStep
@@ -960,7 +960,7 @@ function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: number, 
   }
 
   if (options.orientation === 'portrait') { 
-    const padded = resizeWithPadding(croppedCanvas, padColor, dims.width, dims.height)
+    const padded = await resizeWithPadding(croppedCanvas, padColor, dims.width, dims.height, !options.useWasm)
     results.push(processAndEncode(padded, options, generatePreview))
     sharedCanvasPool.release(padded)
     sharedCanvasPool.release(croppedCanvas)
@@ -976,18 +976,18 @@ function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: number, 
       const segs = calculateOverlapSegments(crop.width, crop.height, dims.width, dims.height)
       for (const seg of segs) {
         const extracted = extractAndRotate(croppedCanvas, seg.x, seg.y, seg.w, seg.h)
-        const padded = resizeWithPadding(extracted, padColor, dims.width, dims.height)
+        const padded = await resizeWithPadding(extracted, padColor, dims.width, dims.height, !options.useWasm)
         results.push(processAndEncode(padded, options, generatePreview))
         sharedCanvasPool.release(extracted); sharedCanvasPool.release(padded)
       }
     } else {
       const half = Math.floor(crop.height / 2)
       const ex1 = extractAndRotate(croppedCanvas, 0, 0, crop.width, half)
-      const pad1 = resizeWithPadding(ex1, padColor, dims.width, dims.height)
+      const pad1 = await resizeWithPadding(ex1, padColor, dims.width, dims.height, !options.useWasm)
       results.push(processAndEncode(pad1, options, generatePreview))
       
       const ex2 = extractAndRotate(croppedCanvas, 0, half, crop.width, crop.height - half)
-      const pad2 = resizeWithPadding(ex2, padColor, dims.width, dims.height)
+      const pad2 = await resizeWithPadding(ex2, padColor, dims.width, dims.height, !options.useWasm)
       results.push(processAndEncode(pad2, options, generatePreview))
       
       sharedCanvasPool.release(ex1); sharedCanvasPool.release(pad1)
@@ -995,7 +995,7 @@ function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: number, 
     }
   } else {
     const rotated = rotateCanvas(croppedCanvas, 90)
-    const padded = resizeWithPadding(rotated, padColor, dims.width, dims.height)
+    const padded = await resizeWithPadding(rotated, padColor, dims.width, dims.height, !options.useWasm)
     results.push(processAndEncode(padded, options, generatePreview))
     sharedCanvasPool.release(rotated); sharedCanvasPool.release(padded)
   }
@@ -1015,7 +1015,7 @@ async function processImageAsBinary(imgData: Uint8Array, pageNum: number, option
     canvas.getContext('2d', { willReadFrequently: true })!.drawImage(bitmap, 0, 0)
     bitmap.close()
     
-    const results = processCanvasAsImage(canvas, pageNum, options, generatePreview)
+    const results = await processCanvasAsImage(canvas, pageNum, options, generatePreview)
     sharedCanvasPool.release(canvas)
     return { results }
   } catch (e) {
