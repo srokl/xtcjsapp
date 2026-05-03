@@ -1,5 +1,5 @@
 import InitFreetype, { FreetypeModule, FT_FaceRec, FT_GlyphSlotRec } from 'freetype-wasm/dist/freetype.js';
-import opentype from 'opentype.js';
+import * as opentype from 'opentype.js';
 
 /**
  * Subsets a font buffer to only include the specified characters.
