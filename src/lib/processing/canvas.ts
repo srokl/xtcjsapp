@@ -11,31 +11,27 @@ async function restartSquoosh(reason = "critical error") {
   resizerCallCount = 0;
   try {
     await rawSquooshResizer.terminate();
-  } catch (e) {}
+  } catch (e) { }
   rawSquooshResizer = createResizer('worker', { assetPath: '/assets' });
 }
 
 // Squoosh workers (WASM) often share a single memory instance and can't handle 
 // concurrent requests without "offset out of bounds" errors. We queue them.
-// NOTE: Squoosh-kit v0.2.x has a memory leak where input buffers are not freed 
-// in the WASM instance. We periodically restart the worker to clear memory.
 let resizerQueue: Promise<any> = Promise.resolve();
 async function squooshResizer(payload: { data: Uint8Array | Uint8ClampedArray, width: number, height: number }, options: any) {
   const previous = resizerQueue;
   let resolveNext: () => void;
   resizerQueue = new Promise((resolve) => { resolveNext = resolve; });
-  
+
   await previous;
   try {
     resizerCallCount++;
     if (resizerCallCount > MAX_RESIZES_BEFORE_RESTART) {
       await restartSquoosh("periodic maintenance (leak prevention)");
     }
-    
+
     return await rawSquooshResizer(payload, options);
   } catch (err: any) {
-    // If we hit an out of bounds error, the WASM memory state is likely corrupted.
-    // Restarting the worker is the only way to recover.
     if (err?.message?.includes("offset is out of bounds")) {
       await restartSquoosh("memory exhaustion");
     }
@@ -45,33 +41,59 @@ async function squooshResizer(payload: { data: Uint8Array | Uint8ClampedArray, w
   }
 }
 
-/**
- * Downsample an image to a safe intermediate size (2.5x target) using native canvas
- * if it's significantly larger than the target. This reduces WASM memory pressure
- * and prevents "offset is out of bounds" errors for high-res images.
- */
-function getSafeResizerInput(source: HTMLCanvasElement, targetW: number, targetH: number) {
-  // If the source is more than 2.5x the target, downsample to 2.5x first using native high-quality scaling
-  // This drastically reduces memory usage while still providing a high-quality source for Lanczos3
-  const limitW = Math.floor(targetW * 2.5);
-  const limitH = Math.floor(targetH * 2.5);
-  
-  if (source.width > limitW || source.height > limitH) {
-    const temp = document.createElement('canvas');
-    temp.width = limitW;
-    temp.height = limitH;
-    const tctx = temp.getContext('2d', { willReadFrequently: true })!;
-    tctx.imageSmoothingEnabled = true;
-    tctx.imageSmoothingQuality = 'high';
-    tctx.drawImage(source, 0, 0, source.width, source.height, 0, 0, limitW, limitH);
-    
-    const id = tctx.getImageData(0, 0, limitW, limitH);
-    return { data: new Uint8Array(id.data.buffer), width: limitW, height: limitH };
+
+function downscaleStepped(source: HTMLCanvasElement, targetW: number, targetH: number): { canvas: HTMLCanvasElement, isTemp: boolean, steps: number } {
+  let currentWidth = source.width;
+  let currentHeight = source.height;
+  let currentCanvas: HTMLCanvasElement = source;
+  let steps = 0;
+  const tempCanvases: HTMLCanvasElement[] = [];
+
+  while (currentWidth > targetW * 2 || currentHeight > targetH * 2) {
+    const nextWidth = Math.max(targetW, Math.floor(currentWidth / 2));
+    const nextHeight = Math.max(targetH, Math.floor(currentHeight / 2));
+
+    const nextCanvas = sharedCanvasPool.acquire(nextWidth, nextHeight);
+    const nctx = nextCanvas.getContext('2d', { willReadFrequently: true })!;
+    nctx.imageSmoothingEnabled = true;
+    nctx.imageSmoothingQuality = 'high';
+    nctx.drawImage(currentCanvas, 0, 0, currentWidth, currentHeight, 0, 0, nextWidth, nextHeight);
+
+    if (tempCanvases.length > 0) {
+      sharedCanvasPool.release(tempCanvases[tempCanvases.length - 1]);
+    }
+
+    tempCanvases.push(nextCanvas);
+    currentCanvas = nextCanvas;
+    currentWidth = nextWidth;
+    currentHeight = nextHeight;
+    steps++;
   }
-  
-  const sctx = source.getContext('2d', { willReadFrequently: true })!;
-  const id = sctx.getImageData(0, 0, source.width, source.height);
-  return { data: new Uint8Array(id.data.buffer), width: source.width, height: source.height };
+
+  if (steps > 0) {
+    console.log(`[Resizer] Stepped Downscale: ${source.width}x${source.height} -> ${currentWidth}x${currentHeight} (${steps} steps)`);
+  }
+
+  return {
+    canvas: currentCanvas,
+    isTemp: steps > 0,
+    steps
+  };
+}
+
+
+function getSafeResizerInput(source: HTMLCanvasElement, targetW: number, targetH: number) {
+  const { canvas: intermediate, isTemp, steps } = downscaleStepped(source, targetW, targetH);
+
+  const finalCtx = intermediate.getContext('2d', { willReadFrequently: true })!;
+  const id = finalCtx.getImageData(0, 0, intermediate.width, intermediate.height);
+  const result = { data: new Uint8Array(id.data.buffer), width: intermediate.width, height: intermediate.height };
+
+  if (isTemp) {
+    sharedCanvasPool.release(intermediate);
+  }
+
+  return result;
 }
 
 // Target dimensions for XTEink X4 (Default)
@@ -96,7 +118,7 @@ class CanvasPool {
   }
 
   release(canvas: HTMLCanvasElement) {
-    if (this.pool.length < 5) {
+    if (this.pool.length < 10) {
       this.pool.push(canvas);
     }
   }
@@ -165,7 +187,7 @@ export function extractRegion(
  * Resize canvas with padding to fit target dimensions
  */
 export async function resizeWithPadding(
-  canvas: HTMLCanvasElement, 
+  canvas: HTMLCanvasElement,
   padColor = 255,
   targetWidth = TARGET_WIDTH,
   targetHeight = TARGET_HEIGHT,
@@ -176,16 +198,13 @@ export async function resizeWithPadding(
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
 
-  // Fill with padding color (white by default)
   ctx.fillStyle = `rgb(${padColor}, ${padColor}, ${padColor})`;
   ctx.fillRect(0, 0, targetWidth, targetHeight);
 
-  // Calculate scale to fit
   const scale = Math.min(targetWidth / canvas.width, targetHeight / canvas.height);
   const newWidth = Math.max(1, Math.floor(canvas.width * scale));
   const newHeight = Math.max(1, Math.floor(canvas.height * scale));
 
-  // Center the image
   const x = Math.floor((targetWidth - newWidth) / 2);
   const y = Math.floor((targetHeight - newHeight) / 2);
 
@@ -193,18 +212,22 @@ export async function resizeWithPadding(
     try {
       const input = getSafeResizerInput(canvas, newWidth, newHeight);
       const resizedData = await squooshResizer(input, { width: newWidth, height: newHeight, method: 'lanczos3' });
-      
+
       const tempCanvas = document.createElement('canvas');
       tempCanvas.width = newWidth;
       tempCanvas.height = newHeight;
       tempCanvas.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(resizedData.data), newWidth, newHeight), 0, 0);
       ctx.drawImage(tempCanvas, x, y);
     } catch (e) {
-      console.warn(`Lanczos3 resize failed (${canvas.width}x${canvas.height} -> ${newWidth}x${newHeight}), falling back to native drawImage`, e);
-      ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, x, y, newWidth, newHeight);
+      console.warn(`Lanczos3 resize failed, falling back to native stepped downscale`, e);
+      const { canvas: stepped, isTemp } = downscaleStepped(canvas, newWidth, newHeight);
+      ctx.drawImage(stepped, 0, 0, stepped.width, stepped.height, x, y, newWidth, newHeight);
+      if (isTemp) sharedCanvasPool.release(stepped);
     }
   } else {
-    ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, x, y, newWidth, newHeight);
+    const { canvas: stepped, isTemp } = downscaleStepped(canvas, newWidth, newHeight);
+    ctx.drawImage(stepped, 0, 0, stepped.width, stepped.height, x, y, newWidth, newHeight);
+    if (isTemp) sharedCanvasPool.release(stepped);
   }
 
   return result;
@@ -223,25 +246,29 @@ export async function resizeFill(
   const ctx = result.getContext('2d', { willReadFrequently: true })!;
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
-  
+
   if (useLanczos && canvas.width <= 8192 && canvas.height <= 8192) {
     try {
       const input = getSafeResizerInput(canvas, targetWidth, targetHeight);
       const resizedData = await squooshResizer(input, { width: targetWidth, height: targetHeight, method: 'lanczos3' });
-      
+
       const tempCanvas = document.createElement('canvas');
       tempCanvas.width = targetWidth;
       tempCanvas.height = targetHeight;
       tempCanvas.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(resizedData.data), targetWidth, targetHeight), 0, 0);
       ctx.drawImage(tempCanvas, 0, 0);
     } catch (e) {
-      console.warn(`Lanczos3 fill-resize failed (${canvas.width}x${canvas.height} -> ${targetWidth}x${targetHeight}), falling back to native drawImage`, e);
-      ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, targetWidth, targetHeight);
+      console.warn(`Lanczos3 fill failed, falling back to native stepped downscale`, e);
+      const { canvas: stepped, isTemp } = downscaleStepped(canvas, targetWidth, targetHeight);
+      ctx.drawImage(stepped, 0, 0, stepped.width, stepped.height, 0, 0, targetWidth, targetHeight);
+      if (isTemp) sharedCanvasPool.release(stepped);
     }
   } else {
-    ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, targetWidth, targetHeight);
+    const { canvas: stepped, isTemp } = downscaleStepped(canvas, targetWidth, targetHeight);
+    ctx.drawImage(stepped, 0, 0, stepped.width, stepped.height, 0, 0, targetWidth, targetHeight);
+    if (isTemp) sharedCanvasPool.release(stepped);
   }
-  
+
   return result;
 }
 
@@ -270,20 +297,24 @@ export async function resizeCover(
     try {
       const input = getSafeResizerInput(canvas, newWidth, newHeight);
       const resizedData = await squooshResizer(input, { width: newWidth, height: newHeight, method: 'lanczos3' });
-      
+
       const tempCanvas = document.createElement('canvas');
       tempCanvas.width = newWidth;
       tempCanvas.height = newHeight;
       tempCanvas.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(resizedData.data), newWidth, newHeight), 0, 0);
       ctx.drawImage(tempCanvas, x, y);
     } catch (e) {
-      console.warn(`Lanczos3 cover-resize failed (${canvas.width}x${canvas.height} -> ${newWidth}x${newHeight}), falling back to native drawImage`, e);
-      ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, x, y, newWidth, newHeight);
+      console.warn(`Lanczos3 cover failed, falling back to native stepped downscale`, e);
+      const { canvas: stepped, isTemp } = downscaleStepped(canvas, newWidth, newHeight);
+      ctx.drawImage(stepped, 0, 0, stepped.width, stepped.height, x, y, newWidth, newHeight);
+      if (isTemp) sharedCanvasPool.release(stepped);
     }
   } else {
-    ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, x, y, newWidth, newHeight);
+    const { canvas: stepped, isTemp } = downscaleStepped(canvas, newWidth, newHeight);
+    ctx.drawImage(stepped, 0, 0, stepped.width, stepped.height, x, y, newWidth, newHeight);
+    if (isTemp) sharedCanvasPool.release(stepped);
   }
-  
+
   return result;
 }
 

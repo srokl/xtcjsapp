@@ -101,7 +101,7 @@ function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOptions,
       runWasmFilters(imageData, options.contrast, options.gamma, options.invert)
       ctx.putImageData(imageData, 0, 0)
       applyDithering(ctx, width, height, options.dithering, options.is2bit, true)
-      preview = canvas.toDataURL('image/jpeg', 0.6)
+      preview = canvas.toDataURL('image/png')
     }
   } else if (options.dithering === 'none' && !options.manhwa) {
     // Unified High-Performance JS Pipeline (Single memory pass)
@@ -112,7 +112,7 @@ function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOptions,
     if (generatePreview) {
       applyUnifiedFilters(imageData.data, options)
       ctx.putImageData(imageData, 0, 0)
-      preview = canvas.toDataURL('image/jpeg', 0.6)
+      preview = canvas.toDataURL('image/png')
     }
   } else {
     // Standard JS Pipeline (Multi-pass fallback)
@@ -126,7 +126,7 @@ function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOptions,
     
     if (generatePreview) {
       ctx.putImageData(imageData, 0, 0)
-      preview = canvas.toDataURL('image/jpeg', 0.6)
+      preview = canvas.toDataURL('image/png')
     }
     
     buffer = options.is2bit ? imageDataToXth(imageData) : imageDataToXtg(imageData)
