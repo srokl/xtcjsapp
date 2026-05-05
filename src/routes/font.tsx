@@ -340,6 +340,14 @@ function FontPage() {
                     Rotate Punctuation (-, (), ...)
                   </label>
                 )}
+                <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
+                  <input
+                    type="checkbox"
+                    checked={options.format === 'xtf'}
+                    onChange={e => setOptions({ ...options, format: e.target.checked ? 'xtf' : 'bin' })}
+                  />
+                  XTF Format (2-bit AA)
+                </label>
                 {options.vertical && (
                   <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
                     <input
@@ -589,7 +597,7 @@ function FontPage() {
                 className="btn-download"
                 style={{ width: '100%', padding: 'var(--space-md)' }}
               >
-                Generate .bin Font File
+                Generate {options.format === 'xtf' ? '.xtf' : '.bin'} Font File
               </button>
             )}
           </div>
