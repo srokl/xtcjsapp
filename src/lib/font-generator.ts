@@ -347,6 +347,27 @@ export class XTEinkFontBinary {
   }
 }
 
+// CRC32 for XTF integrity checksums (standard polynomial 0xEDB88320)
+const CRC32_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let j = 0; j < 8; j++) {
+      c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    }
+    table[i] = c;
+  }
+  return table;
+})();
+
+function crc32(data: Uint8Array, start: number, end: number): number {
+  let crc = 0xFFFFFFFF;
+  for (let i = start; i < end; i++) {
+    crc = CRC32_TABLE[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
 export class XTEinkFontXTF {
   width: number;
   height: number;
@@ -374,7 +395,7 @@ export class XTEinkFontXTF {
   }
 
   getSuggestedFileName(title: string, pt: number) {
-    return `${title}.${pt}pt.${this.width}x${this.height}.xtf`;
+    return `${pt}pt${this.fontSize}px_${title.replace(/\s+/g, '_')}.xtf`;
   }
 
   setPixel2Bit(charCode: number, x: number, y: number, grayValue: number, advWidth?: number) {
@@ -508,9 +529,9 @@ export class XTEinkFontXTF {
     view.setUint32(0x28, blockSize, true);
     // 0x2C: Data section size (totalGlyphs * blockSize)
     view.setUint32(0x2C, dataSize, true);
-    // 0x30-0x37: Reserved/hash (zero)
-    // 0x38: Unknown (zero for generated fonts)
-    view.setUint32(0x38, 0, true);
+    // 0x30-0x37: CRC32 checksums (computed AFTER data is written)
+    // 0x38: Table end offset (0x40 + numEntries * 16)
+    view.setUint32(0x38, tableEnd, true);
     // 0x3C: First range count
     if (ranges.length > 0) {
       view.setUint32(0x3C, ranges[0].count, true);
@@ -544,6 +565,31 @@ export class XTEinkFontXTF {
       // Pixel data follows the prefix
       u8.set(glyph, offset + 2);
     }
+
+    // === ASCII ADVANCE WIDTH TABLE ===
+    // The device reads a 95-byte advance width lookup table for U+0020-U+007E
+    // stored in the gap between the mapping table end and the data start.
+    // This enables proportional Latin character spacing.
+    const charToGlyphIdx = new Map<number, number>();
+    for (let i = 0; i < sortedChars.length; i++) {
+      charToGlyphIdx.set(sortedChars[i], i);
+    }
+    for (let cp = 0x20; cp <= 0x7E; cp++) {
+      const gi = charToGlyphIdx.get(cp);
+      if (gi !== undefined) {
+        // Read the advance width from the already-written glyph prefix
+        const advW = u8[dataStartOffset + gi * blockSize];
+        u8[tableEnd + (cp - 0x20)] = advW;
+      }
+    }
+
+    // === CRC32 CHECKSUMS ===
+    // 0x30: CRC32 of entire data section (all glyph blocks)
+    const dataCrc = crc32(u8, dataStartOffset, dataStartOffset + dataSize);
+    view.setUint32(0x30, dataCrc, true);
+    // 0x34: CRC32 of header bytes 0x00-0x33 (after 0x30 is set)
+    const headerCrc = crc32(u8, 0x00, 0x34);
+    view.setUint32(0x34, headerCrc, true);
 
     console.log(`[XTF] Generated ${totalGlyphs} glyphs in ${numEntries} ranges. Data at 0x${dataStartOffset.toString(16)}. Block=${blockSize}. Total: ${(totalFileSize / 1024).toFixed(1)} KB`);
     return buffer;
@@ -669,7 +715,11 @@ export async function generateFontBinary(
       ctx.rect(baseX, baseY, sW, sH);
       ctx.clip();
 
-      let tx = Math.round(baseX + sW / 2 + options.xOffset * S);
+      // XTF: left-align (device renders from left edge, advances by per-glyph width)
+      // bin: center in cell (fixed-width grid)
+      let tx = isXtf
+        ? Math.round(baseX + options.xOffset * S)
+        : Math.round(baseX + sW / 2 + options.xOffset * S);
       let ty = Math.round(baseY + sH / 2 + options.yOffset * S);
 
       if (options.autoFit) {
@@ -725,7 +775,11 @@ export async function generateFontBinary(
 
           tempCtx.putImageData(bitmap.imagedata, 0, 0);
 
-          const dx = Math.round(glyph.bitmap_left - adv / 2);
+          // For XTF: left-align glyphs (device advances by per-glyph width from left edge)
+          // For bin: center glyphs in the fixed-width cell
+          const dx = isXtf
+            ? Math.round(glyph.bitmap_left)
+            : Math.round(glyph.bitmap_left - adv / 2);
           const dy = Math.round(-(glyph.bitmap_top - dyOffset));
           ctx.drawImage(tempCanvas, 0, 0, bitmap.width, bitmap.rows, dx, dy, bitmap.width, bitmap.rows);
         } else if (isXtf) {
