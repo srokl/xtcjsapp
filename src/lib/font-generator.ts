@@ -129,6 +129,21 @@ function isEnglishOrNumber(char: string): boolean {
   return /^[\x20-\x7E]+$/.test(char) && !isVerticalSymbol(char);
 }
 
+function checkIsLeftSided(charCode: number, charStr: string, options: FontGenerationOptions): boolean {
+  if (options.format !== 'xtf' || charCode > 0x7E) return false;
+  let isRotatedMinus90 = false;
+  if (options.vertical) {
+    if (options.verticalSymbols && isVerticalSymbol(charStr)) {
+      isRotatedMinus90 = false;
+    } else if (!options.verticalEnglishUpright && isEnglishOrNumber(charStr)) {
+      isRotatedMinus90 = false;
+    } else {
+      isRotatedMinus90 = true;
+    }
+  }
+  return !isRotatedMinus90;
+}
+
 function getCharMetrics(ctx: CanvasRenderingContext2D, char: string, box: { width: number, height: number }, options: FontGenerationOptions, preloadedGlyph?: FT_GlyphSlotRec | null) {
   let left = 0, right = 0, top = 0, bottom = 0;
   const fontSizePx = Math.round(options.fontSize * PX_PER_PT);
@@ -157,16 +172,29 @@ function getCharMetrics(ctx: CanvasRenderingContext2D, char: string, box: { widt
     if (!glyph || glyph.glyph_index === 0) {
       left = 0; right = 0; top = 0; bottom = 0;
     } else {
-      // Use bitmap boundaries relative to the centered pen
-      left = (glyph.bitmap_left - adv / 2);
-      right = left + glyph.bitmap.width;
+      const isLeftSided = checkIsLeftSided(char.charCodeAt(0), char, options);
+      if (isLeftSided) {
+        // Pen is at the left edge of the bounding box
+        left = -(box.width / 2) + glyph.bitmap_left;
+        right = left + glyph.bitmap.width;
+      } else {
+        // Use bitmap boundaries relative to the centered pen
+        left = (glyph.bitmap_left - adv / 2);
+        right = left + glyph.bitmap.width;
+      }
       top = -(glyph.bitmap_top - dyOffset);
       bottom = top + glyph.bitmap.rows;
     }
   } else {
     const metrics = ctx.measureText(char);
-    left = -metrics.actualBoundingBoxLeft;
-    right = metrics.actualBoundingBoxRight;
+    const isLeftSided = checkIsLeftSided(char.charCodeAt(0), char, options);
+    if (isLeftSided) {
+      left = -(box.width / 2);
+      right = left + metrics.actualBoundingBoxRight + metrics.actualBoundingBoxLeft;
+    } else {
+      left = -metrics.actualBoundingBoxLeft;
+      right = metrics.actualBoundingBoxRight;
+    }
     top = -metrics.actualBoundingBoxAscent;
     bottom = metrics.actualBoundingBoxDescent;
   }
@@ -715,9 +743,11 @@ export async function generateFontBinary(
       ctx.rect(baseX, baseY, sW, sH);
       ctx.clip();
 
-      // XTF: left-align (device renders from left edge, advances by per-glyph width)
-      // bin: center in cell (fixed-width grid)
-      let tx = isXtf
+      const isLeftSided = checkIsLeftSided(charCode, charStr, options);
+
+      // XTF ASCII: left-align (device advances by per-glyph width from left edge)
+      // bin and XTF non-ASCII: center in cell
+      let tx = isLeftSided
         ? Math.round(baseX + options.xOffset * S)
         : Math.round(baseX + sW / 2 + options.xOffset * S);
       let ty = Math.round(baseY + sH / 2 + options.yOffset * S);
@@ -775,9 +805,9 @@ export async function generateFontBinary(
 
           tempCtx.putImageData(bitmap.imagedata, 0, 0);
 
-          // For XTF: left-align glyphs (device advances by per-glyph width from left edge)
-          // For bin: center glyphs in the fixed-width cell
-          const dx = isXtf
+          // For XTF ASCII: left-align glyphs (device advances by per-glyph width from left edge)
+          // For bin and XTF non-ASCII: center glyphs in the fixed-width cell
+          const dx = isLeftSided
             ? Math.round(glyph.bitmap_left)
             : Math.round(glyph.bitmap_left - adv / 2);
           const dy = Math.round(-(glyph.bitmap_top - dyOffset));
@@ -793,8 +823,10 @@ export async function generateFontBinary(
         // Canvas fallback for glyphs not in FreeType (works for both XTF and bin)
         ctx.lineWidth = 0.5;
         ctx.strokeStyle = 'white';
+        if (isLeftSided) ctx.textAlign = 'left';
         ctx.fillText(charStr, 0, 0);
         ctx.strokeText(charStr, 0, 0);
+        if (isLeftSided) ctx.textAlign = 'center';
       }
 
       ctx.restore();
@@ -819,11 +851,13 @@ export async function generateFontBinary(
           const rowIdx = (baseY + y) * stride + baseX * 4;
 
           if (isXtf) {
+            const charStr = String.fromCharCode(charCode);
+            const isLeftSided = checkIsLeftSided(charCode, charStr, options);
             for (let x = 0; x < box.width; x++) {
               const alpha = batchData[rowIdx + x * 4 + 3];
               if (alpha > 10) {
                 const v2bit = Math.min(3, Math.round(alpha / 85));
-                const aw = glyphAdvWidths.get(charCode) || box.width;
+                const aw = isLeftSided ? (glyphAdvWidths.get(charCode) || box.width) : box.width;
                 (binary as XTEinkFontXTF).setPixel2Bit(charCode, x, y, v2bit, aw);
               }
             }
@@ -889,7 +923,9 @@ export async function generateFontBinary(
                 const avgAlpha = alphaSum / S2;
                 if (avgAlpha > 10) {
                   const v2bit = Math.min(3, Math.round(avgAlpha / 85));
-                  const aw = glyphAdvWidths.get(charCode) || box.width;
+                  const charStr = String.fromCharCode(charCode);
+                  const isLeftSided = checkIsLeftSided(charCode, charStr, options);
+                  const aw = isLeftSided ? (glyphAdvWidths.get(charCode) || box.width) : box.width;
                   (binary as XTEinkFontXTF).setPixel2Bit(charCode, x, y, v2bit, aw);
                 }
               } else if (alphaSum >= scaledThreshold) {
@@ -1042,13 +1078,17 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
 
       ctx.save();
 
-      let scale = 1;
       let tx, ty;
+      const isLeftSided = checkIsLeftSided(charStr.charCodeAt(0), charStr, options);
       if (options.vertical) {
         tx = Math.round(currentX + charBoxH / 2 - options.yOffset);
-        ty = Math.round(currentY + charBoxW / 2 + options.xOffset);
+        ty = isLeftSided
+          ? Math.round(currentY + options.xOffset)
+          : Math.round(currentY + charBoxW / 2 + options.xOffset);
       } else {
-        tx = Math.round(currentX + charBoxW / 2 + options.xOffset);
+        tx = isLeftSided
+          ? Math.round(currentX + options.xOffset)
+          : Math.round(currentX + charBoxW / 2 + options.xOffset);
         ty = Math.round(currentY + charBoxH / 2 + options.yOffset);
       }
 
@@ -1119,7 +1159,9 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
             }
             previewTempCtx.putImageData(bitmap.imagedata, 0, 0);
 
-            const dx = Math.round(glyph.bitmap_left - adv / 2);
+            const dx = isLeftSided
+              ? Math.round(glyph.bitmap_left)
+              : Math.round(glyph.bitmap_left - adv / 2);
             const dy = Math.round(-(glyph.bitmap_top - dyOffset));
             ctx.drawImage(previewTempCanvas, 0, 0, bitmap.width, bitmap.rows, dx, dy, bitmap.width, bitmap.rows);
           }
@@ -1127,15 +1169,19 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
           // Fallback
           ctx.lineWidth = 0.5;
           ctx.strokeStyle = 'black';
+          if (isLeftSided) ctx.textAlign = 'left';
           ctx.fillText(charStr, 0, 0);
           ctx.strokeText(charStr, 0, 0);
+          if (isLeftSided) ctx.textAlign = 'center';
         }
       } else {
         // Fallback
         ctx.lineWidth = 0.5;
         ctx.strokeStyle = 'black';
+        if (isLeftSided) ctx.textAlign = 'left';
         ctx.fillText(charStr, 0, 0);
         ctx.strokeText(charStr, 0, 0);
+        if (isLeftSided) ctx.textAlign = 'center';
       }
 
       ctx.restore();
@@ -1147,10 +1193,20 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
       }
 
       // Advance cursor
+      let aw = charBoxW;
+      if (isLeftSided) {
+        if (preloadedGlyph && preloadedGlyph.glyph_index !== 0) {
+          aw = (preloadedGlyph.advance.x >> 6);
+        } else {
+          const metrics = ctx.measureText(charStr);
+          aw = Math.round(metrics.width);
+        }
+      }
+
       if (options.vertical) {
-        currentY += charBoxW;
+        currentY += aw;
       } else {
-        currentX += charBoxW;
+        currentX += aw;
       }
     }
   }
