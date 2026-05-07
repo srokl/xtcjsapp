@@ -1,43 +1,83 @@
 // Canvas utility functions for rotation and resizing
 import { createResizer } from '@squoosh-kit/resize';
 
-let rawSquooshResizer = createResizer('worker', { assetPath: '/assets' });
-
-let resizerCallCount = 0;
-const MAX_RESIZES_BEFORE_RESTART = 25; // Lower limit for safer memory management
-
-async function restartSquoosh(reason = "critical error") {
-  console.warn(`[Canvas] Restarting Squoosh worker due to ${reason}...`);
-  resizerCallCount = 0;
-  try {
-    await rawSquooshResizer.terminate();
-  } catch (e) { }
-  rawSquooshResizer = createResizer('worker', { assetPath: '/assets' });
+interface SquooshWorkerNode {
+  worker: ReturnType<typeof createResizer>;
+  callCount: number;
+  id: number;
 }
 
-// Squoosh workers (WASM) often share a single memory instance and can't handle 
-// concurrent requests without "offset out of bounds" errors. We queue them.
-let resizerQueue: Promise<any> = Promise.resolve();
-async function squooshResizer(payload: { data: Uint8Array | Uint8ClampedArray, width: number, height: number }, options: any) {
-  const previous = resizerQueue;
-  let resolveNext: () => void;
-  resizerQueue = new Promise((resolve) => { resolveNext = resolve; });
+const MAX_RESIZES_BEFORE_RESTART = 15; // Lower limit for safer parallel memory management
 
-  await previous;
+class SquooshWorkerPool {
+  private idle: SquooshWorkerNode[] = [];
+  private waiters: ((node: SquooshWorkerNode) => void)[] = [];
+  private nextId = 0;
+
+  constructor(size: number) {
+    for (let i = 0; i < size; i++) {
+      this.idle.push(this.createNode());
+    }
+  }
+
+  private createNode(): SquooshWorkerNode {
+    return {
+      worker: createResizer('worker', { assetPath: '/assets' }),
+      callCount: 0,
+      id: this.nextId++
+    };
+  }
+
+  async acquire(): Promise<SquooshWorkerNode> {
+    if (this.idle.length > 0) {
+      return this.idle.pop()!;
+    }
+    return new Promise(resolve => this.waiters.push(resolve));
+  }
+
+  release(node: SquooshWorkerNode) {
+    if (this.waiters.length > 0) {
+      const resolve = this.waiters.shift()!;
+      resolve(node);
+    } else {
+      this.idle.push(node);
+    }
+  }
+
+  async restartNode(node: SquooshWorkerNode, reason: string): Promise<SquooshWorkerNode> {
+    console.warn(`[Canvas] Restarting Squoosh worker #${node.id} due to ${reason}...`);
+    try {
+      // @ts-ignore - The Squoosh resizer function has a terminate method attached
+      if (node.worker.terminate) await node.worker.terminate();
+    } catch (e) { }
+    return this.createNode();
+  }
+}
+
+// Initialize pool based on hardware concurrency (max 6, min 1)
+const POOL_SIZE = typeof navigator !== 'undefined' && navigator.hardwareConcurrency 
+  ? Math.min(Math.max(1, navigator.hardwareConcurrency), 6) 
+  : 4;
+
+const workerPool = new SquooshWorkerPool(POOL_SIZE);
+
+async function squooshResizer(payload: { data: Uint8Array | Uint8ClampedArray, width: number, height: number }, options: any) {
+  let node = await workerPool.acquire();
+
   try {
-    resizerCallCount++;
-    if (resizerCallCount > MAX_RESIZES_BEFORE_RESTART) {
-      await restartSquoosh("periodic maintenance (leak prevention)");
+    node.callCount++;
+    if (node.callCount > MAX_RESIZES_BEFORE_RESTART) {
+      node = await workerPool.restartNode(node, "periodic maintenance (leak prevention)");
     }
 
-    return await rawSquooshResizer(payload, options);
+    return await node.worker(payload, options);
   } catch (err: any) {
     if (err?.message?.includes("offset is out of bounds")) {
-      await restartSquoosh("memory exhaustion");
+      node = await workerPool.restartNode(node, "memory exhaustion");
     }
     throw err;
   } finally {
-    resolveNext!();
+    workerPool.release(node);
   }
 }
 
