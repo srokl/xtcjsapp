@@ -355,7 +355,7 @@ export function MergePage() {
           <input
             id="merge-file-input"
             type="file"
-            accept=".cbz,.CBZ,.pdf,.PDF,.xtc,.XTC,.xtch,.XTCH,.xtcz,.XTCZ"
+            accept=".cbz,.CBZ,.pdf,.PDF,.xtc,.XTC,.xtch,.XTCH,.xtcz,.XTCZ,application/pdf,application/zip,application/x-cbz,application/octet-stream"
             multiple={mode === 'merge'}
             hidden
             onChange={handleFileInput}
