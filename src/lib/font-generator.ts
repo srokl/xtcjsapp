@@ -91,36 +91,8 @@ const VERTICAL_SYMBOLS = new Set([
   '(', ')', '[', ']', '{', '}', '<', '>',
   '（', '）', '【', '】', '《', '》', '〈', '〉', '「', '」', '『', '』', '［', '］', '｛', '｝', '〔', '〕', '〖', '〗', '〘', '〙', '〚', '〛',
   '-', '—', '–', '…', '⋯', '‥', '_', '~', '～', '〜', 'ー', '｜',
-  '：', '；', '=', '＝', '‰',
-  // Keys from TATE_REPLACE that might not be covered above
-  '︙', '︰', '─', '‐', '〰', '∼', '∽', '∿', '、', '。', '＋', '±', '×', '÷', '≠', '≒', '≡', '∞'
+  '：', '；', '=', '＝', '‰'
 ]);
-
-const TATE_REPLACE: Record<string, string> = {
-  // --- 括弧・句読点 ---
-  "…": "︙", "‥": "︰", "⋯": "︙", "︙": "︙", "︰": "︰", "─": "丨", "―": "丨", "—": "丨", "‐": "丨", "-": "丨",
-  "～": "≀", "〜": "≀", "〰": "≀", "~": "≀", "∼": "≀", "∽": "≀", "∿": "≀",
-  "「": "﹁", "」": "﹂", "『": "﹃", "』": "﹄",
-  "（": "︵", "）": "︶", "(": "︵", ")": "︶",
-  "【": "︻", "】": "︼", "〔": "︹", "〕": "︺",
-  "［": "﹇", "］": "﹈", "[": "﹇", "]": "﹈",
-  "｛": "︷", "｝": "︸", "{": "︷", "}": "︸",
-  "〈": "︿", "〉": "﹀", "＜": "︿", "＞": "﹀", "<": "︿", ">": "﹀",
-  "《": "︽", "》": "︾", "≪": "︽", "≫": "︾",
-  "、": "︑", "。": "︒",
-  // --- 数学記号 ---
-  "＝": "‖", "=": "‖",
-  "＋": "＋",
-  "±": "∓",
-  "×": "×",
-  "÷": "÷",
-  "≠": "⧘",
-  "≒": "≓",
-  "≡": "⦀",
-  "∞": "∞",
-  "：": "‥",
-  "；": "；",
-};
 
 // Characters that need to be shifted to the top-right in vertical layout
 // We only include Japanese/CJK full-width punctuation here. Standard English punctuation stays on the baseline.
@@ -154,11 +126,11 @@ function isVerticalSymbol(char: string): boolean {
 
 function isEnglishOrNumber(char: string): boolean {
   // ASCII characters (letters, numbers, and basic punctuation not in vertical symbols)
-  return /^[\x20-\xFF]+$/.test(char) && !isVerticalSymbol(char);
+  return /^[\x20-\x7E]+$/.test(char) && !isVerticalSymbol(char);
 }
 
 function checkIsLeftSided(charCode: number, charStr: string, options: FontGenerationOptions): boolean {
-  if (options.format !== 'xtf' || charCode > 0xFF) return false;
+  if (options.format !== 'xtf' || charCode > 0x7E) return false;
   let isRotatedMinus90 = false;
   if (options.vertical) {
     if (options.verticalSymbols && isVerticalSymbol(charStr)) {
@@ -630,7 +602,7 @@ export class XTEinkFontXTF {
     for (let i = 0; i < sortedChars.length; i++) {
       charToGlyphIdx.set(sortedChars[i], i);
     }
-    for (let cp = 0x20; cp <= 0xFF; cp++) {
+    for (let cp = 0x20; cp <= 0x7E; cp++) {
       const gi = charToGlyphIdx.get(cp);
       if (gi !== undefined) {
         // Read the advance width from the already-written glyph prefix
@@ -744,14 +716,7 @@ export async function generateFontBinary(
     }
 
     const chunkCodes: number[] = [];
-    for (let c = i; c < end; c++) {
-      const charStr = String.fromCharCode(c);
-      if (options.vertical && options.verticalSymbols && TATE_REPLACE[charStr]) {
-        chunkCodes.push(TATE_REPLACE[charStr].charCodeAt(0));
-      } else {
-        chunkCodes.push(c);
-      }
-    }
+    for (let c = i; c < end; c++) chunkCodes.push(c);
     const chunkGlyphs = (options.renderer === 'freetype' && activeFace && ftModule) ? ftModule.LoadGlyphs(chunkCodes, baseLoadFlags) : null;
 
     ctx.clearRect(0, 0, batchCanvas.width, batchCanvas.height);
@@ -759,20 +724,12 @@ export async function generateFontBinary(
     for (let j = 0; j < count; j++) {
       const charCode = i + j;
       const charStr = String.fromCharCode(charCode);
-      
-      let fetchCode = charCode;
-      let fetchStr = charStr;
-      if (options.vertical && options.verticalSymbols && TATE_REPLACE[charStr]) {
-        fetchStr = TATE_REPLACE[charStr];
-        fetchCode = fetchStr.charCodeAt(0);
-      }
-      
-      const glyph = chunkGlyphs ? chunkGlyphs.get(fetchCode) : null;
+      const glyph = chunkGlyphs ? chunkGlyphs.get(charCode) : null;
 
       // Restored Canvas fallback support!
 
       // Fix 2: Passes loaded glyph to isCharCutoff
-      const exceedsBounds = isCharCutoff(ctx, fetchStr, box, options, glyph);
+      const exceedsBounds = isCharCutoff(ctx, charStr, box, options, glyph);
       if (exceedsBounds) {
         cutoffChars.push(charStr);
       }
@@ -799,7 +756,7 @@ export async function generateFontBinary(
       let ty = Math.round(baseY + sH / 2 + options.yOffset * S);
 
       if (options.autoFit) {
-        const m = getCharMetrics(ctx, fetchStr, box, options, glyph);
+        const m = getCharMetrics(ctx, charStr, box, options, glyph);
         const halfW = box.width / 2;
         const halfH = box.height / 2;
         const charW = m.right - m.left;
@@ -831,8 +788,6 @@ export async function generateFontBinary(
       if (options.vertical) {
         if (options.verticalSymbols && isVerticalSymbol(charStr)) {
           ctx.rotate(0);
-          const offset = getVerticalCharOffset(charStr, fontSizePx);
-          if (offset.x !== 0 || offset.y !== 0) ctx.translate(offset.x, offset.y);
         } else if (!options.verticalEnglishUpright && isEnglishOrNumber(charStr)) {
           ctx.rotate(0);
         } else {
@@ -872,8 +827,8 @@ export async function generateFontBinary(
         ctx.lineWidth = 0.5;
         ctx.strokeStyle = 'white';
         ctx.textAlign = isLeftSided ? 'left' : 'center';
-        ctx.fillText(fetchStr, 0, 0);
-        ctx.strokeText(fetchStr, 0, 0);
+        ctx.fillText(charStr, 0, 0);
+        ctx.strokeText(charStr, 0, 0);
         if (isLeftSided) ctx.textAlign = 'center';
       }
 
