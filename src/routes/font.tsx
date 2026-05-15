@@ -225,7 +225,7 @@ function FontPage() {
               </label>
               <label style={{ flex: 1 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '2px' }}>
-                  <strong style={{ fontSize: '0.85rem' }}>Font Brightness/Weight</strong>
+                  <strong style={{ fontSize: '0.85rem' }}>Boldness</strong>
                   <input
                     type="number"
                     min="100" max="900" step="100"

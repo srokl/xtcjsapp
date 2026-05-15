@@ -214,6 +214,47 @@ export function calculateOverlapSegments(
 }
 
 /**
+ * Calculate overlapping segments for wide landscape pages (horizontal split).
+ * Each segment spans the full height and a portion of the width,
+ * producing portrait-oriented sub-images from a landscape source.
+ */
+export function calculateHorizontalOverlapSegments(
+  width: number,
+  height: number,
+  targetWidth: number,
+  targetHeight: number
+): Array<{ x: number; y: number; w: number; h: number }> {
+  // Scale so each segment's height fills the target
+  const scale = targetHeight / height;
+  const segmentWidth = Math.floor(targetWidth / scale);
+
+  let numSegments = 2; // Landscape pages typically split into 2
+  let shift = 0;
+
+  if (numSegments > 1) {
+    shift = Math.floor(segmentWidth - (segmentWidth * numSegments - width) / (numSegments - 1));
+  }
+
+  // Increase segments if overlap is too small
+  while (shift / segmentWidth > 0.95 && numSegments < 10) {
+    numSegments++;
+    shift = Math.floor(segmentWidth - (segmentWidth * numSegments - width) / (numSegments - 1));
+  }
+
+  const segments = [];
+  for (let i = 0; i < numSegments; i++) {
+    segments.push({
+      x: shift * i,
+      y: 0,
+      w: i === numSegments - 1 ? width - shift * i : segmentWidth,
+      h: height
+    });
+  }
+
+  return segments;
+}
+
+/**
  * Check if an image region is effectively a solid color (low standard deviation).
  */
 export function isSolidColor(

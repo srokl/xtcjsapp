@@ -21,6 +21,7 @@ export interface ConversionOptions {
   streamedDownload: boolean
   compressXtcz: boolean
   packToXtc: boolean
+  landscapeSplit: 'none' | 'rtl' | 'ltr'
 }
 
 export interface ConversionResult {

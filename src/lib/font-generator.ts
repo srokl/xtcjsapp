@@ -91,8 +91,36 @@ const VERTICAL_SYMBOLS = new Set([
   '(', ')', '[', ']', '{', '}', '<', '>',
   '（', '）', '【', '】', '《', '》', '〈', '〉', '「', '」', '『', '』', '［', '］', '｛', '｝', '〔', '〕', '〖', '〗', '〘', '〙', '〚', '〛',
   '-', '—', '–', '…', '⋯', '‥', '_', '~', '～', '〜', 'ー', '｜',
-  '：', '；', '=', '＝', '‰'
+  '：', '；', '=', '＝', '‰',
+  // Keys from TATE_REPLACE that might not be covered above
+  '︙', '︰', '─', '‐', '〰', '∼', '∽', '∿', '、', '。', '＋', '±', '×', '÷', '≠', '≒', '≡', '∞'
 ]);
+
+const TATE_REPLACE: Record<string, string> = {
+  // --- 括弧・句読点 ---
+  "…": "︙", "‥": "︰", "⋯": "︙", "︙": "︙", "︰": "︰", "─": "丨", "―": "丨", "—": "丨", "‐": "丨", "-": "丨",
+  "～": "≀", "〜": "≀", "〰": "≀", "~": "≀", "∼": "≀", "∽": "≀", "∿": "≀",
+  "「": "﹁", "」": "﹂", "『": "﹃", "』": "﹄",
+  "（": "︵", "）": "︶", "(": "︵", ")": "︶",
+  "【": "︻", "】": "︼", "〔": "︹", "〕": "︺",
+  "［": "﹇", "］": "﹈", "[": "﹇", "]": "﹈",
+  "｛": "︷", "｝": "︸", "{": "︷", "}": "︸",
+  "〈": "︿", "〉": "﹀", "＜": "︿", "＞": "﹀", "<": "︿", ">": "﹀",
+  "《": "︽", "》": "︾", "≪": "︽", "≫": "︾",
+  "、": "︑", "。": "︒",
+  // --- 数学記号 ---
+  "＝": "‖", "=": "‖",
+  "＋": "＋",
+  "±": "∓",
+  "×": "×",
+  "÷": "÷",
+  "≠": "⧘",
+  "≒": "≓",
+  "≡": "⦀",
+  "∞": "∞",
+  "：": "‥",
+  "；": "；",
+};
 
 // Characters that need to be shifted to the top-right in vertical layout
 // We only include Japanese/CJK full-width punctuation here. Standard English punctuation stays on the baseline.
@@ -126,11 +154,11 @@ function isVerticalSymbol(char: string): boolean {
 
 function isEnglishOrNumber(char: string): boolean {
   // ASCII characters (letters, numbers, and basic punctuation not in vertical symbols)
-  return /^[\x20-\x7E]+$/.test(char) && !isVerticalSymbol(char);
+  return /^[\x20-\xFF]+$/.test(char) && !isVerticalSymbol(char);
 }
 
 function checkIsLeftSided(charCode: number, charStr: string, options: FontGenerationOptions): boolean {
-  if (options.format !== 'xtf' || charCode > 0x7E) return false;
+  if (options.format !== 'xtf' || charCode > 0xFF) return false;
   let isRotatedMinus90 = false;
   if (options.vertical) {
     if (options.verticalSymbols && isVerticalSymbol(charStr)) {
@@ -602,7 +630,7 @@ export class XTEinkFontXTF {
     for (let i = 0; i < sortedChars.length; i++) {
       charToGlyphIdx.set(sortedChars[i], i);
     }
-    for (let cp = 0x20; cp <= 0x7E; cp++) {
+    for (let cp = 0x20; cp <= 0xFF; cp++) {
       const gi = charToGlyphIdx.get(cp);
       if (gi !== undefined) {
         // Read the advance width from the already-written glyph prefix
@@ -642,8 +670,11 @@ export async function generateFontBinary(
   const fontSizePx = Math.round(options.fontSize * PX_PER_PT * S);
   const fontString = `${options.fontStyle} ${options.fontWeight} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
 
-  const alphaThreshold = Math.round(255 - (options.threshold / 1000 * 255));
-  // Pre-compute scaled threshold for S>1: compare alphaSum >= scaledThreshold instead of alphaSum/(S*S) >= threshold
+  // Boldness: 400 = neutral, <400 = thinner (erode), >400 = bolder (dilate)
+  // For .bin: morphological dilation/erosion on alpha, then threshold at 128
+  // For .xtf: same morphological operation, then map to 2-bit greyscale levels
+  const boldness = (options.threshold - 400) / 500; // -0.6 to +1.0 range
+  const alphaThreshold = 128; // Fixed threshold for 1-bit after boldness
   const S2 = S * S;
   const scaledThreshold = alphaThreshold * S2;
 
@@ -713,7 +744,14 @@ export async function generateFontBinary(
     }
 
     const chunkCodes: number[] = [];
-    for (let c = i; c < end; c++) chunkCodes.push(c);
+    for (let c = i; c < end; c++) {
+      const charStr = String.fromCharCode(c);
+      if (options.vertical && options.verticalSymbols && TATE_REPLACE[charStr]) {
+        chunkCodes.push(TATE_REPLACE[charStr].charCodeAt(0));
+      } else {
+        chunkCodes.push(c);
+      }
+    }
     const chunkGlyphs = (options.renderer === 'freetype' && activeFace && ftModule) ? ftModule.LoadGlyphs(chunkCodes, baseLoadFlags) : null;
 
     ctx.clearRect(0, 0, batchCanvas.width, batchCanvas.height);
@@ -721,12 +759,20 @@ export async function generateFontBinary(
     for (let j = 0; j < count; j++) {
       const charCode = i + j;
       const charStr = String.fromCharCode(charCode);
-      const glyph = chunkGlyphs ? chunkGlyphs.get(charCode) : null;
+      
+      let fetchCode = charCode;
+      let fetchStr = charStr;
+      if (options.vertical && options.verticalSymbols && TATE_REPLACE[charStr]) {
+        fetchStr = TATE_REPLACE[charStr];
+        fetchCode = fetchStr.charCodeAt(0);
+      }
+      
+      const glyph = chunkGlyphs ? chunkGlyphs.get(fetchCode) : null;
 
       // Restored Canvas fallback support!
 
       // Fix 2: Passes loaded glyph to isCharCutoff
-      const exceedsBounds = isCharCutoff(ctx, charStr, box, options, glyph);
+      const exceedsBounds = isCharCutoff(ctx, fetchStr, box, options, glyph);
       if (exceedsBounds) {
         cutoffChars.push(charStr);
       }
@@ -753,7 +799,7 @@ export async function generateFontBinary(
       let ty = Math.round(baseY + sH / 2 + options.yOffset * S);
 
       if (options.autoFit) {
-        const m = getCharMetrics(ctx, charStr, box, options, glyph);
+        const m = getCharMetrics(ctx, fetchStr, box, options, glyph);
         const halfW = box.width / 2;
         const halfH = box.height / 2;
         const charW = m.right - m.left;
@@ -785,6 +831,8 @@ export async function generateFontBinary(
       if (options.vertical) {
         if (options.verticalSymbols && isVerticalSymbol(charStr)) {
           ctx.rotate(0);
+          const offset = getVerticalCharOffset(charStr, fontSizePx);
+          if (offset.x !== 0 || offset.y !== 0) ctx.translate(offset.x, offset.y);
         } else if (!options.verticalEnglishUpright && isEnglishOrNumber(charStr)) {
           ctx.rotate(0);
         } else {
@@ -823,20 +871,64 @@ export async function generateFontBinary(
         // Canvas fallback for glyphs not in FreeType (works for both XTF and bin)
         ctx.lineWidth = 0.5;
         ctx.strokeStyle = 'white';
-        if (isLeftSided) ctx.textAlign = 'left';
-        ctx.fillText(charStr, 0, 0);
-        ctx.strokeText(charStr, 0, 0);
+        ctx.textAlign = isLeftSided ? 'left' : 'center';
+        ctx.fillText(fetchStr, 0, 0);
+        ctx.strokeText(fetchStr, 0, 0);
         if (isLeftSided) ctx.textAlign = 'center';
       }
 
       ctx.restore();
     }
 
-    // Batch getImageData
-    const batchData = ctx.getImageData(0, 0, batchCols * sW, batchRows * sH).data;
-    const stride = batchCols * sW * 4;
+    // Extract alpha channel and apply boldness morphological operation
+    const batchImageData = ctx.getImageData(0, 0, batchCols * sW, batchRows * sH).data;
     const fullBytes = Math.floor(box.width / 8);
     const remainderBits = box.width & 7;
+    const batchWidth = batchCols * sW;
+    const batchHeight = batchRows * sH;
+    const alphaBuffer = new Float32Array(batchWidth * batchHeight);
+    for (let p = 0; p < alphaBuffer.length; p++) {
+      alphaBuffer[p] = batchImageData[p * 4 + 3];
+    }
+
+    if (boldness !== 0) {
+      // Morphological dilation (boldness > 0) or erosion (boldness < 0)
+      // Uses a 3x3 kernel with fractional strength for smooth control
+      const radius = 1;
+      const strength = Math.abs(boldness);
+      const isDilate = boldness > 0;
+      const temp = new Float32Array(alphaBuffer.length);
+
+      for (let py = 0; py < batchHeight; py++) {
+        for (let px = 0; px < batchWidth; px++) {
+          const idx = py * batchWidth + px;
+          let extremeVal = isDilate ? 0 : 255;
+
+          for (let dy = -radius; dy <= radius; dy++) {
+            const ny = py + dy;
+            if (ny < 0 || ny >= batchHeight) continue;
+            for (let dx = -radius; dx <= radius; dx++) {
+              const nx = px + dx;
+              if (nx < 0 || nx >= batchWidth) continue;
+              const nVal = alphaBuffer[ny * batchWidth + nx];
+              if (isDilate) {
+                if (nVal > extremeVal) extremeVal = nVal;
+              } else {
+                if (nVal < extremeVal) extremeVal = nVal;
+              }
+            }
+          }
+
+          // Blend between original and dilated/eroded based on strength
+          temp[idx] = alphaBuffer[idx] + (extremeVal - alphaBuffer[idx]) * strength;
+        }
+      }
+
+      // Copy back
+      for (let p = 0; p < alphaBuffer.length; p++) {
+        alphaBuffer[p] = temp[p];
+      }
+    }
 
     // Optimized extraction: byte-at-a-time packing with hoisted S branch
     if (S === 1) {
@@ -848,13 +940,13 @@ export async function generateFontBinary(
         const baseX = col * sW;
         const baseY = row * sH;
         for (let y = 0; y < box.height; y++) {
-          const rowIdx = (baseY + y) * stride + baseX * 4;
+          const rowIdx = (baseY + y) * batchWidth + baseX;
 
           if (isXtf) {
             const charStr = String.fromCharCode(charCode);
             const isLeftSided = checkIsLeftSided(charCode, charStr, options);
             for (let x = 0; x < box.width; x++) {
-              const alpha = batchData[rowIdx + x * 4 + 3];
+              const alpha = alphaBuffer[rowIdx + x];
               if (alpha > 10) {
                 const v2bit = Math.min(3, Math.round(alpha / 85));
                 const aw = isLeftSided ? (glyphAdvWidths.get(charCode) || box.width) : box.width;
@@ -865,24 +957,24 @@ export async function generateFontBinary(
             const outRowOffset = (binary as XTEinkFontBinary).charByte * charCode + y * (binary as XTEinkFontBinary).widthByte;
             // Full 8-pixel bytes (no bounds check)
             for (let x8 = 0; x8 < fullBytes; x8++) {
-              const base = rowIdx + (x8 << 5); // x8 * 8 * 4
+              const base = rowIdx + x8 * 8;
               (binary as XTEinkFontBinary).fontbin[outRowOffset + x8] =
-                ((batchData[base + 3] >= alphaThreshold ? 0x80 : 0)) |
-                ((batchData[base + 7] >= alphaThreshold ? 0x40 : 0)) |
-                ((batchData[base + 11] >= alphaThreshold ? 0x20 : 0)) |
-                ((batchData[base + 15] >= alphaThreshold ? 0x10 : 0)) |
-                ((batchData[base + 19] >= alphaThreshold ? 0x08 : 0)) |
-                ((batchData[base + 23] >= alphaThreshold ? 0x04 : 0)) |
-                ((batchData[base + 27] >= alphaThreshold ? 0x02 : 0)) |
-                ((batchData[base + 31] >= alphaThreshold ? 0x01 : 0));
+                ((alphaBuffer[base]     >= alphaThreshold ? 0x80 : 0)) |
+                ((alphaBuffer[base + 1] >= alphaThreshold ? 0x40 : 0)) |
+                ((alphaBuffer[base + 2] >= alphaThreshold ? 0x20 : 0)) |
+                ((alphaBuffer[base + 3] >= alphaThreshold ? 0x10 : 0)) |
+                ((alphaBuffer[base + 4] >= alphaThreshold ? 0x08 : 0)) |
+                ((alphaBuffer[base + 5] >= alphaThreshold ? 0x04 : 0)) |
+                ((alphaBuffer[base + 6] >= alphaThreshold ? 0x02 : 0)) |
+                ((alphaBuffer[base + 7] >= alphaThreshold ? 0x01 : 0));
             }
 
             // Remaining bits
             if (remainderBits > 0) {
               let byteVal = 0;
-              const base = rowIdx + (fullBytes << 5);
+              const base = rowIdx + fullBytes * 8;
               for (let bit = 0; bit < remainderBits; bit++) {
-                if (batchData[base + (bit << 2) + 3] >= alphaThreshold) {
+                if (alphaBuffer[base + bit] >= alphaThreshold) {
                   byteVal |= (0x80 >>> bit);
                 }
               }
@@ -892,7 +984,7 @@ export async function generateFontBinary(
         }
       }
     } else {
-      // === Supersampled path (S > 1) with integer threshold ===
+      // === Supersampled path (S > 1) with boldness ===
       for (let j = 0; j < count; j++) {
         const charCode = i + j;
         const col = j % batchCols;
@@ -913,12 +1005,12 @@ export async function generateFontBinary(
               const syBase = baseY + y * S;
               const sxBase = baseX + x * S;
               for (let sy = 0; sy < S; sy++) {
-                const rowStart = (syBase + sy) * stride + sxBase * 4;
+                const rowStart = (syBase + sy) * batchWidth + sxBase;
                 for (let sx = 0; sx < S; sx++) {
-                  alphaSum += batchData[rowStart + (sx << 2) + 3];
+                  alphaSum += alphaBuffer[rowStart + sx];
                 }
               }
-              // Integer comparison: alphaSum >= alphaThreshold * S * S
+
               if (isXtf) {
                 const avgAlpha = alphaSum / S2;
                 if (avgAlpha > 10) {
@@ -1211,28 +1303,70 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
     }
   }
 
-  // Apply thresholding effect for accurate 1-bit preview with supersampling
+  // Apply boldness morphological operation on the preview alpha channel
   const osImageData = ctx.getImageData(0, 0, osCanvas.width, osCanvas.height);
   const data = osImageData.data;
 
-  const prevAlphaThreshold = Math.round(255 - (options.threshold / 1000 * 255));
+  const prevBoldness = (options.threshold - 400) / 500;
   const prevS2 = S * S;
-  const prevScaledThreshold = prevAlphaThreshold * prevS2;
+  const prevAlphaThreshold = 128; // Fixed after boldness
+
+  // Extract alpha into float buffer for morphological processing
+  const osW = osCanvas.width;
+  const osH = osCanvas.height;
+  const prevAlpha = new Float32Array(osW * osH);
+  for (let p = 0; p < prevAlpha.length; p++) {
+    prevAlpha[p] = data[p * 4 + 3];
+  }
+
+  if (prevBoldness !== 0) {
+    const radius = 1;
+    const strength = Math.abs(prevBoldness);
+    const isDilate = prevBoldness > 0;
+    const temp = new Float32Array(prevAlpha.length);
+
+    for (let py = 0; py < osH; py++) {
+      for (let px = 0; px < osW; px++) {
+        const idx = py * osW + px;
+        let extremeVal = isDilate ? 0 : 255;
+
+        for (let dy = -radius; dy <= radius; dy++) {
+          const ny = py + dy;
+          if (ny < 0 || ny >= osH) continue;
+          for (let dx = -radius; dx <= radius; dx++) {
+            const nx = px + dx;
+            if (nx < 0 || nx >= osW) continue;
+            const nVal = prevAlpha[ny * osW + nx];
+            if (isDilate) {
+              if (nVal > extremeVal) extremeVal = nVal;
+            } else {
+              if (nVal < extremeVal) extremeVal = nVal;
+            }
+          }
+        }
+
+        temp[idx] = prevAlpha[idx] + (extremeVal - prevAlpha[idx]) * strength;
+      }
+    }
+
+    for (let p = 0; p < prevAlpha.length; p++) {
+      prevAlpha[p] = temp[p];
+    }
+  }
 
   const finalImageData = finalCtx.createImageData(SCREEN_W, SCREEN_H);
   const outData = finalImageData.data;
-  const osWidth = osCanvas.width;
 
   for (let y = 0; y < SCREEN_H; y++) {
     for (let x = 0; x < SCREEN_W; x++) {
       let alphaSum = 0;
       if (S === 1) {
-        alphaSum = data[((y * SCREEN_W + x) * 4) + 3];
+        alphaSum = prevAlpha[y * SCREEN_W + x];
       } else {
         for (let sy = 0; sy < S; sy++) {
-          const rowStart = ((y * S + sy) * osWidth) * 4 + (x * S) * 4;
+          const rowStart = (y * S + sy) * osW + x * S;
           for (let sx = 0; sx < S; sx++) {
-            alphaSum += data[rowStart + (sx << 2) + 3];
+            alphaSum += prevAlpha[rowStart + sx];
           }
         }
       }
@@ -1254,7 +1388,8 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
           outData[outIdx + 3] = 255;
         }
       } else {
-        if (alphaSum >= prevScaledThreshold) {
+        const scaledThresholdPrev = prevAlphaThreshold * prevS2;
+        if (alphaSum >= scaledThresholdPrev) {
           outData[outIdx] = 0;
           outData[outIdx + 1] = 0;
           outData[outIdx + 2] = 0;

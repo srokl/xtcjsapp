@@ -6,7 +6,7 @@ import { createExtractorFromData } from 'node-unrar-js'
 import unrarWasm from 'node-unrar-js/esm/js/unrar.wasm?url'
 import * as pdfjsLib from 'pdfjs-dist'
 import { applyDithering, applyDitheringToData } from './processing/dithering'
-import { toGrayscale, applyContrast, calculateOverlapSegments, isSolidColor, applyGamma, applyInvert, applyUnifiedFilters } from './processing/image'
+import { toGrayscale, applyContrast, calculateOverlapSegments, calculateHorizontalOverlapSegments, isSolidColor, applyGamma, applyInvert, applyUnifiedFilters } from './processing/image'
 import { rotateCanvas, extractAndRotate, extractRegion, resizeWithPadding, resizeFill, resizeCover, resizeCrop, TARGET_WIDTH, TARGET_HEIGHT, DEVICE_DIMENSIONS, sharedCanvasPool } from './processing/canvas'
 import { buildXtc, buildXtcFromBuffers, imageDataToXth, imageDataToXtg, wrapWasmData, buildXtcHeaderAndIndex, getXtcPageSize, type StreamPageInfo } from './xtc-format'
 import { compressXtczLz4 } from './processing/lz4-compress'
@@ -115,7 +115,7 @@ function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOptions,
       preview = canvas.toDataURL('image/png')
     }
   } else {
-    // Standard JS Pipeline (Multi-pass fallback)
+    // Standard JS Pipeline
     applyUnifiedFilters(imageData.data, {
       contrast: options.contrast,
       gamma: options.gamma,
@@ -193,8 +193,22 @@ function calculateOutputPageCount(width: number, height: number, options: Conver
   if (options.includeOverviews) count++
   if (options.orientation === 'portrait') count++
   else {
-    const shouldSplit = width < height && options.splitMode !== 'nosplit'
-    count += shouldSplit ? (options.splitMode === 'overlap' ? 3 : 2) : 1
+    const isWide = width >= height
+    if (isWide && options.landscapeSplit && options.landscapeSplit !== 'none') {
+      // Landscape split: method follows splitMode
+      if (options.splitMode === 'nosplit') {
+        count += 1 // No split, just rotate and letterbox
+      } else if (options.splitMode === 'overlap') {
+        const dims = DEVICE_DIMENSIONS[options.device] || DEVICE_DIMENSIONS.X4
+        const segs = calculateHorizontalOverlapSegments(width, height, dims.width, dims.height)
+        count += segs.length
+      } else {
+        count += 2 // Split in half
+      }
+    } else {
+      const shouldSplit = width < height && options.splitMode !== 'nosplit'
+      count += shouldSplit ? (options.splitMode === 'overlap' ? 3 : 2) : 1
+    }
   }
   return count
 }
@@ -263,7 +277,7 @@ export async function convertCbzToXtc(
       const pageInfos: StreamPageInfo[] = []
       
       // Optimization: If no splitting or overviews, we know each file is 1 page.
-      const isSimple1to1 = options.splitMode === 'nosplit' && !options.sidewaysOverviews && !options.includeOverviews;
+      const isSimple1to1 = options.splitMode === 'nosplit' && !options.sidewaysOverviews && !options.includeOverviews && (!options.landscapeSplit || options.landscapeSplit === 'none');
 
       if (isSimple1to1) {
         for (let i = 0; i < imageFiles.length; i++) {
@@ -307,21 +321,27 @@ export async function convertCbzToXtc(
         throw new Error('Failed to initiate streamed download.')
       }
 
-      // Pass 2: Data Processing (Safe Pre-fetch)
-      let nextData = imageFiles[0].entry.getData(new Uint8ArrayWriter());
+      // Pass 2: Pipelined Processing — extract and process in parallel batches, write in order
+      const STREAM_CONCURRENCY = 4;
+      for (let i = 0; i < imageFiles.length; i += STREAM_CONCURRENCY) {
+        const batch = imageFiles.slice(i, i + STREAM_CONCURRENCY);
+        const tasks = batch.map(async (file, batchIdx) => {
+          const globalIdx = i + batchIdx;
+          const data = await file.entry.getData(new Uint8ArrayWriter());
+          const result = await processImageAsBinary(data, globalIdx + 1, options, pageImages.length < 3);
+          return { globalIdx, result };
+        });
 
-      for (let i = 0; i < imageFiles.length; i++) {
-        const imgData = await nextData;
-        if (i + 1 < imageFiles.length) {
-          nextData = imageFiles[i + 1].entry.getData(new Uint8ArrayWriter());
-        }
+        const batchResults = await Promise.all(tasks);
+        batchResults.sort((a, b) => a.globalIdx - b.globalIdx);
 
-        const result = await processImageAsBinary(imgData, i + 1, options, pageImages.length < 10)
-        for (const res of result.results) {
-          await writer!.write(new Uint8Array(res.buffer))
-          if (pageImages.length < 10) pageImages.push(res.preview)
+        for (const item of batchResults) {
+          for (const res of item.result.results) {
+            await writer!.write(new Uint8Array(res.buffer))
+            if (pageImages.length < 3) pageImages.push(res.preview)
+          }
         }
-        if (i % 5 === 0) onProgress(0.05 + (i + 1) / imageFiles.length * 0.95, null)
+        onProgress(0.05 + Math.min(1, (i + STREAM_CONCURRENCY) / imageFiles.length) * 0.95, null)
       }
       
       await writer.close()
@@ -345,9 +365,9 @@ export async function convertCbzToXtc(
           const slices = await stitcher.append(bitmap)
           bitmap.close()
           for (const slice of slices) {
-            const res = processAndEncode(slice.canvas, options, pageImages.length < 10)
+            const res = processAndEncode(slice.canvas, options, pageImages.length < 3)
             pageBuffers.push(res.buffer); pageInfos.push({ width: dims.width, height: dims.height })
-            if (pageImages.length < 10) pageImages.push(res.preview)
+            if (pageImages.length < 3) pageImages.push(res.preview)
           }
           mappingCtx.addOriginalPage(i + 1, slices.length)
           if (i % 5 === 0) onProgress((i + 1) / imageFiles.length, null)
@@ -360,7 +380,7 @@ export async function convertCbzToXtc(
           const tasks = batch.map(async (file, batchIdx) => {
             const globalIdx = i + batchIdx;
             const data = await file.entry.getData(new Uint8ArrayWriter());
-            const result = await processImageAsBinary(data, globalIdx + 1, options, pageImages.length < 10);
+            const result = await processImageAsBinary(data, globalIdx + 1, options, pageImages.length < 3);
             return { globalIdx, result };
           });
 
@@ -370,7 +390,7 @@ export async function convertCbzToXtc(
           for (const item of batchResults) {
             for (const res of item.result.results) {
               pageBuffers.push(res.buffer); pageInfos.push({ width: dims.width, height: dims.height })
-              if (pageImages.length < 10) pageImages.push(res.preview)
+              if (pageImages.length < 3) pageImages.push(res.preview)
             }
             mappingCtx.addOriginalPage(item.globalIdx + 1, item.result.results.length)
           }
@@ -380,9 +400,9 @@ export async function convertCbzToXtc(
       
       if (stitcher) {
         for (const p of stitcher.finish()) {
-          const res = await processAndEncode(p.canvas, options, pageImages.length < 10)
+          const res = await processAndEncode(p.canvas, options, pageImages.length < 3)
           pageBuffers.push(res.buffer); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
-          if (pageImages.length < 10) pageImages.push(res.preview)
+          if (pageImages.length < 3) pageImages.push(res.preview)
         }
       }
       
@@ -463,7 +483,7 @@ export async function convertCbrToXtc(
     const pageInfos: StreamPageInfo[] = []
 
     // Optimization: If no splitting or overviews, we know each file is 1 page.
-    const isSimple1to1 = options.splitMode === 'nosplit' && !options.sidewaysOverviews && !options.includeOverviews;
+    const isSimple1to1 = options.splitMode === 'nosplit' && !options.sidewaysOverviews && !options.includeOverviews && (!options.landscapeSplit || options.landscapeSplit === 'none');
 
     if (isSimple1to1) {
       for (let i = 0; i < imageFiles.length; i++) {
@@ -503,7 +523,7 @@ export async function convertCbrToXtc(
       const batch = imageFiles.slice(i, i + CONCURRENCY);
       const tasks = batch.map(async (file, batchIdx) => {
         const globalIdx = i + batchIdx;
-        const result = await processImageAsBinary(file.data, globalIdx + 1, options, pageImages.length < 10);
+        const result = await processImageAsBinary(file.data, globalIdx + 1, options, pageImages.length < 3);
         return { globalIdx, result };
       });
 
@@ -513,7 +533,7 @@ export async function convertCbrToXtc(
       for (const item of batchResults) {
         for (const res of item.result.results) {
           await writer.write(new Uint8Array(res.buffer))
-          if (pageImages.length < 10) pageImages.push(res.preview)
+          if (pageImages.length < 3) pageImages.push(res.preview)
         }
       }
       onProgress(0.05 + Math.min(1, (i + CONCURRENCY) / imageFiles.length) * 0.95, null)
@@ -532,9 +552,9 @@ export async function convertCbrToXtc(
           const slices = await stitcher.append(bitmap)
           bitmap.close()
           for (const slice of slices) {
-            const res = processAndEncode(slice.canvas, options, pageImages.length < 10)
+            const res = processAndEncode(slice.canvas, options, pageImages.length < 3)
             pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
-            if (pageImages.length < 10) pageImages.push(res.preview)
+            if (pageImages.length < 3) pageImages.push(res.preview)
           }
           mappingCtx.addOriginalPage(i + 1, slices.length)
           if (i % 5 === 0) onProgress((i + 1) / imageFiles.length, null)
@@ -545,7 +565,7 @@ export async function convertCbrToXtc(
           const batch = imageFiles.slice(i, i + CONCURRENCY);
           const tasks = batch.map(async (file, batchIdx) => {
             const globalIdx = i + batchIdx;
-            const result = await processImageAsBinary(file.data, globalIdx + 1, options, pageImages.length < 10);
+            const result = await processImageAsBinary(file.data, globalIdx + 1, options, pageImages.length < 3);
             return { globalIdx, result };
           });
 
@@ -555,7 +575,7 @@ export async function convertCbrToXtc(
           for (const item of batchResults) {
             for (const res of item.result.results) {
               pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
-              if (pageImages.length < 10) pageImages.push(res.preview)
+              if (pageImages.length < 3) pageImages.push(res.preview)
             }
             mappingCtx.addOriginalPage(item.globalIdx + 1, item.result.results.length)
           }
@@ -563,9 +583,9 @@ export async function convertCbrToXtc(
         }
       }    if (stitcher) {
       for (const p of stitcher.finish()) {
-        const res = await processAndEncode(p.canvas, options, pageImages.length < 10)
+        const res = await processAndEncode(p.canvas, options, pageImages.length < 3)
         pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
-        if (pageImages.length < 10) pageImages.push(res.preview)
+        if (pageImages.length < 3) pageImages.push(res.preview)
       }
     }
     if (metadata.toc.length > 0) {
@@ -619,7 +639,7 @@ async function convertPdfToXtc(
     const pageInfos: StreamPageInfo[] = []
 
     // Optimization: If no splitting or overviews, we know each file is 1 page.
-    const isSimple1to1 = options.splitMode === 'nosplit' && !options.sidewaysOverviews && !options.includeOverviews;
+    const isSimple1to1 = options.splitMode === 'nosplit' && !options.sidewaysOverviews && !options.includeOverviews && (!options.landscapeSplit || options.landscapeSplit === 'none');
 
     if (isSimple1to1) {
       for (let i = 1; i <= numPages; i++) {
@@ -661,7 +681,7 @@ async function convertPdfToXtc(
           const viewport = page.getViewport({ scale });
           const canvas = sharedCanvasPool.acquire(viewport.width, viewport.height);
           await page.render({ canvasContext: canvas.getContext('2d')!, viewport, background: 'rgb(255,255,255)', canvas: canvas as any }).promise;
-          const results = await processCanvasAsImage(canvas, pageNum, options, pageImages.length < 10);
+          const results = await processCanvasAsImage(canvas, pageNum, options, pageImages.length < 3);
           sharedCanvasPool.release(canvas);
           return { pageNum, results };
         })());
@@ -673,7 +693,7 @@ async function convertPdfToXtc(
       for (const item of batchResults) {
         for (const res of item.results) {
           await writer.write(new Uint8Array(res.buffer))
-          if (pageImages.length < 10) pageImages.push(res.preview)
+          if (pageImages.length < 3) pageImages.push(res.preview)
         }
       }
       onProgress(0.05 + Math.min(1, (i + CONCURRENCY - 1) / numPages) * 0.95, null)
@@ -692,9 +712,9 @@ async function convertPdfToXtc(
         const slices = await stitcher.append(canvas)
         sharedCanvasPool.release(canvas)
         for (const slice of slices) {
-          const res = processAndEncode(slice.canvas, options, pageImages.length < 10)
+          const res = processAndEncode(slice.canvas, options, pageImages.length < 3)
           pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
-          if (pageImages.length < 10) pageImages.push(res.preview)
+          if (pageImages.length < 3) pageImages.push(res.preview)
         }
         mappingCtx.addOriginalPage(i, slices.length)
         onProgress(i / numPages, null)
@@ -711,7 +731,7 @@ async function convertPdfToXtc(
             const viewport = page.getViewport({ scale });
             const canvas = sharedCanvasPool.acquire(viewport.width, viewport.height);
           await page.render({ canvasContext: canvas.getContext('2d')!, viewport, background: 'rgb(255,255,255)', canvas: canvas as any }).promise;
-            const results = await processCanvasAsImage(canvas, pageNum, options, pageImages.length < 10);
+            const results = await processCanvasAsImage(canvas, pageNum, options, pageImages.length < 3);
             sharedCanvasPool.release(canvas);
             return { pageNum, results };
           })());
@@ -723,7 +743,7 @@ async function convertPdfToXtc(
         for (const item of batchResults) {
           for (const res of item.results) {
             pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
-            if (pageImages.length < 10) pageImages.push(res.preview)
+            if (pageImages.length < 3) pageImages.push(res.preview)
           }
           mappingCtx.addOriginalPage(item.pageNum, item.results.length)
         }
@@ -732,9 +752,9 @@ async function convertPdfToXtc(
     }
     if (stitcher) {
       for (const p of stitcher.finish()) {
-        const res = await processAndEncode(p.canvas, options, pageImages.length < 10)
+        const res = await processAndEncode(p.canvas, options, pageImages.length < 3)
         pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
-        if (pageImages.length < 10) pageImages.push(res.preview)
+        if (pageImages.length < 3) pageImages.push(res.preview)
       }
     }
     if (metadata.toc.length > 0) {
@@ -796,11 +816,11 @@ export async function convertImagesToXtcPack(
 
     fileTocEntries.push({ name: file.name.replace(/\.[^/.]+$/, ''), startPage: currentPage })
 
-    const result = await processImageAsBinary(new Uint8Array(await file.arrayBuffer()), i + 1, options, pageImages.length < 10)
+    const result = await processImageAsBinary(new Uint8Array(await file.arrayBuffer()), i + 1, options, pageImages.length < 3)
     for (const res of result.results) {
       pageBuffers.push(res.buffer)
       pageInfos.push({ width: dims.width, height: dims.height })
-      if (pageImages.length < 10) pageImages.push(res.preview)
+      if (pageImages.length < 3) pageImages.push(res.preview)
       currentPage++
     }
   }
@@ -853,7 +873,7 @@ async function convertVideoToXtc(file: File, options: ConversionOptions, onProgr
       let canvas = frameCanvas; const angle = getOrientationAngle(options.orientation)
       if (angle !== 0 && (angle === 180 || canvas.width >= canvas.height)) canvas = rotateCanvas(canvas, angle)
       const finalCanvas = await resizeWithPadding(canvas, 0, dims.width, dims.height, !options.useWasm)
-      const res = processAndEncode(finalCanvas, options, pageImages.length < 10)
+      const res = processAndEncode(finalCanvas, options, pageImages.length < 3)
       
       // Cleanup intermediate frames if they are copies
       if (canvas !== frameCanvas) sharedCanvasPool.release(canvas)
@@ -863,7 +883,7 @@ async function convertVideoToXtc(file: File, options: ConversionOptions, onProgr
 
     for (const res of results) {
       pageBuffers.push(res.buffer); pageInfos.push({ width: dims.width, height: dims.height })
-      if (pageImages.length < 10) pageImages.push(res.preview)
+      if (pageImages.length < 3) pageImages.push(res.preview)
     }
     onProgress(Math.min(1, (i + CONCURRENCY) / frames.length), null)
   }
@@ -967,11 +987,41 @@ async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: nu
     return results 
   }
   
-  const isLandscape = options.orientation === 'landscape'
-  const isWide = crop.width > crop.height
-  const isTall = crop.width < crop.height
+  const isWide = crop.width >= crop.height
 
-  if (crop.width < crop.height && options.splitMode !== 'nosplit') {
+  // Landscape splitting: split wide images based on splitMode, ordered by landscapeSplit direction
+  if (isWide && options.landscapeSplit && options.landscapeSplit !== 'none' && options.splitMode !== 'nosplit') {
+    const isRtl = options.landscapeSplit === 'rtl'
+
+    if (options.splitMode === 'overlap') {
+      // Overlapping horizontal segments
+      const segs = calculateHorizontalOverlapSegments(crop.width, crop.height, dims.width, dims.height)
+      const orderedSegs = isRtl ? [...segs].reverse() : segs
+      for (const seg of orderedSegs) {
+        const extracted = extractRegion(croppedCanvas, seg.x, seg.y, seg.w, seg.h)
+        const padded = await resizeWithPadding(extracted, padColor, dims.width, dims.height, !options.useWasm)
+        results.push(processAndEncode(padded, options, generatePreview))
+        sharedCanvasPool.release(extracted); sharedCanvasPool.release(padded)
+      }
+    } else {
+      // Split in half
+      const halfWidth = Math.floor(crop.width / 2)
+      const leftHalf = extractRegion(croppedCanvas, 0, 0, halfWidth, crop.height)
+      const rightHalf = extractRegion(croppedCanvas, halfWidth, 0, crop.width - halfWidth, crop.height)
+
+      const firstHalf = isRtl ? rightHalf : leftHalf
+      const secondHalf = isRtl ? leftHalf : rightHalf
+
+      const pad1 = await resizeWithPadding(firstHalf, padColor, dims.width, dims.height, !options.useWasm)
+      results.push(processAndEncode(pad1, options, generatePreview))
+
+      const pad2 = await resizeWithPadding(secondHalf, padColor, dims.width, dims.height, !options.useWasm)
+      results.push(processAndEncode(pad2, options, generatePreview))
+
+      sharedCanvasPool.release(leftHalf); sharedCanvasPool.release(rightHalf)
+      sharedCanvasPool.release(pad1); sharedCanvasPool.release(pad2)
+    }
+  } else if (crop.width < crop.height && options.splitMode !== 'nosplit') {
     if (options.splitMode === 'overlap') {
       const segs = calculateOverlapSegments(crop.width, crop.height, dims.width, dims.height)
       for (const seg of segs) {

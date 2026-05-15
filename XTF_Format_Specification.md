@@ -59,8 +59,8 @@ Each entry is 16 bytes. It allows the hardware to find a glyph index for a given
 ## 4. ASCII Fast-Path Table
 
 Located in the "gap" immediately following the Mapping Table (at the offset specified in `0x38`).
-- **Size**: 95 bytes.
-- **Content**: Advance widths for ASCII range `U+0020` (Space) through `U+007E` (~).
+- **Size**: 224 bytes.
+- **Content**: Advance widths for extended ASCII range `U+0020` (Space) through `U+00FF` (ÿ).
 - **Purpose**: The device reads this table for instant Latin character spacing without parsing individual glyph headers.
 
 ---
@@ -85,7 +85,11 @@ Pixels are packed 4 per byte. `0x00` is transparent/white, `0x03` is solid black
 
 ## 6. Implementation Notes
 
-- **Alignment**: The `Data Offset` (0x24) should be aligned to a significant boundary (e.g., 16KB / `0x4000`) to facilitate hardware DMA transfers.
+- **Alignment & Advance Strategies**:
+  - **Proportional Glyphs (ASCII / Sideways Vertical)**: These must be **left-aligned** within their fixed-size block. The `Advance Width` is set to the exact proportional horizontal spacing (e.g., 5px for 'i'). The hardware draws from the left edge of the cell and advances the pen horizontally by `Advance Width`.
+  - **Fixed-Width Glyphs (CJK / Upright Vertical)**: These must be **centered** horizontally and vertically within the block. The `Advance Width` MUST equal the `Cell Width` (maximum cell size) to ensure proper fixed grid spacing.
+- **Vertical Reading Mode**: The XTF hardware does not have a native "vertical flow" rendering instruction. It always renders text horizontally left-to-right. Vertical mode is achieved by the user physically rotating the e-reader 90 degrees clockwise. 
+  - Therefore, proportional ASCII characters generated for a vertical font will have their left-aligned edge become the "top" edge on the screen, and their horizontal advance width perfectly translates into vertical spacing down the column.
+- **Data Offset Alignment**: The `Data Offset` (0x24) should be padded to a significant boundary (e.g., 16KB / `0x4000`) to facilitate fast hardware DMA transfers.
 - **Checksums**: Standard CRC32 polynomial `0xEDB88320`. The header CRC (0x34) must be calculated *after* the data CRC (0x30) is written into the buffer.
-- **Rendering**: Hardware expects glyphs to be **left-aligned** within their bitmap. The `Advance Width` dictates where the next character's pen origin begins.
-- **Padding**: Ensure `Width` is a multiple of 4. Stride is calculated as `Width / 4`. Any remainder will cause row-drift (smearing).
+- **Stride Padding**: Ensure `Width` is a multiple of 4. Stride is calculated as `Width / 4`. Any remainder will cause pixel row-drift (smearing).

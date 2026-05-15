@@ -248,7 +248,13 @@ export async function resizeWithPadding(
   const x = Math.floor((targetWidth - newWidth) / 2);
   const y = Math.floor((targetHeight - newHeight) / 2);
 
-  if (useLanczos && canvas.width <= 8192 && canvas.height <= 8192) {
+  // Fast path: skip Lanczos3 worker overhead when downscale ratio is moderate (≤3x).
+  // At target sizes like 480×800, manga pages (~1500px) produce near-identical results
+  // with native drawImage + stepped half-size pre-downscale, saving ~30ms/page of worker overhead.
+  const downscaleRatio = Math.max(canvas.width / newWidth, canvas.height / newHeight);
+  const useFastNative = downscaleRatio <= 3;
+
+  if (useLanczos && !useFastNative && canvas.width <= 8192 && canvas.height <= 8192) {
     try {
       const input = getSafeResizerInput(canvas, newWidth, newHeight);
       const resizedData = await squooshResizer(input, { width: newWidth, height: newHeight, method: 'lanczos3' });

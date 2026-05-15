@@ -213,7 +213,7 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
 
           {!isImageMode && !isVideoMode && options.orientation === 'landscape' && !options.manhwa && (
             <div className="option">
-              <label htmlFor="splitMode">Page Split</label>
+              <label htmlFor="splitMode">Portrait Page Split</label>
               <select
                 id="splitMode"
                 value={options.splitMode}
@@ -222,6 +222,21 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
                 <option value="overlap">Overlapping thirds</option>
                 <option value="split">Split in half</option>
                 <option value="nosplit">No split</option>
+              </select>
+            </div>
+          )}
+
+          {!isImageMode && !isVideoMode && options.orientation === 'landscape' && !options.manhwa && (
+            <div className="option">
+              <label htmlFor="landscapeSplit">Landscape Page Split</label>
+              <select
+                id="landscapeSplit"
+                value={options.landscapeSplit}
+                onChange={(e) => onChange({ ...options, landscapeSplit: e.target.value as any })}
+              >
+                <option value="rtl">Right to Left (Manga)</option>
+                <option value="ltr">Left to Right (Western)</option>
+                <option value="none">No split</option>
               </select>
             </div>
           )}

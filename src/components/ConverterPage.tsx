@@ -90,6 +90,7 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
     streamedDownload: false,
     compressXtcz: false,
     packToXtc: false,
+    landscapeSplit: (fileType === 'cbz') ? 'rtl' : 'none',
   })
 
   const handleFiles = useCallback((files: File[]) => {
