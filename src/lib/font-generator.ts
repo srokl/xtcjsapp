@@ -5,9 +5,9 @@ import * as opentype from 'opentype.js';
  * Subsets a font buffer to only include the specified characters.
  * This is used to reduce the memory footprint for large CJK fonts before passing them to FreeType.
  */
-export function subsetFontBuffer(buffer: ArrayBuffer, characters: string, nameSuffix: string = ''): ArrayBuffer {
+export function subsetFontBuffer(buffer: ArrayBuffer, characters: string, nameSuffix: string = '', parsedFont?: opentype.Font): ArrayBuffer {
   try {
-    const font = opentype.parse(buffer);
+    const font = parsedFont || opentype.parse(buffer);
     const glyphs: opentype.Glyph[] = [];
 
     // Always include the .notdef glyph (index 0)
@@ -692,6 +692,16 @@ export async function generateFontBinary(
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'center';
 
+  // Pre-parse the font once to avoid parsing it 64 times in the chunk loop
+  let preScannedFont: opentype.Font | null = null;
+  if (options.renderer === 'freetype' && options.customFontBuffer) {
+    try {
+      preScannedFont = opentype.parse(options.customFontBuffer);
+    } catch (e) {
+      console.warn("Failed to pre-parse font for optimization:", e);
+    }
+  }
+
   for (let i = 0; i < binary.totalChar; i += CHUNK_SIZE) {
     const end = Math.min(i + CHUNK_SIZE, binary.totalChar);
     const count = end - i;
@@ -702,16 +712,29 @@ export async function generateFontBinary(
     let tempSubsetFace: FT_FaceRec | null = null;
 
     if (options.renderer === 'freetype' && options.customFontBuffer && ftModule) {
-      const chunkChars = Array.from({ length: end - i }, (_, k) => String.fromCharCode(i + k)).join('');
+      let chunkChars = "";
+      if (preScannedFont) {
+        for (let c = i; c < end; c++) {
+          const char = String.fromCharCode(c);
+          const glyph = preScannedFont.charToGlyph(char);
+          if (glyph && glyph.index !== 0) {
+            chunkChars += char;
+          }
+        }
+      } else {
+        chunkChars = Array.from({ length: end - i }, (_, k) => String.fromCharCode(i + k)).join('');
+      }
 
-      // Use a unique suffix for each chunk to avoid name collisions and accidental unloads of the main font
-      tempSubsetBuffer = subsetFontBuffer(options.customFontBuffer, chunkChars, `chunk_${i}`);
-      const faces = ftModule.LoadFontFromBytes(new Uint8Array(tempSubsetBuffer));
-      if (faces.length > 0) {
-        tempSubsetFace = faces[0];
-        activeFace = tempSubsetFace;
-        ftModule.SetFont(activeFace.family_name, activeFace.style_name);
-        ftMetrics = ftModule.SetPixelSize(0, fontSizePx);
+      if (chunkChars.length > 0) {
+        // Use a unique suffix for each chunk to avoid name collisions and accidental unloads of the main font
+        tempSubsetBuffer = subsetFontBuffer(options.customFontBuffer, chunkChars, `chunk_${i}`, preScannedFont || undefined);
+        const faces = ftModule.LoadFontFromBytes(new Uint8Array(tempSubsetBuffer));
+        if (faces.length > 0) {
+          tempSubsetFace = faces[0];
+          activeFace = tempSubsetFace;
+          ftModule.SetFont(activeFace.family_name, activeFace.style_name);
+          ftMetrics = ftModule.SetPixelSize(0, fontSizePx);
+        }
       }
     }
 
