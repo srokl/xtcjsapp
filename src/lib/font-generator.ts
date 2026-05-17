@@ -149,8 +149,13 @@ const XTF_PROPORTIONAL_EXTENDED = new Set([
 
 function checkIsLeftSided(charCode: number, charStr: string, options: FontGenerationOptions): boolean {
   if (options.format !== 'xtf') return false;
-  // ASCII (U+0020-U+007E) + specific extended punctuation are left-aligned proportional
-  if (charCode > 0x7E && !XTF_PROPORTIONAL_EXTENDED.has(charCode)) return false;
+  // Left-aligned proportional: ASCII + Latin Extended ranges + specific extended punctuation
+  const isProportional = charCode <= 0x7E                                 // ASCII
+    || (charCode >= 0x00A0 && charCode <= 0x024F)                         // Latin-1 Supplement + Latin Extended-A/B
+    || (charCode >= 0x0300 && charCode <= 0x036F)                         // Combining Diacritical Marks
+    || (charCode >= 0x1E00 && charCode <= 0x1EFF)                         // Latin Extended Additional (Vietnamese)
+    || XTF_PROPORTIONAL_EXTENDED.has(charCode);                           // Smart quotes, dashes, etc.
+  if (!isProportional) return false;
   let isRotatedMinus90 = false;
   if (options.vertical) {
     if (options.verticalSymbols && isVerticalSymbol(charStr)) {
