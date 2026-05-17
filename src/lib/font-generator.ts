@@ -85,6 +85,7 @@ export interface FontGenerationOptions {
   characters: string;
   customFontBuffer?: ArrayBuffer;
   format?: 'bin' | 'xtf';
+  xtfFontOnly?: boolean;  // XTF only: render only glyphs present in the uploaded font
 }
 
 const VERTICAL_SYMBOLS = new Set([
@@ -129,8 +130,27 @@ function isEnglishOrNumber(char: string): boolean {
   return /^[\x20-\x7E]+$/.test(char) && !isVerticalSymbol(char);
 }
 
+// Extended punctuation that should be left-aligned proportional in XTF (same as ASCII),
+// matching the Bookerly reference. These are non-ASCII chars commonly found in e-book text.
+const XTF_PROPORTIONAL_EXTENDED = new Set([
+  0x2013, 0x2014,             // en dash, em dash
+  0x2018, 0x2019, 0x201A,     // single quotes
+  0x201C, 0x201D, 0x201E,     // double quotes
+  0x2026,                     // ellipsis
+  0x2010, 0x2011, 0x2012,     // hyphens
+  0x2015,                     // horizontal bar
+  0x2020, 0x2021,             // daggers
+  0x2022,                     // bullet
+  0x2039, 0x203A,             // single guillemets
+  0x00AB, 0x00BB,             // double guillemets
+  0x00A0,                     // non-breaking space
+  0x00AD,                     // soft hyphen
+]);
+
 function checkIsLeftSided(charCode: number, charStr: string, options: FontGenerationOptions): boolean {
-  if (options.format !== 'xtf' || charCode > 0x7E) return false;
+  if (options.format !== 'xtf') return false;
+  // ASCII (U+0020-U+007E) + specific extended punctuation are left-aligned proportional
+  if (charCode > 0x7E && !XTF_PROPORTIONAL_EXTENDED.has(charCode)) return false;
   let isRotatedMinus90 = false;
   if (options.vertical) {
     if (options.verticalSymbols && isVerticalSymbol(charStr)) {
@@ -401,11 +421,16 @@ export class XTEinkFontXTF {
   height: number;
   stride: number;
   glyphSize: number;  // pixel data only (stride * height)
-  metrics: Map<number, { width: number }> = new Map();
+  metrics: Map<number, { width: number }> = new Map();       // bitmap width per glyph (glyph prefix byte 0)
+  fontAdvWidths: Map<number, number> = new Map();             // font-metric advance width (for fast-path table)
   usedChars: Map<number, Uint8Array> = new Map();
   totalChar = 0x10000;
 
   fontSize: number;
+  // Font-specific metrics from FreeType (set externally after construction)
+  fontAscent: number = 0;
+  fontDescender: number = 0;
+  cellWidth: number = 0;  // default advance width (e.g., digit '0'), NOT max width
 
   constructor(width: number, height: number, fontSize: number, widthPadding: number = 0, heightPadding: number = 0) {
     // Apply user-defined padding first (widthPadding can be NEGATIVE to shrink cell)
@@ -504,11 +529,12 @@ export class XTEinkFontXTF {
     const blockSize = 2 + this.glyphSize; // 2-byte PREFIX + pixel data
     const tableOffset = 0x40;
 
-    // Calculate data start: table end, then align to next power-of-2 boundary.
-    // NF28 uses 0x4000 (16KB) as the base alignment.
+    // Calculate data start: table end + 224 bytes for fast-path table, then align
+    // to the next power-of-2 boundary for DMA-safe alignment.
     const tableEnd = tableOffset + numEntries * 16;
-    let dataStartOffset = 0x4000;
-    while (dataStartOffset < tableEnd) {
+    const minDataStart = tableEnd + 224; // fast-path table occupies 224 bytes after mapping table
+    let dataStartOffset = 0x0800; // minimum alignment (2KB)
+    while (dataStartOffset < minDataStart) {
       dataStartOffset *= 2;
     }
 
@@ -530,19 +556,18 @@ export class XTEinkFontXTF {
     view.setUint8(0x0A, this.width);
     // 0x0B: HEIGHT (device reads this as height!)
     view.setUint8(0x0B, this.height);
-    // 0x0C: Ascent
-    view.setUint8(0x0C, Math.round(this.height * 0.85));
-    // 0x0D: Cell Width (= Width, NOT height. NF28: 0x0D=28=width)
-    view.setUint8(0x0D, this.width);
-    // 0x0E: Scaling/Version (NF28: height/2 = 16, CJK: height/2+1 = 19)
-    // Using height/2 as it appears to be the standard pattern for this format.
-    view.setUint8(0x0E, Math.floor(this.height / 2));
+    // 0x0C: Ascent — font-specific metric from FreeType, fallback to height * 0.85
+    view.setUint8(0x0C, this.fontAscent > 0 ? this.fontAscent : Math.round(this.height * 0.85));
+    // 0x0D: Cell Width — default advance width (e.g., digit '0'), NOT Max Width
+    view.setUint8(0x0D, this.cellWidth > 0 ? this.cellWidth : this.width);
+    // 0x0E: Scaling Factor — ceil(height/2)
+    view.setUint8(0x0E, Math.ceil(this.height / 2));
     view.setUint8(0x0F, 0);
-    // 0x10: First printable Unicode character (NF28: 0x21, CJK: 0x22)
-    const firstPrintable = sortedChars.find(c => c > 32) || 33;
-    view.setUint16(0x10, firstPrintable, true);
-    // 0x12: Descender (signed -9)
-    view.setInt16(0x12, -9, true);
+    // 0x10: First Unicode character — includes Space (U+0020)
+    const firstChar = sortedChars.length > 0 ? sortedChars[0] : 0x20;
+    view.setUint16(0x10, firstChar, true);
+    // 0x12: Descender — font-specific signed metric from FreeType
+    view.setInt16(0x12, this.fontDescender !== 0 ? this.fontDescender : -9, true);
     // 0x14: Number of mapping table entries  *** FIXED: was totalGlyphs ***
     view.setUint32(0x14, numEntries, true);
     // 0x18: Total glyph count  *** FIXED: was numEntries ***
@@ -585,7 +610,8 @@ export class XTEinkFontXTF {
       const glyph = this.usedChars.get(charCode)!;
       const offset = dataStartOffset + i * blockSize;
 
-      // PREFIX: Byte 0 = Advance Width, Byte 1 = Flags (0)
+      // PREFIX: Byte 0 = Bitmap Width (rendered pixel extent), Byte 1 = Flags (0)
+      // This is distinct from the font-metric advance in the fast-path table.
       const m = this.metrics.get(charCode) || { width: this.width };
       u8[offset] = Math.min(255, m.width);
       u8[offset + 1] = 0;
@@ -594,20 +620,24 @@ export class XTEinkFontXTF {
       u8.set(glyph, offset + 2);
     }
 
-    // === ASCII ADVANCE WIDTH TABLE ===
-    // The device reads a 95-byte advance width lookup table for U+0020-U+007E
-    // stored in the gap between the mapping table end and the data start.
-    // This enables proportional Latin character spacing.
-    const charToGlyphIdx = new Map<number, number>();
-    for (let i = 0; i < sortedChars.length; i++) {
-      charToGlyphIdx.set(sortedChars[i], i);
-    }
+    // === ASCII FAST-PATH ADVANCE WIDTH TABLE (224 bytes) ===
+    // The device reads a 224-byte font-metric advance width lookup table
+    // for U+0020-U+00FF, stored in the gap between the mapping table end
+    // and the data start. These are the TRUE typographic advance widths
+    // (including sidebearings), which may differ from the bitmap widths
+    // in the glyph prefix bytes. Only U+0020-U+007E are populated;
+    // U+0080-U+00FF are left as zero.
     for (let cp = 0x20; cp <= 0x7E; cp++) {
-      const gi = charToGlyphIdx.get(cp);
-      if (gi !== undefined) {
-        // Read the advance width from the already-written glyph prefix
-        const advW = u8[dataStartOffset + gi * blockSize];
-        u8[tableEnd + (cp - 0x20)] = advW;
+      const fontAdv = this.fontAdvWidths.get(cp);
+      if (fontAdv !== undefined) {
+        // Use the font-metric advance (includes sidebearings) for text layout
+        u8[tableEnd + (cp - 0x20)] = Math.min(255, fontAdv);
+      } else {
+        // Fallback: use the bitmap width from the glyph prefix
+        const charToGlyphIdx = sortedChars.indexOf(cp);
+        if (charToGlyphIdx >= 0) {
+          u8[tableEnd + (cp - 0x20)] = u8[dataStartOffset + charToGlyphIdx * blockSize];
+        }
       }
     }
 
@@ -675,6 +705,25 @@ export async function generateFontBinary(
   // Track actual FreeType advance widths per charCode for XTF prefix
   const glyphAdvWidths = new Map<number, number>();
 
+  // Extract real font metrics from FreeType for XTF header fields
+  if (isXtf && options.renderer === 'freetype' && options.freetypeFace && ftModule) {
+    const xtfBin = binary as XTEinkFontXTF;
+    ftModule.SetFont(options.freetypeFace.family_name, options.freetypeFace.style_name);
+    const rawFontSizePx = Math.round(options.fontSize * PX_PER_PT);
+    const metrics = ftModule.SetPixelSize(0, rawFontSizePx);
+    if (metrics) {
+      // Real font ascent/descender from FreeType's scaled metrics (26.6 fixed point)
+      xtfBin.fontAscent = Math.round(metrics.ascender >> 6);
+      xtfBin.fontDescender = Math.round(metrics.descender >> 6); // negative value
+    }
+    // Determine cellWidth from digit '0' advance — this is the standard default advance
+    const digitGlyphs = ftModule.LoadGlyphs([0x30], ftModule.FT_LOAD_DEFAULT);
+    const digitGlyph = digitGlyphs.get(0x30);
+    if (digitGlyph && digitGlyph.glyph_index !== 0) {
+      xtfBin.cellWidth = Math.round(digitGlyph.advance.x >> 6);
+    }
+  }
+
   // Fix 1: Batch architecture - 1024 glyphs in one canvas
   const CHUNK_SIZE = 1024;
   const maxCanvasSize = 4096;
@@ -702,8 +751,34 @@ export async function generateFontBinary(
     }
   }
 
-  for (let i = 0; i < binary.totalChar; i += CHUNK_SIZE) {
-    const end = Math.min(i + CHUNK_SIZE, binary.totalChar);
+  // XTF Font-Only mode: build a set of char codes that exist in the font,
+  // then only iterate those instead of the full 0-0xFFFF range.
+  // This dramatically speeds up generation for Latin-only fonts (e.g., ~2000 vs 65536).
+  let fontOnlyCharCodes: number[] | null = null;
+  if (isXtf && options.xtfFontOnly !== false && preScannedFont) {
+    const validCodes = new Set<number>();
+    const glyphSet = preScannedFont.glyphs;
+    for (let gi = 0; gi < glyphSet.length; gi++) {
+      const g = glyphSet.get(gi);
+      if (g && g.unicodes) {
+        for (const u of g.unicodes) {
+          if (u >= 0 && u < 0x10000) validCodes.add(u);
+        }
+      }
+    }
+    // Always ensure Space is included
+    validCodes.add(0x20);
+    fontOnlyCharCodes = Array.from(validCodes).sort((a, b) => a - b);
+    // Override totalChar so progress reporting is accurate
+    binary.totalChar = fontOnlyCharCodes.length;
+    console.log(`[XTF] Font-Only mode: ${fontOnlyCharCodes.length} glyphs found in font`);
+  }
+
+  // Determine iteration range
+  const totalIterations = fontOnlyCharCodes ? fontOnlyCharCodes.length : binary.totalChar;
+
+  for (let i = 0; i < totalIterations; i += CHUNK_SIZE) {
+    const end = Math.min(i + CHUNK_SIZE, totalIterations);
     const count = end - i;
 
     // Chunked FreeType Subsetting to avoid OOM
@@ -713,7 +788,12 @@ export async function generateFontBinary(
 
     if (options.renderer === 'freetype' && options.customFontBuffer && ftModule) {
       let chunkChars = "";
-      if (preScannedFont) {
+      if (fontOnlyCharCodes) {
+        // In font-only mode, i..end are indices into fontOnlyCharCodes
+        for (let c = i; c < end; c++) {
+          chunkChars += String.fromCharCode(fontOnlyCharCodes[c]);
+        }
+      } else if (preScannedFont) {
         for (let c = i; c < end; c++) {
           const char = String.fromCharCode(c);
           const glyph = preScannedFont.charToGlyph(char);
@@ -739,13 +819,15 @@ export async function generateFontBinary(
     }
 
     const chunkCodes: number[] = [];
-    for (let c = i; c < end; c++) chunkCodes.push(c);
+    for (let c = i; c < end; c++) {
+      chunkCodes.push(fontOnlyCharCodes ? fontOnlyCharCodes[c] : c);
+    }
     const chunkGlyphs = (options.renderer === 'freetype' && activeFace && ftModule) ? ftModule.LoadGlyphs(chunkCodes, baseLoadFlags) : null;
 
     ctx.clearRect(0, 0, batchCanvas.width, batchCanvas.height);
 
     for (let j = 0; j < count; j++) {
-      const charCode = i + j;
+      const charCode = fontOnlyCharCodes ? fontOnlyCharCodes[i + j] : (i + j);
       const charStr = String.fromCharCode(charCode);
       const glyph = chunkGlyphs ? chunkGlyphs.get(charCode) : null;
 
@@ -825,6 +907,11 @@ export async function generateFontBinary(
         // Store the real advance width for XTF prefix (always, even for invisible glyphs like Space)
         glyphAdvWidths.set(charCode, Math.round(adv / S));
 
+        // For XTF: also store font-metric advance width in fontAdvWidths for the fast-path table
+        // This includes sidebearings and represents the true typographic advance.
+        if (isXtf && charCode >= 0x20 && charCode <= 0x7E) {
+          (binary as XTEinkFontXTF).fontAdvWidths.set(charCode, Math.round(adv / S));
+        }
         const bitmap = glyph.bitmap;
         if (bitmap.imagedata) {
           const dyOffset = (ftMetrics.ascender + ftMetrics.descender) >> 7;
@@ -912,7 +999,7 @@ export async function generateFontBinary(
     if (S === 1) {
       // === Native resolution fast path (no supersampling) ===
       for (let j = 0; j < count; j++) {
-        const charCode = i + j;
+        const charCode = fontOnlyCharCodes ? fontOnlyCharCodes[i + j] : (i + j);
         const col = j % batchCols;
         const row = Math.floor(j / batchCols);
         const baseX = col * sW;
@@ -964,7 +1051,7 @@ export async function generateFontBinary(
     } else {
       // === Supersampled path (S > 1) with boldness ===
       for (let j = 0; j < count; j++) {
-        const charCode = i + j;
+        const charCode = fontOnlyCharCodes ? fontOnlyCharCodes[i + j] : (i + j);
         const col = j % batchCols;
         const row = Math.floor(j / batchCols);
         const baseX = col * sW;

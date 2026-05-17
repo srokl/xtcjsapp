@@ -66,7 +66,7 @@ function FontPage() {
     try {
       const fontName = file.name.replace(/\.[^/.]+$/, "")
       let buffer = await file.arrayBuffer()
-      
+
       if (!ftModule) {
         alert("FreeType not initialized yet. Please wait.")
         return
@@ -97,12 +97,12 @@ function FontPage() {
         throw new Error("No faces found in font file")
       }
       const face = faces[0]
-      
+
       const font = new FontFace(fontName, originalBuffer)
       await font.load()
       document.fonts.add(font)
       setCustomFontName(fontName)
-      
+
       setOptions({ ...options, fontFamily: fontName, freetypeFace: face, renderer: 'freetype', customFontBuffer: originalBuffer })
     } catch (err) {
       console.error(err)
@@ -178,8 +178,8 @@ function FontPage() {
                   onChange={e => {
                     const newFamily = e.target.value;
                     const isCustom = customFontName && newFamily === customFontName;
-                    setOptions({ 
-                      ...options, 
+                    setOptions({
+                      ...options,
                       fontFamily: newFamily,
                       freetypeFace: isCustom ? options.freetypeFace : undefined
                     });
@@ -344,10 +344,20 @@ function FontPage() {
                   <input
                     type="checkbox"
                     checked={options.format === 'xtf'}
-                    onChange={e => setOptions({ ...options, format: e.target.checked ? 'xtf' : 'bin' })}
+                    onChange={e => setOptions({ ...options, format: e.target.checked ? 'xtf' : 'bin', xtfFontOnly: e.target.checked ? (options.xtfFontOnly ?? true) : undefined })}
                   />
                   XTF Format (2-bit AA)
                 </label>
+                {options.format === 'xtf' && options.customFontBuffer && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
+                    <input
+                      type="checkbox"
+                      checked={options.xtfFontOnly ?? true}
+                      onChange={e => setOptions({ ...options, xtfFontOnly: e.target.checked })}
+                    />
+                    Font Glyphs Only
+                  </label>
+                )}
                 {options.vertical && (
                   <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
                     <input
@@ -376,31 +386,31 @@ function FontPage() {
                       <option value="canvas-fallback">Browser Canvas fallback</option>
                     </select>
                   </label>
-                  
+
                   {options.renderer === 'freetype' && (
                     <>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
-                    <span style={{ fontSize: '0.85rem' }}>Hinting:</span>
-                    <select
-                      value={options.hinting}
-                      onChange={e => setOptions({ ...options, hinting: e.target.value as any })}
-                      style={{ padding: '2px 4px', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
-                    >
-                      <option value="Full">Full (Mono)</option>
-                      <option value="Medium">Medium (Normal)</option>
-                      <option value="Slight">Slight (Light)</option>
-                      <option value="None">None (Raw Outline)</option>
-                    </select>
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
-                    <input
-                      type="checkbox"
-                      checked={options.forceAutohint}
-                      onChange={e => setOptions({ ...options, forceAutohint: e.target.checked })}
-                    />
-                    Force Auto-hint
-                  </label>
-                  </>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
+                        <span style={{ fontSize: '0.85rem' }}>Hinting:</span>
+                        <select
+                          value={options.hinting}
+                          onChange={e => setOptions({ ...options, hinting: e.target.value as any })}
+                          style={{ padding: '2px 4px', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
+                        >
+                          <option value="Full">Full (Mono)</option>
+                          <option value="Medium">Medium (Normal)</option>
+                          <option value="Slight">Slight (Light)</option>
+                          <option value="None">None (Raw Outline)</option>
+                        </select>
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
+                        <input
+                          type="checkbox"
+                          checked={options.forceAutohint}
+                          onChange={e => setOptions({ ...options, forceAutohint: e.target.checked })}
+                        />
+                        Force Auto-hint
+                      </label>
+                    </>
                   )}
                 </div>
                 {options.renderer === 'freetype' && (
