@@ -344,7 +344,15 @@ function FontPage() {
                   <input
                     type="checkbox"
                     checked={options.format === 'xtf'}
-                    onChange={e => setOptions({ ...options, format: e.target.checked ? 'xtf' : 'bin', xtfFontOnly: e.target.checked ? (options.xtfFontOnly ?? true) : undefined })}
+                    onChange={e => {
+                      const isXtf = e.target.checked;
+                      setOptions({ 
+                        ...options, 
+                        format: isXtf ? 'xtf' : 'bin', 
+                        xtfFontOnly: isXtf ? (options.xtfFontOnly ?? true) : undefined,
+                        forceAutohint: isXtf ? false : options.forceAutohint
+                      });
+                    }}
                   />
                   XTF Format (2-bit AA)
                 </label>
