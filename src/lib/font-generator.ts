@@ -1,11 +1,25 @@
 import InitFreetype, { FreetypeModule, FT_FaceRec, FT_GlyphSlotRec } from 'freetype-wasm/dist/freetype.js';
 import * as opentype from 'opentype.js';
+import { fontSubsetPool } from './font-subset-pool';
 
 /**
  * Subsets a font buffer to only include the specified characters.
- * This is used to reduce the memory footprint for large CJK fonts before passing them to FreeType.
+ * This runs on a Web Worker pool for parallel processing.
  */
-export function subsetFontBuffer(buffer: ArrayBuffer, characters: string, nameSuffix: string = '', parsedFont?: opentype.Font): ArrayBuffer {
+export async function subsetFontBuffer(buffer: ArrayBuffer, characters: string, nameSuffix: string = ''): Promise<ArrayBuffer> {
+  try {
+    return await fontSubsetPool.subset(buffer, characters, nameSuffix);
+  } catch (err) {
+    console.error('Worker subset failed, falling back to sync:', err);
+    return subsetFontBufferSync(buffer, characters, nameSuffix);
+  }
+}
+
+/**
+ * Synchronous fallback for font subsetting (main thread).
+ * Used during font upload where FreeType needs immediate access to the subset buffer.
+ */
+export function subsetFontBufferSync(buffer: ArrayBuffer, characters: string, nameSuffix: string = '', parsedFont?: opentype.Font): ArrayBuffer {
   try {
     const font = parsedFont || opentype.parse(buffer);
     const glyphs: opentype.Glyph[] = [];
@@ -92,7 +106,7 @@ const VERTICAL_SYMBOLS = new Set([
   '(', ')', '[', ']', '{', '}', '<', '>',
   '（', '）', '【', '】', '《', '》', '〈', '〉', '「', '」', '『', '』', '［', '］', '｛', '｝', '〔', '〕', '〖', '〗', '〘', '〙', '〚', '〛',
   '-', '—', '–', '…', '⋯', '‥', '_', '~', '～', '〜', 'ー', '｜',
-  '：', '；', '=', '＝', '‰'
+  '：', '；', '=', '＝', '‰', '―'
 ]);
 
 // Characters that need to be shifted to the top-right in vertical layout
@@ -109,13 +123,21 @@ function getVerticalCharOffset(char: string, fontSizePx: number): { x: number, y
     // Both preview (unrotated) and generator (post-rotation) visually share the same translation vector
     // because the e-reader's physical +90 rotation perfectly cancels out the generator's -90 rotation.
     // To move from bottom-left to top-right, we shift Right (+X) and Up (-Y).
-    return { x: fontSizePx * 0.55, y: -fontSizePx * 0.55 };
+    // The -2px X adjustment corrects for the visual leftward drift on the device.
+    return { x: fontSizePx * 0.55 - 2, y: -fontSizePx * 0.55 };
   }
 
   if (VERTICAL_SUTEGANA.has(char)) {
     // Sutegana (small kana) require an independent, smaller shift.
     // Shift slightly Right (+X) and Up (-Y)
-    return { x: fontSizePx * 0.15, y: -fontSizePx * 0.15 };
+    return { x: fontSizePx * 0.15 - 2, y: -fontSizePx * 0.15 };
+  }
+
+  if (isEnglishOrNumber(char)) {
+    // Rotated Latin/English characters (when verticalEnglishUpright is checked)
+    // need a small upward shift to center properly in the cell after -90° rotation.
+    // On device (rotated +90°), this becomes a leftward shift.
+    return { x: -2, y: 0 };
   }
 
   return { x: 0, y: 0 };
@@ -123,11 +145,6 @@ function getVerticalCharOffset(char: string, fontSizePx: number): { x: number, y
 
 function isVerticalSymbol(char: string): boolean {
   return VERTICAL_SYMBOLS.has(char);
-}
-
-function isEnglishOrNumber(char: string): boolean {
-  // ASCII characters (letters, numbers, and basic punctuation not in vertical symbols)
-  return /^[\x20-\x7E]+$/.test(char) && !isVerticalSymbol(char);
 }
 
 // Extended punctuation that should be left-aligned proportional in XTF (same as ASCII),
@@ -146,6 +163,17 @@ const XTF_PROPORTIONAL_EXTENDED = new Set([
   0x00A0,                     // non-breaking space
   0x00AD,                     // soft hyphen
 ]);
+
+function isEnglishOrNumber(char: string): boolean {
+  // ASCII characters (letters, numbers, and basic punctuation not in vertical symbols)
+  // + Extended Latin ranges so accented chars (é, ñ, ü, etc.) follow the same rotation rules
+  if (isVerticalSymbol(char)) return false;
+  const code = char.charCodeAt(0);
+  return (code >= 0x20 && code <= 0x7E)                   // ASCII
+    || (code >= 0x00A0 && code <= 0x024F)                  // Latin-1 Supplement + Latin Extended-A/B
+    || (code >= 0x1E00 && code <= 0x1EFF)                  // Latin Extended Additional (Vietnamese)
+    || XTF_PROPORTIONAL_EXTENDED.has(code);                // Smart quotes, dashes, etc.
+}
 
 function checkIsLeftSided(charCode: number, charStr: string, options: FontGenerationOptions): boolean {
   if (options.format !== 'xtf') return false;
@@ -171,7 +199,7 @@ function checkIsLeftSided(charCode: number, charStr: string, options: FontGenera
 
 function getCharMetrics(ctx: CanvasRenderingContext2D, char: string, box: { width: number, height: number }, options: FontGenerationOptions, preloadedGlyph?: FT_GlyphSlotRec | null) {
   let left = 0, right = 0, top = 0, bottom = 0;
-  const fontSizePx = Math.round(options.fontSize * PX_PER_PT);
+  const fontSizePx = Math.round(options.fontSize);
 
   if (options.renderer === 'freetype' && options.freetypeFace && ftModule) {
     ftModule.SetFont(options.freetypeFace.family_name, options.freetypeFace.style_name);
@@ -297,7 +325,7 @@ function isCharCutoff(ctx: CanvasRenderingContext2D, char: string, box: { width:
 
 
 export function measureCharSize(options: FontGenerationOptions): { width: number, height: number } {
-  const fontSizePx = Math.round(options.fontSize * PX_PER_PT);
+  const fontSizePx = Math.round(options.fontSize);
   let w = 0, h = 0;
 
   if (options.renderer === 'freetype' && options.freetypeFace && ftModule) {
@@ -346,11 +374,22 @@ export function measureCharSize(options: FontGenerationOptions): { width: number
   let finalW = w + options.charSpacing;
   let finalH = h + options.lineSpacing;
 
-  if (options.vertical) {
-    // In vertical mode, some characters are drawn sideways (rotated -90), and some are drawn upright (rotate 0).
+  if (options.vertical && options.format !== 'xtf') {
+    // In vertical mode for .bin format, some characters are drawn sideways (rotated -90),
+    // and some are drawn upright (rotate 0).
     // Because the .bin format requires a single globally fixed width/height for ALL characters,
     // a rectangular box will inevitably cut off one group or the other.
     // The only mathematically safe solution is to force a square box based on the largest dimension.
+    const maxDim = Math.max(finalW, finalH);
+    finalW = maxDim;
+    finalH = maxDim;
+  } else if (options.format === 'xtf') {
+    // XTF format: the device uses Cell Width (header 0x0D) for CJK fixed-grid spacing.
+    // Cell Width = Max Width = block width. For CJK characters to not overlap, the block
+    // must be square (width = height). Reference file 36_文泉驿微米黑.xtf confirms:
+    // Max Width = Max Height = Cell Width = 36.
+    // ASCII proportional chars use per-glyph advance widths from the fast-path table,
+    // so the square cell doesn't affect their spacing.
     const maxDim = Math.max(finalW, finalH);
     finalW = maxDim;
     finalH = maxDim;
@@ -378,8 +417,8 @@ export class XTEinkFontBinary {
     this.fontbin = new Uint8Array(this.charByte * this.totalChar);
   }
 
-  getSuggestedFileName(title: string, pt: number) {
-    return `${title}.${pt}pt.${this.width}x${this.height}.bin`;
+  getSuggestedFileName(title: string, px: number) {
+    return `${title}.${px}px.${this.width}x${this.height}.bin`;
   }
 
   setPixel(charCode: number, x: number, y: number, value: boolean) {
@@ -452,8 +491,8 @@ export class XTEinkFontXTF {
     this.glyphSize = this.stride * this.height;
   }
 
-  getSuggestedFileName(title: string, pt: number) {
-    return `${pt}pt${this.fontSize}px_${title.replace(/\s+/g, '_')}.xtf`;
+  getSuggestedFileName(title: string, px: number) {
+    return `${px}_${title.replace(/\s+/g, '_')}.xtf`;
   }
 
   setPixel2Bit(charCode: number, x: number, y: number, grayValue: number, advWidth?: number) {
@@ -630,9 +669,8 @@ export class XTEinkFontXTF {
     // for U+0020-U+00FF, stored in the gap between the mapping table end
     // and the data start. These are the TRUE typographic advance widths
     // (including sidebearings), which may differ from the bitmap widths
-    // in the glyph prefix bytes. Only U+0020-U+007E are populated;
-    // U+0080-U+00FF are left as zero.
-    for (let cp = 0x20; cp <= 0x7E; cp++) {
+    // in the glyph prefix bytes.
+    for (let cp = 0x20; cp <= 0xFF; cp++) {
       const fontAdv = this.fontAdvWidths.get(cp);
       if (fontAdv !== undefined) {
         // Use the font-metric advance (includes sidebearings) for text layout
@@ -666,15 +704,16 @@ export async function generateFontBinary(
   const box = measureCharSize(options);
   const isXtf = options.format === 'xtf';
   const binary = isXtf
-    ? new XTEinkFontXTF(box.width, box.height, Math.round(options.fontSize * PX_PER_PT), options.widthPadding, options.heightPadding)
+    ? new XTEinkFontXTF(box.width, box.height, Math.round(options.fontSize), options.widthPadding, options.heightPadding)
     : new XTEinkFontBinary(box.width, box.height, options.widthPadding, options.heightPadding);
+
 
   const S = options.oversample || 1; // Supersample factor
   const sW = box.width * S;
   const sH = box.height * S;
 
   // Use the supersampled font size for rendering
-  const fontSizePx = Math.round(options.fontSize * PX_PER_PT * S);
+  const fontSizePx = Math.round(options.fontSize * S);
   const fontString = `${options.fontStyle} ${options.fontWeight} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
 
   // Boldness: 400 = neutral, <400 = thinner (erode), >400 = bolder (dilate)
@@ -714,19 +753,16 @@ export async function generateFontBinary(
   if (isXtf && options.renderer === 'freetype' && options.freetypeFace && ftModule) {
     const xtfBin = binary as XTEinkFontXTF;
     ftModule.SetFont(options.freetypeFace.family_name, options.freetypeFace.style_name);
-    const rawFontSizePx = Math.round(options.fontSize * PX_PER_PT);
+    const rawFontSizePx = Math.round(options.fontSize);
     const metrics = ftModule.SetPixelSize(0, rawFontSizePx);
     if (metrics) {
       // Real font ascent/descender from FreeType's scaled metrics (26.6 fixed point)
       xtfBin.fontAscent = Math.round(metrics.ascender >> 6);
       xtfBin.fontDescender = Math.round(metrics.descender >> 6); // negative value
     }
-    // Determine cellWidth from digit '0' advance — this is the standard default advance
-    const digitGlyphs = ftModule.LoadGlyphs([0x30], ftModule.FT_LOAD_DEFAULT);
-    const digitGlyph = digitGlyphs.get(0x30);
-    if (digitGlyph && digitGlyph.glyph_index !== 0) {
-      xtfBin.cellWidth = Math.round(digitGlyph.advance.x >> 6);
-    }
+    // Cell Width = Max Width (block width). The reference XTF file confirms
+    // Cell Width always equals Max Width. The device uses this for CJK fixed-grid spacing.
+    xtfBin.cellWidth = xtfBin.width;
   }
 
   // Fix 1: Batch architecture - 1024 glyphs in one canvas
@@ -746,13 +782,30 @@ export async function generateFontBinary(
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'center';
 
-  // Pre-parse the font once to avoid parsing it 64 times in the chunk loop
+  // Pre-parse the font on a worker to avoid blocking the main thread.
+  // For CJK fonts (10-20MB), opentype.parse can take 200-500ms.
   let preScannedFont: opentype.Font | null = null;
+  let preParsedUnicodes: number[] | null = null;
   if (options.renderer === 'freetype' && options.customFontBuffer) {
     try {
-      preScannedFont = opentype.parse(options.customFontBuffer);
+      // Use worker pool for pre-parsing to get unicode coverage without blocking main thread
+      const preParsed = await fontSubsetPool.preparse(options.customFontBuffer);
+      preParsedUnicodes = preParsed.unicodes;
+      console.log(`[FontSubsetPool] Pre-parsed font: ${preParsed.glyphCount} glyphs, ${preParsed.unicodes.length} unicodes`);
+      // We still need a main-thread parse for the glyph-existence check in the chunk loop
+      // when NOT using fontOnlyCharCodes (i.e., .bin mode full 64K iteration).
+      // For XTF font-only mode, we can skip this entirely since we have the unicode list.
+      if (!(isXtf && options.xtfFontOnly !== false)) {
+        preScannedFont = opentype.parse(options.customFontBuffer);
+      }
     } catch (e) {
       console.warn("Failed to pre-parse font for optimization:", e);
+      // Fallback to main-thread parsing
+      try {
+        preScannedFont = opentype.parse(options.customFontBuffer);
+      } catch (e2) {
+        console.warn("Main-thread parse also failed:", e2);
+      }
     }
   }
 
@@ -760,23 +813,31 @@ export async function generateFontBinary(
   // then only iterate those instead of the full 0-0xFFFF range.
   // This dramatically speeds up generation for Latin-only fonts (e.g., ~2000 vs 65536).
   let fontOnlyCharCodes: number[] | null = null;
-  if (isXtf && options.xtfFontOnly !== false && preScannedFont) {
-    const validCodes = new Set<number>();
-    const glyphSet = preScannedFont.glyphs;
-    for (let gi = 0; gi < glyphSet.length; gi++) {
-      const g = glyphSet.get(gi);
-      if (g && g.unicodes) {
-        for (const u of g.unicodes) {
-          if (u >= 0 && u < 0x10000) validCodes.add(u);
+  if (isXtf && options.xtfFontOnly !== false && (preParsedUnicodes || preScannedFont)) {
+    if (preParsedUnicodes) {
+      // Use the worker-parsed unicodes directly (no main-thread opentype.parse needed!)
+      const validCodes = new Set<number>(preParsedUnicodes);
+      validCodes.add(0x20);
+      fontOnlyCharCodes = Array.from(validCodes).sort((a, b) => a - b);
+    } else if (preScannedFont) {
+      const validCodes = new Set<number>();
+      const glyphSet = preScannedFont.glyphs;
+      for (let gi = 0; gi < glyphSet.length; gi++) {
+        const g = glyphSet.get(gi);
+        if (g && g.unicodes) {
+          for (const u of g.unicodes) {
+            if (u >= 0 && u < 0x10000) validCodes.add(u);
+          }
         }
       }
+      validCodes.add(0x20);
+      fontOnlyCharCodes = Array.from(validCodes).sort((a, b) => a - b);
     }
-    // Always ensure Space is included
-    validCodes.add(0x20);
-    fontOnlyCharCodes = Array.from(validCodes).sort((a, b) => a - b);
-    // Override totalChar so progress reporting is accurate
-    binary.totalChar = fontOnlyCharCodes.length;
-    console.log(`[XTF] Font-Only mode: ${fontOnlyCharCodes.length} glyphs found in font`);
+    if (fontOnlyCharCodes) {
+      // Override totalChar so progress reporting is accurate
+      binary.totalChar = fontOnlyCharCodes.length;
+      console.log(`[XTF] Font-Only mode: ${fontOnlyCharCodes.length} glyphs found in font`);
+    }
   }
 
   // Determine iteration range
@@ -806,13 +867,22 @@ export async function generateFontBinary(
             chunkChars += char;
           }
         }
+      } else if (preParsedUnicodes) {
+        // We have unicode list from worker but no preScannedFont — use the unicode set for filtering
+        const unicodeSet = new Set(preParsedUnicodes);
+        for (let c = i; c < end; c++) {
+          if (unicodeSet.has(c)) {
+            chunkChars += String.fromCharCode(c);
+          }
+        }
       } else {
         chunkChars = Array.from({ length: end - i }, (_, k) => String.fromCharCode(i + k)).join('');
       }
 
       if (chunkChars.length > 0) {
-        // Use a unique suffix for each chunk to avoid name collisions and accidental unloads of the main font
-        tempSubsetBuffer = subsetFontBuffer(options.customFontBuffer, chunkChars, `chunk_${i}`, preScannedFont || undefined);
+        // Use worker pool for parallel subsetting — this is the main performance win.
+        // Each chunk's subset runs on a Web Worker, avoiding main-thread blocking.
+        tempSubsetBuffer = await fontSubsetPool.subset(options.customFontBuffer, chunkChars, `chunk_${i}`);
         const faces = ftModule.LoadFontFromBytes(new Uint8Array(tempSubsetBuffer));
         if (faces.length > 0) {
           tempSubsetFace = faces[0];
@@ -914,7 +984,8 @@ export async function generateFontBinary(
 
         // For XTF: also store font-metric advance width in fontAdvWidths for the fast-path table
         // This includes sidebearings and represents the true typographic advance.
-        if (isXtf && charCode >= 0x20 && charCode <= 0x7E) {
+        // Covers full extended ASCII range U+0020-U+00FF per XTF spec Section 4.
+        if (isXtf && charCode >= 0x20 && charCode <= 0xFF) {
           (binary as XTEinkFontXTF).fontAdvWidths.set(charCode, Math.round(adv / S));
         }
         const bitmap = glyph.bitmap;
@@ -1029,7 +1100,7 @@ export async function generateFontBinary(
             for (let x8 = 0; x8 < fullBytes; x8++) {
               const base = rowIdx + x8 * 8;
               (binary as XTEinkFontBinary).fontbin[outRowOffset + x8] =
-                ((alphaBuffer[base]     >= alphaThreshold ? 0x80 : 0)) |
+                ((alphaBuffer[base] >= alphaThreshold ? 0x80 : 0)) |
                 ((alphaBuffer[base + 1] >= alphaThreshold ? 0x40 : 0)) |
                 ((alphaBuffer[base + 2] >= alphaThreshold ? 0x20 : 0)) |
                 ((alphaBuffer[base + 3] >= alphaThreshold ? 0x10 : 0)) |
@@ -1148,7 +1219,7 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
   ctx.scale(S, S);
 
   // Font string uses 'px' not 'pt' to ensure 1:1 mapping on the canvas buffer without OS scaling interference
-  const fontSizePx = Math.round(options.fontSize * PX_PER_PT);
+  const fontSizePx = Math.round(options.fontSize);
   const fontString = `${options.fontStyle} ${options.fontWeight} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
   ctx.font = fontString;
   ctx.fillStyle = 'black'; // text opacity will be mapped cleanly to alpha array
@@ -1498,7 +1569,7 @@ export function calculateMinimumPadding(text: string, options: FontGenerationOpt
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d')!;
 
-  const fontSizePx = options.fontSize * (220 / 72);
+  const fontSizePx = options.fontSize;
   const fontString = `${options.fontStyle || 'normal'} ${options.fontWeight || 'normal'} ${fontSizePx}px "${options.fontFamily}", sans-serif`;
   ctx.font = fontString;
   ctx.textAlign = 'center';
@@ -1538,8 +1609,8 @@ export function calculateMinimumPadding(text: string, options: FontGenerationOpt
   let charSpacing = Math.ceil(requiredWidth - baseBox.width);
   let lineSpacing = Math.ceil(requiredHeight - baseBox.height);
 
-  if (options.vertical) {
-    // In vertical layout, Square Box Padding uses uniform constraints
+  if ((options.vertical && options.format !== 'xtf') || options.format === 'xtf') {
+    // Square box modes: .bin vertical and all XTF use uniform constraints
     const maxPad = Math.max(charSpacing, lineSpacing);
     return { charSpacing: maxPad, lineSpacing: maxPad };
   }

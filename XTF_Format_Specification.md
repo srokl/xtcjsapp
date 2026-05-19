@@ -24,7 +24,7 @@ All multi-byte values are **Little-Endian**.
 | 0x0A | 1 | Max Width | Maximum character cell width (px). Determines stride and block size. |
 | 0x0B | 1 | Max Height | Maximum character cell height (px). |
 | 0x0C | 1 | Ascent | Distance from baseline to top. Font-specific metric from the font's OS/2 or hhea table, scaled to pixel size. |
-| 0x0D | 1 | Cell Width | Default advance width for fixed-pitch rendering (e.g., the advance width of digit '0'). This is NOT the same as Max Width (0x0A). |
+| 0x0D | 1 | Cell Width | Default advance width for CJK fixed-grid spacing. Always equals Max Width (0x0A). The device uses this value for non-ASCII character advancement. |
 | 0x0E | 1 | Scaling Factor | Internal font scaling. Typically `ceil(Height / 2)`. |
 | 0x0F | 1 | Reserved | Always `0x00`. |
 | 0x10 | 2 | First Unicode | The first character with glyph data (e.g., `0x0020` for Space). |
@@ -61,7 +61,7 @@ Each entry is 16 bytes. It allows the hardware to find a glyph index for a given
 Located in the "gap" immediately following the Mapping Table (at the offset specified in `0x38`).
 - **Size**: 224 bytes.
 - **Content**: **Font-metric advance widths** for the extended ASCII range `U+0020` (Space) through `U+00FF` (ÿ). These values represent the true typographic advance (including sidebearings) and may differ from the rendered bitmap width stored in each glyph block's prefix byte.
-- **Coverage**: Only the first 95 entries (`U+0020`–`U+007E`) are typically populated. Entries for `U+007F`–`U+00FF` may be zero even if glyphs exist for those codepoints.
+- **Coverage**: All 224 entries (`U+0020`–`U+00FF`) are populated when glyphs exist. This includes the full Latin-1 Supplement range (accented characters like é, ñ, ü, etc.).
 - **Purpose**: The device reads this table for instant Latin character **text layout spacing** without parsing individual glyph headers.
 
 ---

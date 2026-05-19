@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useState, useEffect, useRef } from 'react'
 import streamSaver from 'streamsaver'
-import { generateFontBinary, previewFontCharacter, initFreeTypeInstance, measureCharSize, calculateMinimumPadding, type FontGenerationOptions, subsetFontBuffer } from '../lib/font-generator'
+import { generateFontBinary, previewFontCharacter, initFreeTypeInstance, measureCharSize, calculateMinimumPadding, type FontGenerationOptions, subsetFontBufferSync } from '../lib/font-generator'
 import type { FreetypeModule } from 'freetype-wasm/dist/freetype.js'
 
 export const Route = createFileRoute('/font')({
@@ -16,7 +16,7 @@ const SYSTEM_FONTS = [
 function FontPage() {
   const [options, setOptions] = useState<FontGenerationOptions>({
     fontFamily: 'serif',
-    fontSize: 10,
+    fontSize: 30,
     fontWeight: 'normal',
     fontStyle: 'normal',
     vertical: false,
@@ -80,7 +80,7 @@ function FontPage() {
         console.log(`[Font] Large font detected (${(buffer.byteLength / 1024 / 1024).toFixed(2)} MB). Subsetting...`);
         // We subset to the characters user wants to generate + common English chars + current preview
         const subsetChars = options.characters + previewText + "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!@#$%^&*()_+-=[]{}|;':\",./<>? ";
-        buffer = subsetFontBuffer(buffer, subsetChars);
+        buffer = subsetFontBufferSync(buffer, subsetChars);
         console.log(`[Font] Subset complete. New size: ${(buffer.byteLength / 1024 / 1024).toFixed(2)} MB`);
       }
 
@@ -215,9 +215,9 @@ function FontPage() {
 
             <div style={{ display: 'flex', gap: 'var(--space-md)' }}>
               <label style={{ flex: 1 }}>
-                <strong style={{ fontSize: '0.85rem' }}>Font Size (Pt)</strong><br />
+                <strong style={{ fontSize: '0.85rem' }}>Font Size (px)</strong><br />
                 <input
-                  type="number" min="8" max="128" step="0.25"
+                  type="number" min="8" max="200" step="1"
                   value={options.fontSize}
                   onChange={e => setOptions({ ...options, fontSize: e.target.value === '' ? '' as any : parseFloat(e.target.value) })}
                   style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
@@ -244,7 +244,7 @@ function FontPage() {
             </div>
 
             <div style={{ display: 'flex', gap: 'var(--space-md)' }}>
-              {options.vertical ? (
+              {(options.vertical && options.format !== 'xtf') || options.format === 'xtf' ? (
                 <label style={{ flex: 1 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <strong style={{ fontSize: '0.85rem' }}>Square Box Padding (px)</strong>
@@ -655,7 +655,7 @@ function FontPage() {
         <div style={{ marginTop: 'var(--space-xl)', background: 'rgba(255, 68, 68, 0.05)', border: '1px solid rgba(255, 68, 68, 0.3)', borderRadius: '8px', padding: 'var(--space-lg)' }}>
           <h3 style={{ color: '#ff4444', marginBottom: 'var(--space-sm)', fontSize: '1rem' }}>⚠️ Full Font Cutoff Report</h3>
           <p style={{ fontSize: '0.85rem', marginBottom: 'var(--space-md)', color: 'var(--ink)' }}>
-            During full font generation, <strong>{generatedCutoffChars.length}</strong> characters were found to exceed the {Math.round(options.fontSize * (220 / 72) + options.charSpacing)}x{Math.round(options.fontSize * (220 / 72) + options.lineSpacing)}px bounding box.
+            During full font generation, <strong>{generatedCutoffChars.length}</strong> characters were found to exceed the {Math.round(options.fontSize + options.charSpacing)}x{Math.round(options.fontSize + options.lineSpacing)}px bounding box.
             Showing first 500 symbols:
           </p>
           <div style={{
