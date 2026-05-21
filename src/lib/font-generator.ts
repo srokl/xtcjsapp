@@ -79,7 +79,7 @@ export async function initFreeTypeInstance() {
 
 export interface FontGenerationOptions {
   fontFamily: string;
-  fontSize: number; // in Pt
+  fontSize: number; // in px
   fontWeight: string;
   fontStyle: string;
   vertical: boolean;
@@ -100,6 +100,7 @@ export interface FontGenerationOptions {
   customFontBuffer?: ArrayBuffer;
   format?: 'bin' | 'xtf';
   xtfFontOnly?: boolean;  // XTF only: render only glyphs present in the uploaded font
+  xtfAsciiOffset?: number; // XTF only: px offset to add to ASCII proportional advance widths
 }
 
 const VERTICAL_SYMBOLS = new Set([
@@ -342,12 +343,19 @@ export function measureCharSize(options: FontGenerationOptions): { width: number
       w = Math.round(glyph.advance.x >> 6);
     }
 
-    // Scale vertical metrics from 26.6 to pixels
-    if (m) {
-      h = Math.round((m.ascender - m.descender) >> 6);
-    } else {
-      // Fallback if font is not set correctly
+    if (options.format === 'xtf') {
+      // XTF: use fontSize directly as height.
+      // Reference files confirm: H = fontSize (e.g., 28px → H=28, 36px → H=36).
+      // ascender-descender produces a much larger value (~38 at 28px) causing
+      // excessive padding compared to stock XTF files.
       h = fontSizePx;
+    } else {
+      // .bin: use ascender-descender for full line height
+      if (m) {
+        h = Math.round((m.ascender - m.descender) >> 6);
+      } else {
+        h = fontSizePx;
+      }
     }
   } else {
     const canvas = document.createElement('canvas');
@@ -360,10 +368,14 @@ export function measureCharSize(options: FontGenerationOptions): { width: number
     const metrics = ctx.measureText("坐");
 
     w = Math.round(metrics.width);
-    h = Math.round(metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent);
 
-    if (isNaN(h) || h === 0) {
-      h = Math.round(metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent);
+    if (options.format === 'xtf') {
+      h = fontSizePx;
+    } else {
+      h = Math.round(metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent);
+      if (isNaN(h) || h === 0) {
+        h = Math.round(metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent);
+      }
     }
   }
 
@@ -383,17 +395,9 @@ export function measureCharSize(options: FontGenerationOptions): { width: number
     const maxDim = Math.max(finalW, finalH);
     finalW = maxDim;
     finalH = maxDim;
-  } else if (options.format === 'xtf') {
-    // XTF format: the device uses Cell Width (header 0x0D) for CJK fixed-grid spacing.
-    // Cell Width = Max Width = block width. For CJK characters to not overlap, the block
-    // must be square (width = height). Reference file 36_文泉驿微米黑.xtf confirms:
-    // Max Width = Max Height = Cell Width = 36.
-    // ASCII proportional chars use per-glyph advance widths from the fast-path table,
-    // so the square cell doesn't affect their spacing.
-    const maxDim = Math.max(finalW, finalH);
-    finalW = maxDim;
-    finalH = maxDim;
   }
+  // XTF: no square enforcement. Stock reference files show non-square cells
+  // (e.g., ShipporiMincho 29×28). Width and height are independent.
 
   if (finalW < 5) finalW = 5;
   if (finalH < 5) finalH = 5;
@@ -475,6 +479,7 @@ export class XTEinkFontXTF {
   fontAscent: number = 0;
   fontDescender: number = 0;
   cellWidth: number = 0;  // default advance width (e.g., digit '0'), NOT max width
+  asciiAdvanceOffset: number = 0;  // px offset applied to ASCII proportional advance widths
 
   constructor(width: number, height: number, fontSize: number, widthPadding: number = 0, heightPadding: number = 0) {
     // Apply user-defined padding first (widthPadding can be NEGATIVE to shrink cell)
@@ -674,7 +679,9 @@ export class XTEinkFontXTF {
       const fontAdv = this.fontAdvWidths.get(cp);
       if (fontAdv !== undefined) {
         // Use the font-metric advance (includes sidebearings) for text layout
-        u8[tableEnd + (cp - 0x20)] = Math.min(255, fontAdv);
+        // Apply ASCII offset if configured (XTF only)
+        const offset = this.asciiAdvanceOffset || 0;
+        u8[tableEnd + (cp - 0x20)] = Math.min(255, Math.max(0, fontAdv + offset));
       } else {
         // Fallback: use the bitmap width from the glyph prefix
         const charToGlyphIdx = sortedChars.indexOf(cp);
@@ -763,6 +770,8 @@ export async function generateFontBinary(
     // Cell Width = Max Width (block width). The reference XTF file confirms
     // Cell Width always equals Max Width. The device uses this for CJK fixed-grid spacing.
     xtfBin.cellWidth = xtfBin.width;
+    // Pass ASCII advance offset to the binary for fast-path table generation
+    xtfBin.asciiAdvanceOffset = options.xtfAsciiOffset || 0;
   }
 
   // Fix 1: Batch architecture - 1024 glyphs in one canvas
@@ -979,15 +988,19 @@ export async function generateFontBinary(
 
       if (glyph && glyph.glyph_index !== 0) {
         const adv = (glyph.advance.x >> 6);
-        // Store the real advance width for XTF prefix (always, even for invisible glyphs like Space)
-        glyphAdvWidths.set(charCode, Math.round(adv / S));
+        const baseAdvPx = Math.round(adv / S);
 
-        // For XTF: also store font-metric advance width in fontAdvWidths for the fast-path table
+        // For XTF: store font-metric advance width in fontAdvWidths for the fast-path table
         // This includes sidebearings and represents the true typographic advance.
         // Covers full extended ASCII range U+0020-U+00FF per XTF spec Section 4.
         if (isXtf && charCode >= 0x20 && charCode <= 0xFF) {
-          (binary as XTEinkFontXTF).fontAdvWidths.set(charCode, Math.round(adv / S));
+          (binary as XTEinkFontXTF).fontAdvWidths.set(charCode, baseAdvPx);
         }
+
+        // Store advance width for XTF glyph prefix byte.
+        // For ASCII/proportional (left-sided) chars, apply the user's ASCII advance offset.
+        const asciiOff = (isXtf && options.xtfAsciiOffset && isLeftSided) ? options.xtfAsciiOffset : 0;
+        glyphAdvWidths.set(charCode, baseAdvPx + asciiOff);
         const bitmap = glyph.bitmap;
         if (bitmap.imagedata) {
           const dyOffset = (ftMetrics.ascender + ftMetrics.descender) >> 7;
@@ -1434,6 +1447,10 @@ export function previewFontCharacter(canvas: HTMLCanvasElement, text: string, op
           const metrics = ctx.measureText(charStr);
           aw = Math.round(metrics.width);
         }
+        // Apply ASCII advance offset for preview consistency
+        if (options.format === 'xtf' && options.xtfAsciiOffset) {
+          aw += options.xtfAsciiOffset;
+        }
       }
 
       if (options.vertical) {
@@ -1609,8 +1626,8 @@ export function calculateMinimumPadding(text: string, options: FontGenerationOpt
   let charSpacing = Math.ceil(requiredWidth - baseBox.width);
   let lineSpacing = Math.ceil(requiredHeight - baseBox.height);
 
-  if ((options.vertical && options.format !== 'xtf') || options.format === 'xtf') {
-    // Square box modes: .bin vertical and all XTF use uniform constraints
+  if (options.vertical && options.format !== 'xtf') {
+    // .bin vertical mode: Square Box Padding uses uniform constraints
     const maxPad = Math.max(charSpacing, lineSpacing);
     return { charSpacing: maxPad, lineSpacing: maxPad };
   }

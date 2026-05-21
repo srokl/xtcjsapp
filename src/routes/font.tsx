@@ -244,7 +244,7 @@ function FontPage() {
             </div>
 
             <div style={{ display: 'flex', gap: 'var(--space-md)' }}>
-              {(options.vertical && options.format !== 'xtf') || options.format === 'xtf' ? (
+              {options.vertical && options.format !== 'xtf' ? (
                 <label style={{ flex: 1 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <strong style={{ fontSize: '0.85rem' }}>Square Box Padding (px)</strong>
@@ -283,6 +283,9 @@ function FontPage() {
                       onChange={e => setOptions({ ...options, lineSpacing: e.target.value === '' ? '' as any : parseInt(e.target.value) })}
                       style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
                     />
+                    {options.format === 'xtf' && (
+                      <div style={{ fontSize: '0.7rem', color: 'var(--ink-light)', marginTop: '4px' }}>Cell forced square: max(W+wPad, H+hPad)</div>
+                    )}
                   </label>
                   <label style={{ flex: 1 }}>
                     <strong style={{ fontSize: '0.85rem' }}>Width Padding (px)</strong><br />
@@ -293,6 +296,18 @@ function FontPage() {
                       style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
                     />
                   </label>
+                  {options.format === 'xtf' && (
+                    <label style={{ flex: 1 }}>
+                      <strong style={{ fontSize: '0.85rem' }}>ASCII Advance (px)</strong><br />
+                      <input
+                        type="number"
+                        value={options.xtfAsciiOffset || 0}
+                        onChange={e => setOptions({ ...options, xtfAsciiOffset: e.target.value === '' ? 0 : parseInt(e.target.value) })}
+                        style={{ width: '100%', padding: 'var(--space-sm)', marginTop: 'var(--space-xs)', background: 'var(--paper)', border: 'var(--border)', color: 'var(--ink)' }}
+                      />
+                      <div style={{ fontSize: '0.7rem', color: 'var(--ink-light)', marginTop: '4px' }}>Offset for ASCII proportional widths</div>
+                    </label>
+                  )}
                 </>
               )}
             </div>
