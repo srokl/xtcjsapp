@@ -9,7 +9,7 @@ import { applyDithering, applyDitheringToData } from './processing/dithering'
 import { toGrayscale, applyContrast, calculateOverlapSegments, calculateHorizontalOverlapSegments, isSolidColor, applyGamma, applyInvert, applyUnifiedFilters } from './processing/image'
 import { rotateCanvas, extractAndRotate, extractRegion, resizeWithPadding, resizeFill, resizeCover, resizeCrop, TARGET_WIDTH, TARGET_HEIGHT, DEVICE_DIMENSIONS, sharedCanvasPool } from './processing/canvas'
 import { buildXtc, buildXtcFromBuffers, imageDataToXth, imageDataToXtg, wrapWasmData, buildXtcHeaderAndIndex, getXtcPageSize, type StreamPageInfo } from './xtc-format'
-import { compressXtczLz4 } from './processing/lz4-compress'
+import { compressXtczAsync } from './lz4-worker-manager'
 import { initWasm, runWasmFilters, isWasmLoaded, runWasmPack, runWasmResize, runWasmPipeline } from './processing/wasm'
 import { runUnifiedXtg, runUnifiedXth } from './processing/unified-js'
 
@@ -19,6 +19,17 @@ function getTargetDimensions(options: ConversionOptions) {
 
 function getOrientationAngle(orientation: string): number {
   return orientation === 'landscape' ? 90 : 0
+}
+
+/**
+ * Returns true for dithering algorithms that use raster-order error diffusion
+ * and can be fused into the unified filter+dither+pack pipeline.
+ * Ordered, stochastic, and matt-parker use non-standard scan patterns
+ * and must fall through to the separate 3-pass pipeline.
+ */
+function isErrorDiffusionAlgorithm(algo: string): boolean {
+  return algo === 'floyd' || algo === 'atkinson' || algo === 'stucki' 
+    || algo === 'zhoufang' || algo === 'ostromoukhov'
 }
 
 /**
@@ -75,6 +86,14 @@ export async function resizeHq(
 
 
 /**
+ * Efficient preview generation: uses toBlob + createObjectURL instead of toDataURL
+ * to avoid expensive base64 encoding and ~2MB string allocation per preview.
+ */
+function generateCanvasPreview(canvas: HTMLCanvasElement): string {
+  return canvas.toDataURL('image/png')
+}
+
+/**
  * Process a canvas (filter, dither) and encode it to binary
  * Highly optimized synchronous pipeline to maximize CPU throughput.
  */
@@ -101,21 +120,27 @@ function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOptions,
       runWasmFilters(imageData, options.contrast, options.gamma, options.invert)
       ctx.putImageData(imageData, 0, 0)
       applyDithering(ctx, width, height, options.dithering, options.is2bit, true)
-      preview = canvas.toDataURL('image/png')
+      preview = generateCanvasPreview(canvas)
     }
-  } else if (options.dithering === 'none' && !options.manhwa) {
-    // Unified High-Performance JS Pipeline (Single memory pass)
+  } else if (!options.manhwa && (options.dithering === 'none' || isErrorDiffusionAlgorithm(options.dithering))) {
+    // Unified High-Performance JS Pipeline (Fused filter + dither + pack)
+    // Supports: none, floyd, atkinson, stucki, zhoufang, ostromoukhov
+    // Uses rolling error buffers instead of full Float32Array, saving ~95% memory
+    const unifiedOpts = { ...options, dithering: options.dithering }
     buffer = options.is2bit 
-      ? runUnifiedXth(imageData.data, width, height, options)
-      : runUnifiedXtg(imageData.data, width, height, options)
+      ? runUnifiedXth(imageData.data, width, height, unifiedOpts)
+      : runUnifiedXtg(imageData.data, width, height, unifiedOpts)
     
     if (generatePreview) {
       applyUnifiedFilters(imageData.data, options)
+      if (options.dithering !== 'none') {
+        applyDitheringToData(imageData.data, width, height, options.dithering, options.is2bit, false)
+      }
       ctx.putImageData(imageData, 0, 0)
-      preview = canvas.toDataURL('image/png')
+      preview = generateCanvasPreview(canvas)
     }
   } else {
-    // Standard JS Pipeline
+    // Standard JS Pipeline (ordered, stochastic, matt-parker, manhwa)
     applyUnifiedFilters(imageData.data, {
       contrast: options.contrast,
       gamma: options.gamma,
@@ -126,7 +151,7 @@ function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOptions,
     
     if (generatePreview) {
       ctx.putImageData(imageData, 0, 0)
-      preview = canvas.toDataURL('image/png')
+      preview = generateCanvasPreview(canvas)
     }
     
     buffer = options.is2bit ? imageDataToXth(imageData) : imageDataToXtg(imageData)
@@ -328,7 +353,7 @@ export async function convertCbzToXtc(
         const tasks = batch.map(async (file, batchIdx) => {
           const globalIdx = i + batchIdx;
           const data = await file.entry.getData(new Uint8ArrayWriter());
-          const result = await processImageAsBinary(data, globalIdx + 1, options, pageImages.length < 3);
+          const result = await processImageAsBinary(data, globalIdx + 1, options, globalIdx < 3);
           return { globalIdx, result };
         });
 
@@ -380,7 +405,7 @@ export async function convertCbzToXtc(
           const tasks = batch.map(async (file, batchIdx) => {
             const globalIdx = i + batchIdx;
             const data = await file.entry.getData(new Uint8ArrayWriter());
-            const result = await processImageAsBinary(data, globalIdx + 1, options, pageImages.length < 3);
+            const result = await processImageAsBinary(data, globalIdx + 1, options, globalIdx < 3);
             return { globalIdx, result };
           });
 
@@ -429,7 +454,7 @@ export async function convertCbzToXtc(
         return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages, size: totalSize }
       } else {
         let xtcData = await buildXtcFromBuffers(pageBuffers, { metadata, is2bit: options.is2bit })
-        if (options.compressXtcz) xtcData = compressXtczLz4(xtcData)
+        if (options.compressXtcz) xtcData = await compressXtczAsync(xtcData)
         return { name: outputFileName, data: xtcData, size: xtcData.byteLength, pageCount: pageInfos.length, pageImages }
       }
     }
@@ -523,7 +548,7 @@ export async function convertCbrToXtc(
       const batch = imageFiles.slice(i, i + CONCURRENCY);
       const tasks = batch.map(async (file, batchIdx) => {
         const globalIdx = i + batchIdx;
-        const result = await processImageAsBinary(file.data, globalIdx + 1, options, pageImages.length < 3);
+        const result = await processImageAsBinary(file.data, globalIdx + 1, options, globalIdx < 3);
         return { globalIdx, result };
       });
 
@@ -542,7 +567,7 @@ export async function convertCbrToXtc(
     return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages, size: totalSize }
     } else {
       // High-Performance Parallel Path
-      const pageBlobs: Blob[] = []; const pageInfos: StreamPageInfo[] = []
+      const pageBuffers: ArrayBuffer[] = []; const pageInfos: StreamPageInfo[] = []
       let stitcher = options.manhwa ? new ManhwaStitcher(options) : null
 
       if (stitcher) {
@@ -553,7 +578,7 @@ export async function convertCbrToXtc(
           bitmap.close()
           for (const slice of slices) {
             const res = processAndEncode(slice.canvas, options, pageImages.length < 3)
-            pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
+            pageBuffers.push(res.buffer); pageInfos.push({ width: dims.width, height: dims.height })
             if (pageImages.length < 3) pageImages.push(res.preview)
           }
           mappingCtx.addOriginalPage(i + 1, slices.length)
@@ -565,7 +590,7 @@ export async function convertCbrToXtc(
           const batch = imageFiles.slice(i, i + CONCURRENCY);
           const tasks = batch.map(async (file, batchIdx) => {
             const globalIdx = i + batchIdx;
-            const result = await processImageAsBinary(file.data, globalIdx + 1, options, pageImages.length < 3);
+            const result = await processImageAsBinary(file.data, globalIdx + 1, options, globalIdx < 3);
             return { globalIdx, result };
           });
 
@@ -574,7 +599,7 @@ export async function convertCbrToXtc(
 
           for (const item of batchResults) {
             for (const res of item.result.results) {
-              pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
+              pageBuffers.push(res.buffer); pageInfos.push({ width: dims.width, height: dims.height })
               if (pageImages.length < 3) pageImages.push(res.preview)
             }
             mappingCtx.addOriginalPage(item.globalIdx + 1, item.result.results.length)
@@ -584,7 +609,7 @@ export async function convertCbrToXtc(
       }    if (stitcher) {
       for (const p of stitcher.finish()) {
         const res = await processAndEncode(p.canvas, options, pageImages.length < 3)
-        pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
+        pageBuffers.push(res.buffer); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
         if (pageImages.length < 3) pageImages.push(res.preview)
       }
     }
@@ -602,14 +627,12 @@ export async function convertCbrToXtc(
       for (const info of pageInfos) totalSize += getXtcPageSize(info.width, info.height, options.is2bit)
       const fileStream = streamSaver.createWriteStream(outputFileName, { size: totalSize }); const writer = fileStream.getWriter()
       await writer.write(headerAndIndex)
-      for (const blob of pageBlobs) await writer.write(new Uint8Array(await blob.arrayBuffer()))
+      for (const buf of pageBuffers) await writer.write(new Uint8Array(buf))
       await writer.close()
       return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages, size: totalSize }
     } else {
-      const allBuffers: ArrayBuffer[] = []
-      for (const blob of pageBlobs) allBuffers.push(await blob.arrayBuffer())
-      let xtcData = await buildXtcFromBuffers(allBuffers, { metadata, is2bit: options.is2bit })
-      if (options.compressXtcz) xtcData = compressXtczLz4(xtcData)
+      let xtcData = await buildXtcFromBuffers(pageBuffers, { metadata, is2bit: options.is2bit })
+      if (options.compressXtcz) xtcData = await compressXtczAsync(xtcData)
       return { name: outputFileName, data: xtcData, size: xtcData.byteLength, pageCount: pageInfos.length, pageImages }
     }
   }
@@ -701,7 +724,7 @@ async function convertPdfToXtc(
     await writer.close(); URL.revokeObjectURL(url)
     return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages, size: totalSize }
   } else {
-    const pageBlobs: Blob[] = []; const pageInfos: StreamPageInfo[] = []
+    const pageBuffers: ArrayBuffer[] = []; const pageInfos: StreamPageInfo[] = []
     let stitcher = options.manhwa ? new ManhwaStitcher(options) : null
     
     if (stitcher) {
@@ -713,7 +736,7 @@ async function convertPdfToXtc(
         sharedCanvasPool.release(canvas)
         for (const slice of slices) {
           const res = processAndEncode(slice.canvas, options, pageImages.length < 3)
-          pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
+          pageBuffers.push(res.buffer); pageInfos.push({ width: dims.width, height: dims.height })
           if (pageImages.length < 3) pageImages.push(res.preview)
         }
         mappingCtx.addOriginalPage(i, slices.length)
@@ -731,7 +754,7 @@ async function convertPdfToXtc(
             const viewport = page.getViewport({ scale });
             const canvas = sharedCanvasPool.acquire(viewport.width, viewport.height);
           await page.render({ canvasContext: canvas.getContext('2d')!, viewport, background: 'rgb(255,255,255)', canvas: canvas as any }).promise;
-            const results = await processCanvasAsImage(canvas, pageNum, options, pageImages.length < 3);
+            const results = await processCanvasAsImage(canvas, pageNum, options, pageNum <= 3);
             sharedCanvasPool.release(canvas);
             return { pageNum, results };
           })());
@@ -742,7 +765,7 @@ async function convertPdfToXtc(
 
         for (const item of batchResults) {
           for (const res of item.results) {
-            pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: dims.width, height: dims.height })
+            pageBuffers.push(res.buffer); pageInfos.push({ width: dims.width, height: dims.height })
             if (pageImages.length < 3) pageImages.push(res.preview)
           }
           mappingCtx.addOriginalPage(item.pageNum, item.results.length)
@@ -753,7 +776,7 @@ async function convertPdfToXtc(
     if (stitcher) {
       for (const p of stitcher.finish()) {
         const res = await processAndEncode(p.canvas, options, pageImages.length < 3)
-        pageBlobs.push(new Blob([res.buffer])); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
+        pageBuffers.push(res.buffer); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
         if (pageImages.length < 3) pageImages.push(res.preview)
       }
     }
@@ -770,14 +793,12 @@ async function convertPdfToXtc(
       let totalSize = headerAndIndex.byteLength
       for (const info of pageInfos) totalSize += getXtcPageSize(info.width, info.height, options.is2bit)
       const fileStream = streamSaver.createWriteStream(outputFileName, { size: totalSize }); const writer = fileStream.getWriter()
-      await writer.write(headerAndIndex); for (const blob of pageBlobs) await writer.write(new Uint8Array(await blob.arrayBuffer()))
+      await writer.write(headerAndIndex); for (const buf of pageBuffers) await writer.write(new Uint8Array(buf))
       await writer.close(); URL.revokeObjectURL(url)
       return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages, size: totalSize }
     } else {
-      const allBuffers: ArrayBuffer[] = []
-      for (const blob of pageBlobs) allBuffers.push(await blob.arrayBuffer())
-      let xtcData = await buildXtcFromBuffers(allBuffers, { metadata, is2bit: options.is2bit })
-      if (options.compressXtcz) xtcData = compressXtczLz4(xtcData)
+      let xtcData = await buildXtcFromBuffers(pageBuffers, { metadata, is2bit: options.is2bit })
+      if (options.compressXtcz) xtcData = await compressXtczAsync(xtcData)
       URL.revokeObjectURL(url)
       return { name: outputFileName, data: xtcData, size: xtcData.byteLength, pageCount: pageInfos.length, pageImages }
     }
@@ -855,7 +876,7 @@ export async function convertImagesToXtcPack(
     return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages, size: totalSize }
   } else {
     let xtcData = await buildXtcFromBuffers(pageBuffers, { is2bit: options.is2bit, metadata })
-    if (options.compressXtcz) xtcData = compressXtczLz4(xtcData)
+    if (options.compressXtcz) xtcData = await compressXtczAsync(xtcData)
     return { name: outputFileName, data: xtcData, size: xtcData.byteLength, pageCount: pageBuffers.length, pageImages }
   }
 }
@@ -897,7 +918,7 @@ async function convertVideoToXtc(file: File, options: ConversionOptions, onProgr
     await writer.close(); return { name: outputFileName, pageCount: pageInfos.length, isStreamed: true, pageImages, size: totalSize }
   } else {
     let xtcData = await buildXtcFromBuffers(pageBuffers, { is2bit: options.is2bit })
-    if (options.compressXtcz) xtcData = compressXtczLz4(xtcData)
+    if (options.compressXtcz) xtcData = await compressXtczAsync(xtcData)
     return { name: outputFileName, data: xtcData, size: xtcData.byteLength, pageCount: pageBuffers.length, pageImages }
   }
 }

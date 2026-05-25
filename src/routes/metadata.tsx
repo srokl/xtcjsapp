@@ -8,7 +8,7 @@ import { Dropzone } from '../components/Dropzone'
 import { Viewer } from '../components/Viewer'
 import { parseXtcFile, type ParsedXtc, extractXtcPages, decodeXtcPageToCanvas } from '../lib/xtc-reader'
 import { buildXtcFromBuffers } from '../lib/xtc-format'
-import { compressXtczLz4 } from '../lib/processing/lz4-compress'
+import { compressXtczAsync } from '../lib/lz4-worker-manager'
 import type { BookMetadata, TocEntry } from '../lib/metadata/types'
 
 export const Route = createFileRoute('/metadata')({
@@ -260,7 +260,7 @@ function MetadataEditor() {
       
       const shouldCompress = asXtcz || parsed.header.isXtcz;
       if (shouldCompress) {
-        newBuffer = compressXtczLz4(newBuffer)
+        newBuffer = await compressXtczAsync(newBuffer)
       }
       
       const ext = shouldCompress ? '.xtcz' : (is2bit ? '.xtch' : '.xtc')

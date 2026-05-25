@@ -32,6 +32,7 @@ export function applyDitheringToData(
 ): void {
   if (useWasm && isWasmLoaded() && (algorithm === 'stucki' || algorithm === 'atkinson')) {
     try {
+      // @ts-ignore - TS strict mode has ArrayBufferLike/ArrayBuffer generic mismatch
       const tempImgData = new ImageData(data, width, height);
       runWasmDither(tempImgData, algorithm, is2bit);
       return;
@@ -149,31 +150,54 @@ function applyStochastic(data: Uint8ClampedArray, width: number, height: number,
 }
 
 function applyThreshold(data: Uint8ClampedArray, is2bit: boolean): void {
-  const len = data.length;
+  const pixels32 = new Uint32Array(data.buffer);
+  const len = pixels32.length;
   if (is2bit) {
-    for (let i = 0; i < len; i += 4) {
-      const val = data[i];
-      let newVal;
+    for (let i = 0; i < len; i++) {
+      const val = pixels32[i] & 0xFF; // Extract R (already grayscale)
+      let newVal: number;
       if (val < 42) newVal = 0;
       else if (val < 127) newVal = 85;
       else if (val < 212) newVal = 170;
       else newVal = 255;
-      data[i] = data[i + 1] = data[i + 2] = newVal;
+      pixels32[i] = newVal | (newVal << 8) | (newVal << 16) | 0xFF000000;
     }
   } else {
-    for (let i = 0; i < len; i += 4) {
-      const val = data[i] < 128 ? 0 : 255;
-      data[i] = data[i + 1] = data[i + 2] = val;
+    for (let i = 0; i < len; i++) {
+      const newVal = (pixels32[i] & 0xFF) < 128 ? 0 : 255;
+      pixels32[i] = newVal | (newVal << 8) | (newVal << 16) | 0xFF000000;
     }
   }
+}
+
+/**
+ * Write quantized Float32 data back to RGBA pixels using Uint32Array for 4x faster writeback.
+ */
+function writebackDithered(pixels: Uint8ClampedArray, floatData: Float32Array): void {
+  const pixels32 = new Uint32Array(pixels.buffer);
+  for (let i = 0; i < floatData.length; i++) {
+    let val = floatData[i];
+    if (val < 0) val = 0; else if (val > 255) val = 255;
+    const v = val | 0;
+    pixels32[i] = v | (v << 8) | (v << 16) | 0xFF000000;
+  }
+}
+
+/**
+ * Extract grayscale values from RGBA pixels using Uint32Array for 4x faster reads.
+ */
+function extractGrayscale(pixels: Uint8ClampedArray, width: number, height: number): Float32Array {
+  const pixels32 = new Uint32Array(pixels.buffer);
+  const data = new Float32Array(width * height);
+  for (let i = 0; i < data.length; i++) data[i] = pixels32[i] & 0xFF;
+  return data;
 }
 
 /**
  * Optimized Floyd-Steinberg
  */
 function applyFloydSteinberg(pixels: Uint8ClampedArray, width: number, height: number, is2bit: boolean): void {
-  const data = new Float32Array(width * height);
-  for (let i = 0; i < data.length; i++) data[i] = pixels[i << 2];
+  const data = extractGrayscale(pixels, width, height);
 
   const stride = width;
   for (let y = 0; y < height; y++) {
@@ -203,18 +227,14 @@ function applyFloydSteinberg(pixels: Uint8ClampedArray, width: number, height: n
     }
   }
 
-  for (let i = 0; i < data.length; i++) {
-    const val = data[i];
-    pixels[i << 2] = pixels[(i << 2) + 1] = pixels[(i << 2) + 2] = val < 0 ? 0 : (val > 255 ? 255 : val);
-  }
+  writebackDithered(pixels, data);
 }
 
 /**
  * Optimized Atkinson
  */
 function applyAtkinson(pixels: Uint8ClampedArray, width: number, height: number, is2bit: boolean): void {
-  const data = new Float32Array(width * height);
-  for (let i = 0; i < data.length; i++) data[i] = pixels[i << 2];
+  const data = extractGrayscale(pixels, width, height);
   
   const stride = width;
   for (let y = 0; y < height; y++) {
@@ -248,15 +268,11 @@ function applyAtkinson(pixels: Uint8ClampedArray, width: number, height: number,
     }
   }
 
-  for (let i = 0; i < data.length; i++) {
-    const val = data[i];
-    pixels[i << 2] = pixels[(i << 2) + 1] = pixels[(i << 2) + 2] = val < 0 ? 0 : (val > 255 ? 255 : val);
-  }
+  writebackDithered(pixels, data);
 }
 
 function applyStucki(pixels: Uint8ClampedArray, width: number, height: number, is2bit: boolean): void {
-  const data = new Float32Array(width * height);
-  for (let i = 0; i < data.length; i++) data[i] = pixels[i << 2];
+  const data = extractGrayscale(pixels, width, height);
 
   const stride = width;
   for (let y = 0; y < height; y++) {
@@ -292,15 +308,11 @@ function applyStucki(pixels: Uint8ClampedArray, width: number, height: number, i
       }
     }
   }
-  for (let i = 0; i < data.length; i++) {
-    const val = data[i];
-    pixels[i << 2] = pixels[(i << 2) + 1] = pixels[(i << 2) + 2] = val < 0 ? 0 : (val > 255 ? 255 : val);
-  }
+  writebackDithered(pixels, data);
 }
 
 function applyZhouFang(pixels: Uint8ClampedArray, width: number, height: number, is2bit: boolean): void {
-  const data = new Float32Array(width * height);
-  for (let i = 0; i < data.length; i++) data[i] = pixels[i << 2];
+  const data = extractGrayscale(pixels, width, height);
   const stride = width;
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -335,15 +347,11 @@ function applyZhouFang(pixels: Uint8ClampedArray, width: number, height: number,
       }
     }
   }
-  for (let i = 0; i < data.length; i++) {
-    const val = data[i];
-    pixels[i << 2] = pixels[(i << 2) + 1] = pixels[(i << 2) + 2] = val < 0 ? 0 : (val > 255 ? 255 : val);
-  }
+  writebackDithered(pixels, data);
 }
 
 function applyOstromoukhov(pixels: Uint8ClampedArray, width: number, height: number, is2bit: boolean): void {
-  const data = new Float32Array(width * height);
-  for (let i = 0; i < data.length; i++) data[i] = pixels[i << 2];
+  const data = extractGrayscale(pixels, width, height);
   const stride = width;
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -375,19 +383,19 @@ function applyOstromoukhov(pixels: Uint8ClampedArray, width: number, height: num
       }
     }
   }
-  for (let i = 0; i < data.length; i++) {
-    const val = data[i];
-    pixels[i << 2] = pixels[(i << 2) + 1] = pixels[(i << 2) + 2] = val < 0 ? 0 : (val > 255 ? 255 : val);
-  }
+  writebackDithered(pixels, data);
 }
 
 function applyOrdered(data: Uint8ClampedArray, width: number, height: number): void {
   const bayer = [[0,8,2,10],[12,4,14,6],[3,11,1,9],[15,7,13,5]];
+  const pixels32 = new Uint32Array(data.buffer);
   for (let y = 0; y < height; y++) {
+    const rowOffset = y * width;
+    const py = y % 4;
     for (let x = 0; x < width; x++) {
-      const idx = (y * width + x) << 2;
-      const val = data[idx] > (bayer[y % 4][x % 4] * 16) ? 255 : 0;
-      data[idx] = data[idx + 1] = data[idx + 2] = val;
+      const newVal = (pixels32[rowOffset + x] & 0xFF) > (bayer[py][x % 4] * 16) ? 255 : 0;
+      pixels32[rowOffset + x] = newVal | (newVal << 8) | (newVal << 16) | 0xFF000000;
     }
   }
 }
+
