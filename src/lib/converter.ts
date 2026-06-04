@@ -263,7 +263,7 @@ export async function convertCbzToXtc(
       if (path.toLowerCase().endsWith('comicinfo.xml')) comicInfoEntry = entry
     }
 
-    imageFiles.sort((a, b) => a.path.localeCompare(b.path))
+    imageFiles.sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true, sensitivity: 'base' }))
     if (imageFiles.length === 0) throw new Error('No images found in CBZ')
 
     const pageTitles = new Map<number, string>()
@@ -491,7 +491,7 @@ export async function convertCbrToXtc(
     if (path.toLowerCase().endsWith('comicinfo.xml') && extractedFile.extraction) comicInfoContent = new TextDecoder().decode(extractedFile.extraction)
   }
 
-  imageFiles.sort((a, b) => a.path.localeCompare(b.path))
+  imageFiles.sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true, sensitivity: 'base' }))
   if (imageFiles.length === 0) throw new Error('No images found in CBR')
 
   const pageTitles = new Map<number, string>()
