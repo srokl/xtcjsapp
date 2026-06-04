@@ -1256,3 +1256,48 @@
   justify-content: center;
   margin-top: var(--space-md);
 }
+
+.preview-converted-pages {
+  display: flex;
+  gap: var(--space-sm);
+  overflow-x: auto;
+  padding: var(--space-xs) 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ink-light) transparent;
+}
+
+.preview-converted-pages::-webkit-scrollbar {
+  height: 6px;
+}
+
+.preview-converted-pages::-webkit-scrollbar-thumb {
+  background: var(--ink-light);
+}
+
+.preview-converted-item {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.preview-converted-item img {
+  max-height: 350px;
+  object-fit: contain;
+  border: var(--border);
+  image-rendering: pixelated;
+  box-shadow: 4px 4px 0 var(--ink);
+}
+
+.preview-page-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  min-width: 16px;
+  text-align: center;
+}
+

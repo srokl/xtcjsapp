@@ -70,11 +70,10 @@ export function LivePreview({ file, fileType, options }: LivePreviewProps) {
   const [pageCount, setPageCount] = useState(0)
   const [currentPage, setCurrentPage] = useState(1)
   const [originalUrl, setOriginalUrl] = useState<string | null>(null)
-  const [convertedUrl, setConvertedUrl] = useState<string | null>(null)
+  const [convertedUrls, setConvertedUrls] = useState<string[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
   const [isExpanded, setIsExpanded] = useState(false)
   const prevUrlRef = useRef<string | null>(null)
-  const prevConvUrlRef = useRef<string | null>(null)
   const abortRef = useRef(0)
 
   // Get page count when file changes
@@ -83,7 +82,7 @@ export function LivePreview({ file, fileType, options }: LivePreviewProps) {
       setPageCount(0)
       setCurrentPage(1)
       setOriginalUrl(null)
-      setConvertedUrl(null)
+      setConvertedUrls([])
       setIsExpanded(false)
       return
     }
@@ -97,7 +96,6 @@ export function LivePreview({ file, fileType, options }: LivePreviewProps) {
       setPageCount(1)
       setCurrentPage(1)
     }
-    // PDF/video not supported for live preview yet
   }, [file, fileType])
 
   // Extract and show the original page
@@ -106,13 +104,12 @@ export function LivePreview({ file, fileType, options }: LivePreviewProps) {
 
     const token = ++abortRef.current
 
-    // Revoke previous URL
     if (prevUrlRef.current) {
       URL.revokeObjectURL(prevUrlRef.current)
       prevUrlRef.current = null
     }
     setOriginalUrl(null)
-    setConvertedUrl(null)
+    setConvertedUrls([])
 
     const extract = async () => {
       let blob: Blob | null = null
@@ -138,7 +135,6 @@ export function LivePreview({ file, fileType, options }: LivePreviewProps) {
   useEffect(() => {
     return () => {
       if (prevUrlRef.current) URL.revokeObjectURL(prevUrlRef.current)
-      if (prevConvUrlRef.current) URL.revokeObjectURL(prevConvUrlRef.current)
     }
   }, [])
 
@@ -147,7 +143,7 @@ export function LivePreview({ file, fileType, options }: LivePreviewProps) {
 
     const token = ++abortRef.current
     setIsProcessing(true)
-    setConvertedUrl(null)
+    setConvertedUrls([])
 
     try {
       if (options.useWasm) {
@@ -174,9 +170,12 @@ export function LivePreview({ file, fileType, options }: LivePreviewProps) {
         return
       }
 
-      if (result.results.length > 0 && result.results[0].preview) {
-        setConvertedUrl(result.results[0].preview)
-      }
+      // Collect ALL output page previews
+      const urls = result.results
+        .filter(r => r.preview)
+        .map(r => r.preview)
+
+      setConvertedUrls(urls)
     } catch (err) {
       console.error('Live preview failed:', err)
     }
@@ -234,6 +233,7 @@ export function LivePreview({ file, fileType, options }: LivePreviewProps) {
           )}
 
           <div className="preview-comparison">
+            {/* Original panel */}
             <div className="preview-panel">
               <span className="preview-label">Original</span>
               {originalUrl ? (
@@ -242,11 +242,27 @@ export function LivePreview({ file, fileType, options }: LivePreviewProps) {
                 <div className="preview-placeholder">Loading...</div>
               )}
             </div>
-            <div className="preview-panel">
-              <span className="preview-label">Converted</span>
-              {convertedUrl ? (
-                <img src={convertedUrl} alt={`Converted page ${currentPage}`} className="converted" />
-              ) : (
+
+            {/* Converted panel(s) — shows all output pages */}
+            {convertedUrls.length > 0 ? (
+              <div className="preview-panel">
+                <span className="preview-label">
+                  Converted ({convertedUrls.length} page{convertedUrls.length !== 1 ? 's' : ''})
+                </span>
+                <div className="preview-converted-pages">
+                  {convertedUrls.map((url, i) => (
+                    <div key={i} className="preview-converted-item">
+                      <img src={url} alt={`Converted ${i + 1}`} className="converted" />
+                      {convertedUrls.length > 1 && (
+                        <span className="preview-page-badge">{i + 1}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="preview-panel">
+                <span className="preview-label">Converted</span>
                 <div className="preview-placeholder">
                   <button
                     className="btn-generate-preview"
@@ -256,11 +272,11 @@ export function LivePreview({ file, fileType, options }: LivePreviewProps) {
                     {isProcessing ? 'Processing...' : 'Generate Preview'}
                   </button>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
 
-          {convertedUrl && (
+          {convertedUrls.length > 0 && (
             <div className="preview-actions">
               <button
                 className="btn-generate-preview"
