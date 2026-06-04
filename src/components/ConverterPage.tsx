@@ -67,6 +67,7 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
   const [progressText, setProgressText] = useState('Processing...')
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [viewerPages, setViewerPages] = useState<string[]>([])
+  const [viewerTotalPages, setViewerTotalPages] = useState<number>(0)
   const [options, setOptions] = useState<ConversionOptions>({
     splitMode: (fileType === 'image' || fileType === 'video') ? 'nosplit' : 'overlap',
     dithering: 'zhoufang',
@@ -198,6 +199,7 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
     const images = await getPreviewImages(result)
     if (images.length > 0) {
       setViewerPages(images)
+      setViewerTotalPages(result.pageCount || images.length)
     }
   }, [getPreviewImages])
 
@@ -275,7 +277,7 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
         onClear={results.length > 0 ? handleClearResults : undefined}
       />
 
-      <Viewer pages={viewerPages} onClose={handleCloseViewer} />
+      <Viewer pages={viewerPages} onClose={handleCloseViewer} totalPages={viewerTotalPages} />
     </>
   )
 }

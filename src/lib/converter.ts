@@ -353,7 +353,7 @@ export async function convertCbzToXtc(
         const tasks = batch.map(async (file, batchIdx) => {
           const globalIdx = i + batchIdx;
           const data = await file.entry.getData(new Uint8ArrayWriter());
-          const result = await processImageAsBinary(data, globalIdx + 1, options, globalIdx < 3);
+          const result = await processImageAsBinary(data, globalIdx + 1, options, pageImages.length < 50);
           return { globalIdx, result };
         });
 
@@ -363,7 +363,7 @@ export async function convertCbzToXtc(
         for (const item of batchResults) {
           for (const res of item.result.results) {
             await writer!.write(new Uint8Array(res.buffer))
-            if (pageImages.length < 3) pageImages.push(res.preview)
+            if (pageImages.length < 50) pageImages.push(res.preview)
           }
         }
         onProgress(0.05 + Math.min(1, (i + STREAM_CONCURRENCY) / imageFiles.length) * 0.95, null)
@@ -390,9 +390,9 @@ export async function convertCbzToXtc(
           const slices = await stitcher.append(bitmap)
           bitmap.close()
           for (const slice of slices) {
-            const res = processAndEncode(slice.canvas, options, pageImages.length < 3)
+            const res = processAndEncode(slice.canvas, options, pageImages.length < 50)
             pageBuffers.push(res.buffer); pageInfos.push({ width: dims.width, height: dims.height })
-            if (pageImages.length < 3) pageImages.push(res.preview)
+            if (pageImages.length < 50) pageImages.push(res.preview)
           }
           mappingCtx.addOriginalPage(i + 1, slices.length)
           if (i % 5 === 0) onProgress((i + 1) / imageFiles.length, null)
@@ -405,7 +405,7 @@ export async function convertCbzToXtc(
           const tasks = batch.map(async (file, batchIdx) => {
             const globalIdx = i + batchIdx;
             const data = await file.entry.getData(new Uint8ArrayWriter());
-            const result = await processImageAsBinary(data, globalIdx + 1, options, globalIdx < 3);
+            const result = await processImageAsBinary(data, globalIdx + 1, options, pageImages.length < 50);
             return { globalIdx, result };
           });
 
@@ -415,7 +415,7 @@ export async function convertCbzToXtc(
           for (const item of batchResults) {
             for (const res of item.result.results) {
               pageBuffers.push(res.buffer); pageInfos.push({ width: dims.width, height: dims.height })
-              if (pageImages.length < 3) pageImages.push(res.preview)
+              if (pageImages.length < 50) pageImages.push(res.preview)
             }
             mappingCtx.addOriginalPage(item.globalIdx + 1, item.result.results.length)
           }
@@ -425,9 +425,9 @@ export async function convertCbzToXtc(
       
       if (stitcher) {
         for (const p of stitcher.finish()) {
-          const res = await processAndEncode(p.canvas, options, pageImages.length < 3)
+          const res = await processAndEncode(p.canvas, options, pageImages.length < 50)
           pageBuffers.push(res.buffer); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
-          if (pageImages.length < 3) pageImages.push(res.preview)
+          if (pageImages.length < 50) pageImages.push(res.preview)
         }
       }
       
@@ -548,7 +548,7 @@ export async function convertCbrToXtc(
       const batch = imageFiles.slice(i, i + CONCURRENCY);
       const tasks = batch.map(async (file, batchIdx) => {
         const globalIdx = i + batchIdx;
-        const result = await processImageAsBinary(file.data, globalIdx + 1, options, globalIdx < 3);
+        const result = await processImageAsBinary(file.data, globalIdx + 1, options, pageImages.length < 50);
         return { globalIdx, result };
       });
 
@@ -558,7 +558,7 @@ export async function convertCbrToXtc(
       for (const item of batchResults) {
         for (const res of item.result.results) {
           await writer.write(new Uint8Array(res.buffer))
-          if (pageImages.length < 3) pageImages.push(res.preview)
+          if (pageImages.length < 50) pageImages.push(res.preview)
         }
       }
       onProgress(0.05 + Math.min(1, (i + CONCURRENCY) / imageFiles.length) * 0.95, null)
@@ -577,9 +577,9 @@ export async function convertCbrToXtc(
           const slices = await stitcher.append(bitmap)
           bitmap.close()
           for (const slice of slices) {
-            const res = processAndEncode(slice.canvas, options, pageImages.length < 3)
+            const res = processAndEncode(slice.canvas, options, pageImages.length < 50)
             pageBuffers.push(res.buffer); pageInfos.push({ width: dims.width, height: dims.height })
-            if (pageImages.length < 3) pageImages.push(res.preview)
+            if (pageImages.length < 50) pageImages.push(res.preview)
           }
           mappingCtx.addOriginalPage(i + 1, slices.length)
           if (i % 5 === 0) onProgress((i + 1) / imageFiles.length, null)
@@ -590,7 +590,7 @@ export async function convertCbrToXtc(
           const batch = imageFiles.slice(i, i + CONCURRENCY);
           const tasks = batch.map(async (file, batchIdx) => {
             const globalIdx = i + batchIdx;
-            const result = await processImageAsBinary(file.data, globalIdx + 1, options, globalIdx < 3);
+            const result = await processImageAsBinary(file.data, globalIdx + 1, options, pageImages.length < 50);
             return { globalIdx, result };
           });
 
@@ -600,7 +600,7 @@ export async function convertCbrToXtc(
           for (const item of batchResults) {
             for (const res of item.result.results) {
               pageBuffers.push(res.buffer); pageInfos.push({ width: dims.width, height: dims.height })
-              if (pageImages.length < 3) pageImages.push(res.preview)
+              if (pageImages.length < 50) pageImages.push(res.preview)
             }
             mappingCtx.addOriginalPage(item.globalIdx + 1, item.result.results.length)
           }
@@ -608,9 +608,9 @@ export async function convertCbrToXtc(
         }
       }    if (stitcher) {
       for (const p of stitcher.finish()) {
-        const res = await processAndEncode(p.canvas, options, pageImages.length < 3)
+        const res = await processAndEncode(p.canvas, options, pageImages.length < 50)
         pageBuffers.push(res.buffer); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
-        if (pageImages.length < 3) pageImages.push(res.preview)
+        if (pageImages.length < 50) pageImages.push(res.preview)
       }
     }
     if (metadata.toc.length > 0) {
@@ -704,7 +704,7 @@ async function convertPdfToXtc(
           const viewport = page.getViewport({ scale });
           const canvas = sharedCanvasPool.acquire(viewport.width, viewport.height);
           await page.render({ canvasContext: canvas.getContext('2d')!, viewport, background: 'rgb(255,255,255)', canvas: canvas as any }).promise;
-          const results = await processCanvasAsImage(canvas, pageNum, options, pageImages.length < 3);
+          const results = await processCanvasAsImage(canvas, pageNum, options, pageImages.length < 50);
           sharedCanvasPool.release(canvas);
           return { pageNum, results };
         })());
@@ -716,7 +716,7 @@ async function convertPdfToXtc(
       for (const item of batchResults) {
         for (const res of item.results) {
           await writer.write(new Uint8Array(res.buffer))
-          if (pageImages.length < 3) pageImages.push(res.preview)
+          if (pageImages.length < 50) pageImages.push(res.preview)
         }
       }
       onProgress(0.05 + Math.min(1, (i + CONCURRENCY - 1) / numPages) * 0.95, null)
@@ -735,9 +735,9 @@ async function convertPdfToXtc(
         const slices = await stitcher.append(canvas)
         sharedCanvasPool.release(canvas)
         for (const slice of slices) {
-          const res = processAndEncode(slice.canvas, options, pageImages.length < 3)
+          const res = processAndEncode(slice.canvas, options, pageImages.length < 50)
           pageBuffers.push(res.buffer); pageInfos.push({ width: dims.width, height: dims.height })
-          if (pageImages.length < 3) pageImages.push(res.preview)
+          if (pageImages.length < 50) pageImages.push(res.preview)
         }
         mappingCtx.addOriginalPage(i, slices.length)
         onProgress(i / numPages, null)
@@ -754,7 +754,7 @@ async function convertPdfToXtc(
             const viewport = page.getViewport({ scale });
             const canvas = sharedCanvasPool.acquire(viewport.width, viewport.height);
           await page.render({ canvasContext: canvas.getContext('2d')!, viewport, background: 'rgb(255,255,255)', canvas: canvas as any }).promise;
-            const results = await processCanvasAsImage(canvas, pageNum, options, pageNum <= 3);
+            const results = await processCanvasAsImage(canvas, pageNum, options, pageImages.length < 50);
             sharedCanvasPool.release(canvas);
             return { pageNum, results };
           })());
@@ -766,7 +766,7 @@ async function convertPdfToXtc(
         for (const item of batchResults) {
           for (const res of item.results) {
             pageBuffers.push(res.buffer); pageInfos.push({ width: dims.width, height: dims.height })
-            if (pageImages.length < 3) pageImages.push(res.preview)
+            if (pageImages.length < 50) pageImages.push(res.preview)
           }
           mappingCtx.addOriginalPage(item.pageNum, item.results.length)
         }
@@ -775,9 +775,9 @@ async function convertPdfToXtc(
     }
     if (stitcher) {
       for (const p of stitcher.finish()) {
-        const res = await processAndEncode(p.canvas, options, pageImages.length < 3)
+        const res = await processAndEncode(p.canvas, options, pageImages.length < 50)
         pageBuffers.push(res.buffer); pageInfos.push({ width: p.canvas.width, height: p.canvas.height })
-        if (pageImages.length < 3) pageImages.push(res.preview)
+        if (pageImages.length < 50) pageImages.push(res.preview)
       }
     }
     if (metadata.toc.length > 0) {
@@ -837,11 +837,11 @@ export async function convertImagesToXtcPack(
 
     fileTocEntries.push({ name: file.name.replace(/\.[^/.]+$/, ''), startPage: currentPage })
 
-    const result = await processImageAsBinary(new Uint8Array(await file.arrayBuffer()), i + 1, options, pageImages.length < 3)
+    const result = await processImageAsBinary(new Uint8Array(await file.arrayBuffer()), i + 1, options, pageImages.length < 50)
     for (const res of result.results) {
       pageBuffers.push(res.buffer)
       pageInfos.push({ width: dims.width, height: dims.height })
-      if (pageImages.length < 3) pageImages.push(res.preview)
+      if (pageImages.length < 50) pageImages.push(res.preview)
       currentPage++
     }
   }
@@ -894,7 +894,7 @@ async function convertVideoToXtc(file: File, options: ConversionOptions, onProgr
       let canvas = frameCanvas; const angle = getOrientationAngle(options.orientation)
       if (angle !== 0 && (angle === 180 || canvas.width >= canvas.height)) canvas = rotateCanvas(canvas, angle)
       const finalCanvas = await resizeWithPadding(canvas, 0, dims.width, dims.height, !options.useWasm)
-      const res = processAndEncode(finalCanvas, options, pageImages.length < 3)
+      const res = processAndEncode(finalCanvas, options, pageImages.length < 50)
       
       // Cleanup intermediate frames if they are copies
       if (canvas !== frameCanvas) sharedCanvasPool.release(canvas)
@@ -904,7 +904,7 @@ async function convertVideoToXtc(file: File, options: ConversionOptions, onProgr
 
     for (const res of results) {
       pageBuffers.push(res.buffer); pageInfos.push({ width: dims.width, height: dims.height })
-      if (pageImages.length < 3) pageImages.push(res.preview)
+      if (pageImages.length < 50) pageImages.push(res.preview)
     }
     onProgress(Math.min(1, (i + CONCURRENCY) / frames.length), null)
   }

@@ -3,9 +3,10 @@ import { useState, useEffect, useCallback } from 'react'
 interface ViewerProps {
   pages: string[]
   onClose: () => void
+  totalPages?: number
 }
 
-export function Viewer({ pages, onClose }: ViewerProps) {
+export function Viewer({ pages, onClose, totalPages }: ViewerProps) {
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isRotated, setIsRotated] = useState(false)
 
@@ -51,12 +52,15 @@ export function Viewer({ pages, onClose }: ViewerProps) {
     return null
   }
 
+  const actualTotal = totalPages && totalPages > pages.length ? totalPages : pages.length
+  const hasMore = actualTotal > pages.length
+
   return (
     <section className={`viewer-section${isRotated ? ' rotated' : ''}`}>
       <div className="viewer-header">
         <div className="section-header">
           <h2>Preview</h2>
-          <span className="badge">{currentIndex + 1} / {pages.length}</span>
+          <span className="badge">{currentIndex + 1} / {pages.length}{hasMore ? ` (${actualTotal} total)` : ''}</span>
         </div>
         <div className="viewer-controls">
           <button
@@ -141,6 +145,12 @@ export function Viewer({ pages, onClose }: ViewerProps) {
               <img src={src} alt={`Page ${i + 1}`} />
             </button>
           ))}
+          {hasMore && (
+            <div className="thumbnail thumbnail-more">
+              <span>+{actualTotal - pages.length}</span>
+              <span>more</span>
+            </div>
+          )}
         </div>
       </div>
     </section>

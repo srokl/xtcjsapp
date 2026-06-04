@@ -46,6 +46,7 @@ export function MergePage() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [results, setResults] = useState<MergePageResult[]>([])
   const [viewerPages, setViewerPages] = useState<string[]>([])
+  const [viewerTotalPages, setViewerTotalPages] = useState<number>(0)
   const [typeError, setTypeError] = useState<string | null>(null)
   const [device, setDevice] = useState<'X4' | 'X3'>('X4')
 
@@ -265,6 +266,7 @@ export function MergePage() {
   const handlePreview = useCallback((result: MergePageResult) => {
     if (result.pageImages) {
       setViewerPages(result.pageImages)
+      setViewerTotalPages(result.pageCount || result.pageImages.length)
     }
   }, [])
 
@@ -680,7 +682,7 @@ export function MergePage() {
       )}
 
       {/* Viewer */}
-      <Viewer pages={viewerPages} onClose={() => setViewerPages([])} />
+      <Viewer pages={viewerPages} onClose={() => setViewerPages([])} totalPages={viewerTotalPages} />
     </>
   )
 }
