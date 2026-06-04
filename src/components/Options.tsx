@@ -177,15 +177,18 @@ export function Options({ options, onChange, fileType }: OptionsProps) {
           {!isImageMode && !isVideoMode && options.manhwa && (
             <div className="option">
               <label htmlFor="manhwaOverlap">Manhwa Overlap</label>
-              <select
-                id="manhwaOverlap"
-                value={options.manhwaOverlap}
-                onChange={(e) => onChange({ ...options, manhwaOverlap: parseInt(e.target.value) })}
-              >
-                <option value="30">30% Overlap</option>
-                <option value="50">50% Overlap</option>
-                <option value="75">75% Overlap</option>
-              </select>
+              <div className="input-with-unit">
+                <input
+                  type="number"
+                  id="manhwaOverlap"
+                  min="0"
+                  max="90"
+                  step="5"
+                  value={options.manhwaOverlap}
+                  onChange={(e) => onChange({ ...options, manhwaOverlap: e.target.value === '' ? '' as any : parseInt(e.target.value) })}
+                />
+                <span className="unit">%</span>
+              </div>
             </div>
           )}
 
