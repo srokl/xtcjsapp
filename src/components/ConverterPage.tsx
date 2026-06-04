@@ -5,6 +5,7 @@ import { Options } from './Options'
 import { Progress } from './Progress'
 import { Results } from './Results'
 import { Viewer } from './Viewer'
+import { LivePreview } from './LivePreview'
 import { convertToXtc, convertImagesToXtcPack, type ConversionOptions } from '../lib/converter'
 import { recordConversion } from '../lib/api'
 import { consumePendingFiles } from '../lib/file-transfer'
@@ -262,6 +263,12 @@ export function ConverterPage({ fileType, notice }: ConverterPageProps) {
       />
 
       <Options options={options} onChange={setOptions} fileType={fileType} />
+
+      <LivePreview
+        file={selectedFiles.length > 0 ? selectedFiles[0] : null}
+        fileType={fileType}
+        options={options}
+      />
 
       <Progress
         visible={isConverting}

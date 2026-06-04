@@ -1075,7 +1075,7 @@ async function processCanvasAsImage(sourceCanvas: HTMLCanvasElement, pageNum: nu
   return results
 }
 
-async function processImageAsBinary(imgData: Uint8Array, pageNum: number, options: ConversionOptions, generatePreview: boolean = true): Promise<{ results: { buffer: ArrayBuffer, preview: string }[] }> {
+export async function processImageAsBinary(imgData: Uint8Array, pageNum: number, options: ConversionOptions, generatePreview: boolean = true): Promise<{ results: { buffer: ArrayBuffer, preview: string }[] }> {
   try {
     const blob = new Blob([imgData as any]);
     const bitmap = await createImageBitmap(blob, {
