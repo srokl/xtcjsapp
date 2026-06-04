@@ -6,15 +6,29 @@ interface ViewerProps {
   totalPages?: number
 }
 
+const PAGES_PER_BATCH = 10
+
 export function Viewer({ pages, onClose, totalPages }: ViewerProps) {
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isRotated, setIsRotated] = useState(false)
+  const [visibleCount, setVisibleCount] = useState(PAGES_PER_BATCH)
+
+  const visiblePages = pages.slice(0, visibleCount)
+  const hasMorePreview = visibleCount < pages.length
+  const actualTotal = totalPages && totalPages > pages.length ? totalPages : pages.length
+  const remainingPreview = pages.length - visibleCount
+  const remainingTotal = actualTotal - visibleCount
 
   const goToPage = useCallback((index: number) => {
-    if (index >= 0 && index < pages.length) {
+    if (index >= 0 && index < visiblePages.length) {
       setCurrentIndex(index)
     }
-  }, [pages.length])
+  }, [visiblePages.length])
+
+  const handleShowMore = useCallback(() => {
+    const nextCount = Math.min(visibleCount + PAGES_PER_BATCH, pages.length)
+    setVisibleCount(nextCount)
+  }, [visibleCount, pages.length])
 
   const toggleRotate = useCallback(() => {
     setIsRotated(prev => !prev)
@@ -46,21 +60,22 @@ export function Viewer({ pages, onClose, totalPages }: ViewerProps) {
   useEffect(() => {
     setCurrentIndex(0)
     setIsRotated(false)
+    setVisibleCount(PAGES_PER_BATCH)
   }, [pages])
 
   if (pages.length === 0) {
     return null
   }
 
-  const actualTotal = totalPages && totalPages > pages.length ? totalPages : pages.length
-  const hasMore = actualTotal > pages.length
-
   return (
     <section className={`viewer-section${isRotated ? ' rotated' : ''}`}>
       <div className="viewer-header">
         <div className="section-header">
           <h2>Preview</h2>
-          <span className="badge">{currentIndex + 1} / {pages.length}{hasMore ? ` (${actualTotal} total)` : ''}</span>
+          <span className="badge">
+            {currentIndex + 1} / {visiblePages.length}
+            {actualTotal > visiblePages.length ? ` (${actualTotal} total)` : ''}
+          </span>
         </div>
         <div className="viewer-controls">
           <button
@@ -77,7 +92,7 @@ export function Viewer({ pages, onClose, totalPages }: ViewerProps) {
             className="viewer-btn"
             onClick={() => {
               const a = document.createElement('a');
-              a.href = pages[currentIndex];
+              a.href = visiblePages[currentIndex];
               a.download = `page_${currentIndex + 1}.png`;
               a.click();
             }}
@@ -104,7 +119,7 @@ export function Viewer({ pages, onClose, totalPages }: ViewerProps) {
           <button
             className="viewer-btn"
             onClick={() => goToPage(currentIndex + 1)}
-            disabled={currentIndex === pages.length - 1}
+            disabled={currentIndex === visiblePages.length - 1}
             aria-label="Next page"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -124,7 +139,7 @@ export function Viewer({ pages, onClose, totalPages }: ViewerProps) {
       </div>
       <div className="viewer-container">
         <div className="viewer-track">
-          {pages.map((src, i) => (
+          {visiblePages.map((src, i) => (
             <div 
               key={i} 
               className={`viewer-page${i === currentIndex ? ' active' : ''}`}
@@ -136,7 +151,7 @@ export function Viewer({ pages, onClose, totalPages }: ViewerProps) {
       </div>
       <div className="viewer-thumbnails">
         <div className="thumbnail-track">
-          {pages.map((src, i) => (
+          {visiblePages.map((src, i) => (
             <button
               key={i}
               className={`thumbnail${i === currentIndex ? ' active' : ''}`}
@@ -145,13 +160,15 @@ export function Viewer({ pages, onClose, totalPages }: ViewerProps) {
               <img src={src} alt={`Page ${i + 1}`} />
             </button>
           ))}
-          {hasMore && (
+          {(hasMorePreview || remainingTotal > visibleCount) && (
             <button
               className="thumbnail thumbnail-more"
-              onClick={() => goToPage(pages.length - 1)}
+              onClick={hasMorePreview ? handleShowMore : undefined}
+              disabled={!hasMorePreview}
+              title={hasMorePreview ? `Load ${Math.min(PAGES_PER_BATCH, remainingPreview)} more previews` : `${remainingTotal} pages without preview`}
             >
-              <span>+{actualTotal - pages.length}</span>
-              <span>more</span>
+              <span>+{hasMorePreview ? remainingPreview : remainingTotal - visibleCount}</span>
+              <span>{hasMorePreview ? 'show' : 'more'}</span>
             </button>
           )}
         </div>

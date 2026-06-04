@@ -7,7 +7,7 @@ The XTF (XTEink Font) format is a proprietary binary font format designed for hi
 An XTF file consists of four primary sections:
 1. **Header (64 bytes)**: Global font metrics, offsets, and checksums.
 2. **Mapping Table**: A list of Unicode ranges and their corresponding glyph indices.
-3. **ASCII Fast-Path Table**: A 224-byte lookup table for U+0020–U+00FF font-metric advance widths.
+3. **ASCII Fast-Path Table**: An 8219-byte lookup table for U+0020–U+203A font-metric advance widths.
 4. **Glyph Data Section**: Fixed-size blocks containing per-glyph metadata and pixel data.
 
 ---
@@ -59,9 +59,9 @@ Each entry is 16 bytes. It allows the hardware to find a glyph index for a given
 ## 4. ASCII Fast-Path Table
 
 Located in the "gap" immediately following the Mapping Table (at the offset specified in `0x38`).
-- **Size**: 224 bytes.
-- **Content**: **Font-metric advance widths** for the extended ASCII range `U+0020` (Space) through `U+00FF` (ÿ). These values represent the true typographic advance (including sidebearings) and may differ from the rendered bitmap width stored in each glyph block's prefix byte.
-- **Coverage**: All 224 entries (`U+0020`–`U+00FF`) are populated when glyphs exist. This includes the full Latin-1 Supplement range (accented characters like é, ñ, ü, etc.).
+- **Size**: 8219 bytes.
+- **Content**: **Font-metric advance widths** for `U+0020` (Space) through `U+203A` (›). These values represent the true typographic advance (including sidebearings) and may differ from the rendered bitmap width stored in each glyph block's prefix byte.
+- **Coverage**: All 8219 entries (`U+0020`–`U+203A`) are populated when glyphs exist. This covers Basic Latin, Latin-1 Supplement (é, ñ, ü), Latin Extended-A/B (Ĉ, ƒ, ȳ), and General Punctuation (smart quotes ' ' " ", em/en dashes — –, ellipsis …, bullet •, guillemets ‹ ›).
 - **Purpose**: The device reads this table for instant Latin character **text layout spacing** without parsing individual glyph headers.
 
 ---

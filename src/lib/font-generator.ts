@@ -176,15 +176,18 @@ function isEnglishOrNumber(char: string): boolean {
     || XTF_PROPORTIONAL_EXTENDED.has(code);                // Smart quotes, dashes, etc.
 }
 
+/** Whether a codepoint is proportional (non-CJK fixed-grid) in XTF. */
+function isProportionalChar(charCode: number): boolean {
+  return charCode <= 0x7E                                 // ASCII
+    || (charCode >= 0x00A0 && charCode <= 0x024F)         // Latin-1 Supplement + Latin Extended-A/B
+    || (charCode >= 0x0300 && charCode <= 0x036F)         // Combining Diacritical Marks
+    || (charCode >= 0x1E00 && charCode <= 0x1EFF)         // Latin Extended Additional (Vietnamese)
+    || XTF_PROPORTIONAL_EXTENDED.has(charCode);           // Smart quotes, dashes, etc.
+}
+
 function checkIsLeftSided(charCode: number, charStr: string, options: FontGenerationOptions): boolean {
   if (options.format !== 'xtf') return false;
-  // Left-aligned proportional: ASCII + Latin Extended ranges + specific extended punctuation
-  const isProportional = charCode <= 0x7E                                 // ASCII
-    || (charCode >= 0x00A0 && charCode <= 0x024F)                         // Latin-1 Supplement + Latin Extended-A/B
-    || (charCode >= 0x0300 && charCode <= 0x036F)                         // Combining Diacritical Marks
-    || (charCode >= 0x1E00 && charCode <= 0x1EFF)                         // Latin Extended Additional (Vietnamese)
-    || XTF_PROPORTIONAL_EXTENDED.has(charCode);                           // Smart quotes, dashes, etc.
-  if (!isProportional) return false;
+  if (!isProportionalChar(charCode)) return false;
   let isRotatedMinus90 = false;
   if (options.vertical) {
     if (options.verticalSymbols && isVerticalSymbol(charStr)) {
@@ -464,6 +467,13 @@ function crc32(data: Uint8Array, start: number, end: number): number {
   return (crc ^ 0xFFFFFFFF) >>> 0;
 }
 
+// ASCII fast-path table range: covers Basic Latin through General Punctuation.
+// Includes all XTF_PROPORTIONAL_EXTENDED characters (smart quotes, dashes, ellipsis, etc.).
+// The firmware reads ascii_tbl(off=%u cnt=%u) dynamically, so expanding is safe.
+const FAST_PATH_FIRST = 0x20;
+const FAST_PATH_LAST  = 0x203A;  // › (single right guillemet — highest in XTF_PROPORTIONAL_EXTENDED)
+const FAST_PATH_SIZE  = FAST_PATH_LAST - FAST_PATH_FIRST + 1;  // 8219 bytes
+
 export class XTEinkFontXTF {
   width: number;
   height: number;
@@ -581,7 +591,7 @@ export class XTEinkFontXTF {
     // Calculate data start: table end + 224 bytes for fast-path table, then align
     // to the next power-of-2 boundary for DMA-safe alignment.
     const tableEnd = tableOffset + numEntries * 16;
-    const minDataStart = tableEnd + 224; // fast-path table occupies 224 bytes after mapping table
+    const minDataStart = tableEnd + FAST_PATH_SIZE; // fast-path table occupies FAST_PATH_SIZE bytes after mapping table
     let dataStartOffset = 0x0800; // minimum alignment (2KB)
     while (dataStartOffset < minDataStart) {
       dataStartOffset *= 2;
@@ -669,24 +679,24 @@ export class XTEinkFontXTF {
       u8.set(glyph, offset + 2);
     }
 
-    // === ASCII FAST-PATH ADVANCE WIDTH TABLE (224 bytes) ===
-    // The device reads a 224-byte font-metric advance width lookup table
-    // for U+0020-U+00FF, stored in the gap between the mapping table end
-    // and the data start. These are the TRUE typographic advance widths
-    // (including sidebearings), which may differ from the bitmap widths
-    // in the glyph prefix bytes.
-    for (let cp = 0x20; cp <= 0xFF; cp++) {
+    // === ASCII FAST-PATH ADVANCE WIDTH TABLE (FAST_PATH_SIZE bytes) ===
+    // The device reads a font-metric advance width lookup table
+    // for U+0020-U+024F (Basic Latin through Latin Extended-B),
+    // stored in the gap between the mapping table end and the data start.
+    // These are the TRUE typographic advance widths (including sidebearings),
+    // which may differ from the bitmap widths in the glyph prefix bytes.
+    for (let cp = FAST_PATH_FIRST; cp <= FAST_PATH_LAST; cp++) {
       const fontAdv = this.fontAdvWidths.get(cp);
       if (fontAdv !== undefined) {
         // Use the font-metric advance (includes sidebearings) for text layout
         // Apply ASCII offset if configured (XTF only)
         const offset = this.asciiAdvanceOffset || 0;
-        u8[tableEnd + (cp - 0x20)] = Math.min(255, Math.max(0, fontAdv + offset));
+        u8[tableEnd + (cp - FAST_PATH_FIRST)] = Math.min(255, Math.max(0, fontAdv + offset));
       } else {
         // Fallback: use the bitmap width from the glyph prefix
         const charToGlyphIdx = sortedChars.indexOf(cp);
         if (charToGlyphIdx >= 0) {
-          u8[tableEnd + (cp - 0x20)] = u8[dataStartOffset + charToGlyphIdx * blockSize];
+          u8[tableEnd + (cp - FAST_PATH_FIRST)] = u8[dataStartOffset + charToGlyphIdx * blockSize];
         }
       }
     }
@@ -993,7 +1003,7 @@ export async function generateFontBinary(
         // For XTF: store font-metric advance width in fontAdvWidths for the fast-path table
         // This includes sidebearings and represents the true typographic advance.
         // Covers full extended ASCII range U+0020-U+00FF per XTF spec Section 4.
-        if (isXtf && charCode >= 0x20 && charCode <= 0xFF) {
+        if (isXtf && charCode >= FAST_PATH_FIRST && charCode <= FAST_PATH_LAST) {
           (binary as XTEinkFontXTF).fontAdvWidths.set(charCode, baseAdvPx);
         }
 
@@ -1023,6 +1033,14 @@ export async function generateFontBinary(
         }
       } else {
         // Canvas fallback for glyphs not in FreeType (works for both XTF and bin)
+        // Measure advance width from canvas so fast-path table and prefix bytes are correct
+        const canvasAdv = Math.round(ctx.measureText(charStr).width / S);
+        if (isXtf && charCode >= FAST_PATH_FIRST && charCode <= FAST_PATH_LAST) {
+          (binary as XTEinkFontXTF).fontAdvWidths.set(charCode, canvasAdv);
+        }
+        const asciiOff = (isXtf && options.xtfAsciiOffset && isLeftSided) ? options.xtfAsciiOffset : 0;
+        glyphAdvWidths.set(charCode, canvasAdv + asciiOff);
+
         ctx.lineWidth = 0.5;
         ctx.strokeStyle = 'white';
         ctx.textAlign = isLeftSided ? 'left' : 'center';
@@ -1099,11 +1117,15 @@ export async function generateFontBinary(
           if (isXtf) {
             const charStr = String.fromCharCode(charCode);
             const isLeftSided = checkIsLeftSided(charCode, charStr, options);
+            // Proportional chars use their measured advance for the prefix byte,
+            // even when centered/rotated in vertical mode. This ensures the device
+            // uses the correct advance for characters outside the fast-path range.
+            const useProportionalAdv = isLeftSided || isProportionalChar(charCode);
             for (let x = 0; x < box.width; x++) {
               const alpha = alphaBuffer[rowIdx + x];
               if (alpha > 10) {
                 const v2bit = Math.min(3, Math.round(alpha / 85));
-                const aw = isLeftSided ? (glyphAdvWidths.get(charCode) || box.width) : box.width;
+                const aw = useProportionalAdv ? (glyphAdvWidths.get(charCode) || box.width) : box.width;
                 (binary as XTEinkFontXTF).setPixel2Bit(charCode, x, y, v2bit, aw);
               }
             }
@@ -1171,7 +1193,8 @@ export async function generateFontBinary(
                   const v2bit = Math.min(3, Math.round(avgAlpha / 85));
                   const charStr = String.fromCharCode(charCode);
                   const isLeftSided = checkIsLeftSided(charCode, charStr, options);
-                  const aw = isLeftSided ? (glyphAdvWidths.get(charCode) || box.width) : box.width;
+                  const useProportionalAdv = isLeftSided || isProportionalChar(charCode);
+                  const aw = useProportionalAdv ? (glyphAdvWidths.get(charCode) || box.width) : box.width;
                   (binary as XTEinkFontXTF).setPixel2Bit(charCode, x, y, v2bit, aw);
                 }
               } else if (alphaSum >= scaledThreshold) {
