@@ -694,7 +694,7 @@
   align-items: center;
   justify-content: center;
   gap: 2px;
-  cursor: default;
+  cursor: pointer;
   opacity: 0.7;
   border: 2px dashed var(--ink-faded);
   background: transparent;

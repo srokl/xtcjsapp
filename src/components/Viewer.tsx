@@ -146,10 +146,13 @@ export function Viewer({ pages, onClose, totalPages }: ViewerProps) {
             </button>
           ))}
           {hasMore && (
-            <div className="thumbnail thumbnail-more">
+            <button
+              className="thumbnail thumbnail-more"
+              onClick={() => goToPage(pages.length - 1)}
+            >
               <span>+{actualTotal - pages.length}</span>
               <span>more</span>
-            </div>
+            </button>
           )}
         </div>
       </div>
