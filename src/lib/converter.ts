@@ -97,7 +97,7 @@ function generateCanvasPreview(canvas: HTMLCanvasElement): string {
  * Process a canvas (filter, dither) and encode it to binary
  * Highly optimized synchronous pipeline to maximize CPU throughput.
  */
-function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOptions, generatePreview: boolean = true): { buffer: ArrayBuffer, preview: string } {
+export function processAndEncode(canvas: HTMLCanvasElement, options: ConversionOptions, generatePreview: boolean = true): { buffer: ArrayBuffer, preview: string } {
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!
   const width = canvas.width
   const height = canvas.height
